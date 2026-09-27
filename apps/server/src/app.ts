@@ -7,6 +7,7 @@ import type { Config } from "./config";
 import { forbidden, HttpError } from "./errors";
 import { authRoutes } from "./routes/auth";
 import { setSessionCookie, type RouteContext } from "./routes/context";
+import { projectRoutes } from "./routes/projects";
 import { setupRoutes } from "./routes/setup";
 import { userRoutes } from "./routes/users";
 
@@ -63,5 +64,6 @@ export async function buildApp({ db, config, now, logger = false }: AppOptions):
   setupRoutes(app, context);
   authRoutes(app, context);
   userRoutes(app, context);
+  projectRoutes(app, context);
   return app;
 }
