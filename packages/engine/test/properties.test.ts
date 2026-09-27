@@ -7,7 +7,7 @@ import { fromDay, toDay } from "../src/date";
 import type { ProjectState, Row } from "../src/model";
 import { computeSchedule, constraintsFor, hasCycle } from "../src/schedule";
 import { buildTree, isParentTask } from "../src/tree";
-import { project, task } from "./fixtures";
+import { project, section, task } from "./fixtures";
 
 const BASE = toDay("2026-10-01");
 const RESOURCES = [null, "ana", "rudy"] as const;
@@ -39,10 +39,14 @@ const calendarArb = fc
       }),
   );
 
-/** Random tasks; predecessors and parents only point to earlier tasks. */
+/**
+ * Random tasks and sections; predecessors and parents only point to earlier rows. Sections
+ * only sit under sections (or the root); only tasks have predecessors.
+ */
 const projectArb = fc
   .array(
     fc.record({
+      section: fc.integer({ min: 0, max: 99 }).map((n) => n < 20),
       userStart: fc.option(dayArb, { freq: 6 }),
       duration: fc.integer({ min: 0, max: 5 }),
       resource: fc.constantFrom(...RESOURCES),
@@ -53,29 +57,50 @@ const projectArb = fc
     }),
     { minLength: 1, maxLength: 12 },
   )
-  .map((specs) =>
-    project(
-      ...specs.map((spec, i) =>
-        task(`t${i}`, {
+  .map((specs) => {
+    const isSection = (i: number) => specs[i]!.section;
+    return project(
+      ...specs.map((spec, i) => {
+        const parent = i > 0 && spec.parent !== null ? spec.parent % i : null;
+        const parentId = parent === null || (spec.section && !isSection(parent)) ? null : `t${parent}`;
+        if (spec.section) return section(`t${i}`, { parentId });
+        const predecessor = i > 0 && spec.predecessor !== null ? spec.predecessor % i : null;
+        return task(`t${i}`, {
           userStart: spec.userStart,
           duration: spec.duration,
           resourceId: spec.resource,
           locked: spec.locked,
-          predecessorId: i > 0 && spec.predecessor !== null ? `t${spec.predecessor % i}` : null,
-          parentId: i > 0 && spec.parent !== null ? `t${spec.parent % i}` : null,
+          predecessorId: predecessor === null || isSection(predecessor) ? null : `t${predecessor}`,
+          parentId,
           offset: spec.offset,
-        }),
-      ),
-    ),
-  );
+        });
+      }),
+    );
+  });
 
-const commandArb = (ids: string[]): fc.Arbitrary<Command> => {
-  const id = fc.constantFrom(...ids);
+/** Ids that do not exist yet (for createRow / duplicateTask) plus one that never exists. */
+const FRESH_IDS = ["n0", "n1", "n2", "n3"];
+const UNKNOWN_ID = "gone";
+
+const commandArb = (existing: string[]): fc.Arbitrary<Command> => {
+  // Mostly existing rows; sometimes rows created during the run, or one that never exists.
+  const id = fc.oneof({ weight: 6, arbitrary: fc.constantFrom(...existing) }, { weight: 1, arbitrary: fc.constantFrom(...FRESH_IDS, UNKNOWN_ID) });
+  const parentId = fc.option(id, { nil: null, freq: 2 });
+  const freshId = fc.constantFrom(...FRESH_IDS);
   return fc.oneof(
+    fc
+      .record({ id: freshId, kind: fc.constantFrom("task" as const, "section" as const), parentId, afterId: parentId, start: fc.option(dayArb, { nil: null }) })
+      .map(({ start, ...fields }): Command => ({ type: "createRow", title: "", ...fields, ...(start === null ? {} : { start }) })),
+    fc.record({ type: fc.constant("deleteRows" as const), ids: fc.uniqueArray(id, { maxLength: 2 }) }),
+    fc.record({ type: fc.constant("moveRow" as const), id, parentId, afterId: parentId }),
+    fc.record({ type: fc.constant("duplicateTask" as const), id, newId: freshId }),
+    fc.record({ type: fc.constant("setDuration" as const), id, duration: fc.integer({ min: 0, max: 6 }) }),
+    fc.record({ type: fc.constant("convertMilestone" as const), id, milestone: fc.boolean() }),
     fc.record({ type: fc.constant("moveTask" as const), id, start: dayArb }),
     fc.record({ type: fc.constant("resizeTask" as const), id, edge: fc.constantFrom("start" as const, "end" as const), date: dayArb }),
     fc.record({ type: fc.constant("linkTasks" as const), fromId: id, toId: id }),
-    fc.record({ type: fc.constant("setOffset" as const), id, offset: fc.integer({ min: -5, max: 5 }) }),
+    // Weighted up: offsets only apply to tasks with a predecessor (parents included).
+    { weight: 3, arbitrary: fc.record({ type: fc.constant("setOffset" as const), id, offset: fc.integer({ min: -5, max: 5 }) }) },
     fc.record({ type: fc.constant("removePredecessor" as const), id }),
     fc.record({ type: fc.constant("setLocked" as const), id, locked: fc.boolean() }),
     fc.record({ type: fc.constant("setAssignee" as const), id, resourceId: fc.constantFrom(...RESOURCES) }),
@@ -83,6 +108,27 @@ const commandArb = (ids: string[]): fc.Arbitrary<Command> => {
     fc.record({ type: fc.constant("outdent" as const), id }),
   );
 };
+
+function assertStructure(state: ProjectState): void {
+  const rows = Object.values(state.rows);
+  const positions = new Set<string>();
+  for (const row of rows) {
+    if (row.parentId !== null) {
+      const parent = state.rows[row.parentId];
+      expect(parent).toBeDefined();
+      if (row.kind === "section") expect(parent!.kind).toBe("section");
+    }
+    if (row.kind === "task" && row.predecessorId !== null) expect(state.rows[row.predecessorId]).toBeDefined();
+    const key = `${row.parentId ?? ""}\u0000${row.position}`;
+    expect(positions.has(key)).toBe(false);
+    positions.add(key);
+    let current = row.parentId;
+    for (let steps = rows.length; current !== null; steps--) {
+      expect(steps).toBeGreaterThan(0);
+      current = state.rows[current]?.parentId ?? null;
+    }
+  }
+}
 
 function assertScheduleInvariants(state: ProjectState, calendar: Calendar): void {
   const schedule = computeSchedule(state, calendar);
@@ -150,15 +196,13 @@ describe("scheduling properties", () => {
             expect(hasCycle(result.state, calendar)).toBe(false);
             expect(applyChanges(state, result.changes)).toEqual(result.state);
             expect(applyChanges(result.state, result.changes, "backward")).toEqual(state);
+            assertStructure(result.state);
             state = result.state;
           }
           assertScheduleInvariants(state, calendar);
-          for (const row of Object.values(state.rows)) {
-            if (row.parentId !== null) expect(state.rows[row.parentId]).toBeDefined();
-          }
         },
       ),
-      { numRuns: 300 },
+      { numRuns: 1000 },
     );
   });
 });
