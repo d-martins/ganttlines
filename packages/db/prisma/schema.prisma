@@ -1,0 +1,84 @@
+// GanttLines database schema. Engine rows map 1:1 onto `Row` (see src/rows.ts).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  admin
+  editor
+  viewer
+  guest
+}
+
+model User {
+  id                 String    @id @default(uuid()) @db.Uuid
+  email              String    @unique
+  name               String
+  passwordHash       String
+  role               Role
+  mustChangePassword Boolean   @default(false)
+  createdAt          DateTime  @default(now())
+  sessions           Session[]
+  resource           Resource?
+}
+
+model Session {
+  /// HMAC-SHA256 of the cookie token (the token itself is never stored)
+  id         String   @id
+  userId     String   @db.Uuid
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt  DateTime
+  lastSeenAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Resource {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String
+  avatarColor String
+  inactive    Boolean  @default(false)
+  userId      String?  @unique @db.Uuid
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+}
+
+model Project {
+  id         String    @id @default(uuid()) @db.Uuid
+  name       String
+  /// incremented for every applied command (plan 2b)
+  version    Int       @default(0)
+  archivedAt DateTime?
+  createdAt  DateTime  @default(now())
+  rows       Row[]
+}
+
+model Row {
+  /// client-generated UUID, globally unique
+  id            String  @id @db.Uuid
+  projectId     String  @db.Uuid
+  project       Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  kind          String
+  title         String
+  parentId      String? @db.Uuid
+  position      String
+  collapsed     Boolean @default(false)
+  // task-only fields (defaults for sections)
+  userStart     String?
+  duration      Int     @default(1)
+  resourceId    String? @db.Uuid
+  color         String  @default("blue")
+  locked        Boolean @default(false)
+  predecessorId String? @db.Uuid
+  offset        Int     @default(0)
+  description   String  @default("")
+
+  @@index([projectId])
+}
