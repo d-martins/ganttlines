@@ -37,7 +37,7 @@ export interface TaskRow extends RowBase {
 export type Row = SectionRow | TaskRow;
 
 export interface ProjectState {
-  readonly rows: Readonly<Record<RowId, Row>>;
+  readonly rows: Readonly<Record<RowId, Readonly<Row>>>;
 }
 
 export const TASK_DEFAULTS = {
