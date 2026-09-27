@@ -175,6 +175,37 @@ describe("moveTask", () => {
     expect(datesIn(state, "r")?.start).toBe(taskIn(state, "r").userStart);
   });
 
+  describe("with an outside task between subtasks", () => {
+    // p contains l2 and l1; outside, x depends on l2 and l1 depends on x (overlapping it by one day).
+    const chained = (l2Start: string) =>
+      project(
+        task("p"),
+        task("l2", { parentId: "p", userStart: l2Start }),
+        task("l1", { parentId: "p", userStart: "2026-10-05", predecessorId: "x", offset: -1 }),
+        task("x", { userStart: "2026-10-05", duration: 2, predecessorId: "l2" }), // pushed by l2
+      );
+
+    it("moves the whole group rigidly when dragged later", () => {
+      const before = chained("2026-10-05"); // l2 Mon 5, x Tue 6 – Wed 7, l1 Wed 7
+      expect(datesIn(before, "l1")?.start).toBe("2026-10-07");
+      const state = run(before, cal, { type: "moveTask", id: "p", start: "2026-10-06" });
+      expect(datesIn(state, "l2")?.start).toBe("2026-10-06");
+      expect(datesIn(state, "x")?.start).toBe("2026-10-07");
+      expect(datesIn(state, "l1")?.start).toBe("2026-10-08");
+      expect(taskIn(state, "l1")).toMatchObject({ userStart: "2026-10-08", offset: -1 });
+    });
+
+    it("moves the whole group rigidly when dragged earlier", () => {
+      const before = chained("2026-10-06"); // l2 Tue 6, x Wed 7 – Thu 8, l1 Thu 8
+      expect(datesIn(before, "l1")?.start).toBe("2026-10-08");
+      const state = run(before, cal, { type: "moveTask", id: "p", start: "2026-10-05" });
+      expect(datesIn(state, "l2")?.start).toBe("2026-10-05");
+      expect(datesIn(state, "x")?.start).toBe("2026-10-06");
+      expect(datesIn(state, "l1")?.start).toBe("2026-10-07");
+      expect(taskIn(state, "l1")).toMatchObject({ userStart: "2026-10-07", offset: -1 });
+    });
+  });
+
   describe("under a parent with a predecessor", () => {
     const nested = project(
       task("a", { userStart: "2026-10-05", duration: 3 }), // Mon 5 – Wed 7
@@ -187,6 +218,18 @@ describe("moveTask", () => {
       expect(taskIn(state, "p").offset).toBe(-2);
       expect(datesIn(state, "c")?.start).toBe("2026-10-06");
       expect(taskIn(state, "c").userStart).toBe("2026-10-06");
+    });
+
+    it("changes nothing when dragged to its current start past a violating locked subtask", () => {
+      const state = project(
+        task("a", { userStart: "2026-10-05", duration: 3 }), // Mon 5 – Wed 7
+        task("p", { predecessorId: "a" }),
+        task("l", { parentId: "p", userStart: "2026-10-05", locked: true }), // violates p's constraint
+        task("c", { parentId: "p", userStart: "2026-10-08" }),
+      );
+      expect(datesIn(state, "p")?.start).toBe("2026-10-05");
+      const result = applyCommand(state, cal, { type: "moveTask", id: "p", start: "2026-10-05" });
+      expect(result).toMatchObject({ ok: true, changes: [] });
     });
 
     it("clamps a subtask drag to the inherited constraint", () => {
@@ -341,6 +384,24 @@ describe("removePredecessor and setOffset", () => {
       const state = run(parentLinked, cal, { type: "removePredecessor", id: "p" });
       expect(taskIn(state, "p")).toMatchObject({ predecessorId: null, offset: 0 });
       expect(datesIn(state, "c")?.start).toBe("2026-10-08");
+    });
+
+    it("only pins subtasks that the parent's constraint was pushing", () => {
+      const state = run(
+        project(
+          task("a", { userStart: "2026-10-05", duration: 3 }), // Mon 5 – Wed 7
+          task("p", { predecessorId: "a" }),
+          task("c1", { parentId: "p", userStart: "2026-10-05" }), // shown Thu 8
+          task("c2", { parentId: "p", userStart: "2026-10-05", predecessorId: "c1" }), // shown Fri 9, follows c1
+        ),
+        cal,
+        { type: "removePredecessor", id: "p" },
+      );
+      expect(taskIn(state, "c1").userStart).toBe("2026-10-08");
+      expect(taskIn(state, "c2").userStart).toBe("2026-10-05");
+      expect(datesIn(state, "c2")?.start).toBe("2026-10-09");
+      const movedBack = run(state, cal, { type: "moveTask", id: "c1", start: "2026-10-05" });
+      expect(datesIn(movedBack, "c2")?.start).toBe("2026-10-06");
     });
 
     it("keeps the subtasks in place when the predecessor is deleted", () => {

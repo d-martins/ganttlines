@@ -190,29 +190,38 @@ class Execution {
 
     const span = this.spanOf(id);
     if (!span) throw new Rejection("unscheduled", "This parent task has no scheduled subtasks");
+    const moving = this.movingIds(id);
+    const leaves = descendantLeafTasks(this.tree, id).filter((leaf) => moving.has(leaf.id));
+    // Measured from the moving subtasks, so locked subtasks never shift the others.
+    const from = leaves.length > 0 ? Math.min(...leaves.map((leaf) => this.spanOf(leaf.id)!.start)) : span.start;
+    let day = this.calendar.addWorkingDays(from, this.calendar.workingDaysBetween(span.start, this.calendar.snap(target, null), null), null);
     // The parent's own predecessor follows the leaf rule, measured on the unassigned calendar.
-    let day = this.calendar.snap(target, null);
     const predecessor = task.predecessorId === null ? null : this.spanOf(task.predecessorId);
     if (predecessor) {
       const anchored = this.anchor(predecessor, day, null);
       day = anchored.day;
       this.patch(task, { offset: anchored.offset });
     }
-    const delta = this.calendar.workingDaysBetween(span.start, day, null);
-    const moving = this.movingIds(id);
-    const moved: RowId[] = [];
-    for (const leaf of descendantLeafTasks(this.tree, id)) {
-      const leafSpan = this.spanOf(leaf.id);
-      if (!leafSpan || leaf.locked) continue;
-      const shifted = this.calendar.addWorkingDays(leafSpan.start, delta, leaf.resourceId);
-      this.patch(leaf, this.placeLeaf(leaf, shifted, moving));
-      moved.push(leaf.id);
+    const delta = this.calendar.workingDaysBetween(from, day, null);
+    const shifted = new Map<RowId, DayNum>();
+    for (const leaf of leaves) {
+      shifted.set(leaf.id, this.calendar.addWorkingDays(this.spanOf(leaf.id)!.start, delta, leaf.resourceId));
+      this.patch(leaf, { userStart: fromDay(shifted.get(leaf.id)!) });
+    }
+    // Re-anchor leaves tied to tasks outside the group against where those tasks now are
+    // (outside tasks may themselves follow the group).
+    const shiftedSchedule = computeSchedule(this.result(), this.calendar);
+    const spanIn = (taskId: RowId) => shiftedSchedule.get(taskId)?.span ?? null;
+    for (const leaf of leaves) {
+      const current = this.rows[leaf.id] as TaskRow;
+      const outside = constraintsFor(this.result(), current).some(({ predecessorId }) => !moving.has(predecessorId));
+      if (outside) this.patch(current, this.placeLeaf(current, shifted.get(leaf.id)!, moving, spanIn));
     }
     // Store exactly what the schedule will show, so the drag is never silently undone.
     const schedule = computeSchedule(this.result(), this.calendar);
-    for (const leafId of moved) {
-      const leafSpan = schedule.get(leafId)?.span;
-      if (leafSpan) this.patch(this.rows[leafId] as TaskRow, { userStart: fromDay(leafSpan.start) });
+    for (const leaf of leaves) {
+      const leafSpan = schedule.get(leaf.id)?.span;
+      if (leafSpan) this.patch(this.rows[leaf.id] as TaskRow, { userStart: fromDay(leafSpan.start) });
     }
     return this.result();
   }
@@ -300,20 +309,35 @@ class Execution {
    * negative offset, dropping it at/after the natural start resets the offset to 0.
    * Predecessors in `moving` move along with the task, so they neither clamp nor re-anchor it.
    */
-  private placeLeaf(task: TaskRow, target: DayNum, moving: ReadonlySet<RowId> = new Set()): { userStart: IsoDate; offset?: number } {
+  private placeLeaf(
+    task: TaskRow,
+    target: DayNum,
+    moving: ReadonlySet<RowId> = new Set(),
+    spanOf: (id: RowId) => Span | null = (id) => this.spanOf(id),
+  ): { userStart: IsoDate; offset?: number } {
     const resource = task.resourceId;
-    let day = this.calendar.snap(target, resource);
-    for (const inherited of constraintsFor(this.result(), { ...task, predecessorId: null })) {
-      const span = moving.has(inherited.predecessorId) ? null : this.spanOf(inherited.predecessorId);
-      if (!span) continue;
-      const natural = this.calendar.nextAfter(span.end, resource);
-      day = Math.max(day, this.calendar.addWorkingDays(natural, inherited.offset, resource), this.calendar.nextAfter(span.start, resource));
-    }
+    const inherited = constraintsFor(this.result(), { ...task, predecessorId: null });
+    const day = Math.max(
+      this.calendar.snap(target, resource),
+      this.required(inherited.filter(({ predecessorId }) => !moving.has(predecessorId)), resource, spanOf),
+    );
     const predecessorId = task.predecessorId;
-    const predecessor = predecessorId === null || moving.has(predecessorId) ? null : this.spanOf(predecessorId);
+    const predecessor = predecessorId === null || moving.has(predecessorId) ? null : spanOf(predecessorId);
     if (!predecessor) return { userStart: fromDay(day) };
     const anchored = this.anchor(predecessor, day, resource);
     return { userStart: fromDay(anchored.day), offset: anchored.offset };
+  }
+
+  /** The earliest start the constraints allow, as computeSchedule measures it (-Infinity if none apply). */
+  private required(constraints: { predecessorId: RowId; offset: number }[], resource: ResourceId | null, spanOf: (id: RowId) => Span | null): number {
+    let required = -Infinity;
+    for (const { predecessorId, offset } of constraints) {
+      const span = spanOf(predecessorId);
+      if (!span) continue;
+      const natural = this.calendar.nextAfter(span.end, resource);
+      required = Math.max(required, this.calendar.addWorkingDays(natural, offset, resource), this.calendar.nextAfter(span.start, resource));
+    }
+    return required;
   }
 
   /** Clamps `day` to after the predecessor's start and expresses it as an offset from the natural start. */
@@ -336,16 +360,26 @@ class Execution {
     return moving;
   }
 
-  /** Removes the predecessor while keeping the task (or, for a parent, each subtask) visually where it is. */
+  /**
+   * Removes the predecessor while keeping the task visually where it is. For a parent, the
+   * subtasks its constraint was pushing are pinned at their current start; the others keep
+   * following their own constraints.
+   */
   private detachPredecessor(task: TaskRow): void {
     const isParent = isParentTask(this.tree, task);
-    // Deleted subtasks (deleteRows) are skipped: patching them would bring them back.
-    for (const leaf of isParent ? descendantLeafTasks(this.tree, task.id) : []) {
-      const span = this.spanOf(leaf.id);
-      if (span && !leaf.locked && this.rows[leaf.id]) this.patch(leaf, { userStart: fromDay(span.start) });
-    }
     const span = isParent ? null : this.spanOf(task.id);
     this.patch(task, span ? { predecessorId: null, offset: 0, userStart: fromDay(span.start) } : { predecessorId: null, offset: 0 });
+    if (!isParent) return;
+    const remaining = (id: RowId) => (this.rows[id] ? this.spanOf(id) : null);
+    for (const leaf of descendantLeafTasks(this.tree, task.id)) {
+      const current = this.rows[leaf.id]; // deleted subtasks (deleteRows) must not come back
+      const leafSpan = this.spanOf(leaf.id);
+      if (current?.kind !== "task" || !leafSpan || current.locked || current.userStart === null) continue;
+      const resource = current.resourceId;
+      const required = this.required(constraintsFor(this.result(), current), resource, remaining);
+      const withoutParent = this.calendar.snap(Math.max(toDay(current.userStart), required), resource);
+      if (withoutParent !== leafSpan.start) this.patch(current, { userStart: fromDay(leafSpan.start) });
+    }
   }
 
   private validDuration(duration: number): number {
