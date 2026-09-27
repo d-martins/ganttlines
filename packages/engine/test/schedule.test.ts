@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { computeSchedule, CycleError, hasCycle } from "../src/schedule";
+import { computeSchedule, constraintsFor, CycleError, hasCycle } from "../src/schedule";
+import type { TaskRow } from "../src/model";
 import { isAncestor } from "../src/tree";
 import { calendar, datesOf, project, section, task } from "./fixtures";
 
@@ -212,6 +213,21 @@ describe("cycles", () => {
     expect(hasCycle(bothUnscheduled, cal)).toBe(true);
     expect(hasCycle(oneUnscheduled, cal)).toBe(true);
     expect(hasCycle(unscheduledChildOfOwnPredecessor, cal)).toBe(true);
+  });
+});
+
+describe("constraintsFor", () => {
+  it("terminates even if parent links are corrupted into a loop", () => {
+    const state = project(
+      task("c", { parentId: "a", userStart: "2026-10-05" }),
+      task("a", { parentId: "b", predecessorId: "x" }),
+      task("b", { parentId: "a" }),
+      task("x", { userStart: "2026-10-05" }),
+    );
+    const constraints = constraintsFor(state, state.rows.c as TaskRow);
+    expect(constraints.length).toBeGreaterThan(0);
+    expect(constraints.length).toBeLessThanOrEqual(Object.keys(state.rows).length);
+    expect(hasCycle(state, cal)).toBe(true);
   });
 });
 

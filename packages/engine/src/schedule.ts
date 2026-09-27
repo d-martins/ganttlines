@@ -95,7 +95,9 @@ export function requiredStart(
 /** The task's own predecessor plus those of every ancestor task (parents push their children). */
 export function constraintsFor(state: ProjectState, task: TaskRow): Constraint[] {
   const constraints: Constraint[] = [];
-  for (let row: Row | undefined = task; row; row = row.parentId === null ? undefined : state.rows[row.parentId]) {
+  // Bounded by the row count so corrupted parent links can never loop forever.
+  let steps = Object.keys(state.rows).length + 1;
+  for (let row: Row | undefined = task; row && steps > 0; row = row.parentId === null ? undefined : state.rows[row.parentId], steps--) {
     if (row.kind === "task" && row.predecessorId !== null) {
       constraints.push({ predecessorId: row.predecessorId, offset: row.offset });
     }
