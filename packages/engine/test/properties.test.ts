@@ -4,7 +4,7 @@ import { Calendar } from "../src/calendar";
 import { applyChanges } from "../src/changes";
 import { applyCommand, type Command } from "../src/commands";
 import { fromDay, toDay } from "../src/date";
-import type { ProjectState, Row, TaskRow } from "../src/model";
+import type { ProjectState, Row } from "../src/model";
 import { computeSchedule, constraintsFor, hasCycle } from "../src/schedule";
 import { buildTree, isParentTask } from "../src/tree";
 import { project, task } from "./fixtures";
@@ -153,7 +153,7 @@ describe("scheduling properties", () => {
             state = result.state;
           }
           assertScheduleInvariants(state, calendar);
-          for (const row of Object.values(state.rows) as TaskRow[]) {
+          for (const row of Object.values(state.rows)) {
             if (row.parentId !== null) expect(state.rows[row.parentId]).toBeDefined();
           }
         },

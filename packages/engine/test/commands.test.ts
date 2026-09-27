@@ -493,6 +493,13 @@ describe("tree commands", () => {
     expect(datesIn(state, "p")).toEqual({ start: "2026-10-08", end: "2026-10-12" });
   });
 
+  it("refuses to duplicate a parent task", () => {
+    const state = project(task("p"), task("c", { parentId: "p" }));
+    expect(applyCommand(state, cal, { type: "duplicateTask", id: "p", newId: "p2" })).toMatchObject({
+      ok: false, reason: "invalid", message: "Only single tasks can be duplicated",
+    });
+  });
+
   it("duplicates a task right after the original", () => {
     const state = run(base, cal, { type: "duplicateTask", id: "a", newId: "a2" });
     expect(orderOf(state, "s")).toEqual(["a", "a2", "b", "c"]);

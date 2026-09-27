@@ -182,7 +182,8 @@ class Execution {
   }
 
   private duplicateTask(id: RowId, newId: RowId): ProjectState {
-    const original = this.leaf(id);
+    const original = this.task(id);
+    if (isParentTask(this.tree, original)) throw new Rejection("invalid", "Only single tasks can be duplicated");
     if (this.rows[newId]) throw new Rejection("invalid", `Row ${newId} already exists`);
     this.rows[newId] = { ...original, id: newId, position: this.positionAfter(original.parentId, original.id) };
     return this.result();
@@ -217,7 +218,9 @@ class Execution {
     }
     // Re-anchor leaves tied to tasks outside the group against where those tasks now are
     // (outside tasks may themselves follow the group).
-    // Single pass by design: rigid for attached chains (see review of 54ed493).
+    // A single pass by design: groups attached through outside tasks move rigidly, but an
+    // outside successor chained to the group is not iterated to a fixpoint (its offset may
+    // then differ slightly; stored starts still match the schedule via the final pass).
     const shiftedSchedule = computeSchedule(this.result(), this.calendar);
     const spanIn = (taskId: RowId) => shiftedSchedule.get(taskId)?.span ?? null;
     for (const leaf of leaves) {
