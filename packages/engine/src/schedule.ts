@@ -1,4 +1,4 @@
-import type { Calendar } from "./calendar";
+import type { Calendar, ResourceId } from "./calendar";
 import { toDay, type DayNum } from "./date";
 import type { ProjectState, Row, RowId, TaskRow } from "./model";
 import { buildTree, childrenOf, isParentTask } from "./tree";
@@ -62,13 +62,7 @@ export function computeSchedule(state: ProjectState, calendar: Calendar): Schedu
       .map(({ predecessorId, offset }) => ({ span: compute(predecessorId).span, offset }));
     if (task.userStart === null) return { span: null, violation: false };
 
-    let required = -Infinity;
-    for (const { span, offset } of predecessors) {
-      if (!span) continue;
-      const natural = calendar.nextAfter(span.end, resource);
-      const floor = calendar.nextAfter(span.start, resource);
-      required = Math.max(required, calendar.addWorkingDays(natural, offset, resource), floor);
-    }
+    const required = requiredStart(calendar, resource, predecessors);
     const userStart = toDay(task.userStart);
     const start = calendar.snap(task.locked ? userStart : Math.max(userStart, required), resource);
     const end = task.duration === 0 ? start : calendar.addWorkingDays(start, task.duration - 1, resource);
@@ -77,6 +71,25 @@ export function computeSchedule(state: ProjectState, calendar: Calendar): Schedu
 
   for (const id of Object.keys(state.rows)) compute(id);
   return results;
+}
+
+/**
+ * The earliest start the constraints allow on `resourceId`'s calendar: for each scheduled
+ * predecessor, `max(natural + offset, floor)`. -Infinity when no constraint applies.
+ */
+export function requiredStart(
+  calendar: Calendar,
+  resourceId: ResourceId | null,
+  constraints: readonly { span: Span | null; offset: number }[],
+): number {
+  let required = -Infinity;
+  for (const { span, offset } of constraints) {
+    if (!span) continue;
+    const natural = calendar.nextAfter(span.end, resourceId);
+    const floor = calendar.nextAfter(span.start, resourceId);
+    required = Math.max(required, calendar.addWorkingDays(natural, offset, resourceId), floor);
+  }
+  return required;
 }
 
 /** The task's own predecessor plus those of every ancestor task (parents push their children). */

@@ -3,7 +3,7 @@ import type { Calendar, ResourceId } from "./calendar";
 import { diffRows, type RowChange } from "./changes";
 import { fromDay, toDay, type DayNum, type IsoDate } from "./date";
 import { TASK_COLORS, TASK_DEFAULTS, type ProjectState, type Row, type RowId, type TaskColor, type TaskRow } from "./model";
-import { computeSchedule, constraintsFor, CycleError, hasCycle, type Schedule, type Span } from "./schedule";
+import { computeSchedule, constraintsFor, CycleError, hasCycle, requiredStart, type Schedule, type Span } from "./schedule";
 import { buildTree, childrenOf, descendantLeafTasks, isAncestor, isParentTask, subtreeIds, type Tree } from "./tree";
 
 export type Command =
@@ -192,8 +192,9 @@ class Execution {
     if (!span) throw new Rejection("unscheduled", "This parent task has no scheduled subtasks");
     const moving = this.movingIds(id);
     const leaves = descendantLeafTasks(this.tree, id).filter((leaf) => moving.has(leaf.id));
+    if (leaves.length === 0) throw new Rejection("locked", "All subtasks are locked");
     // Measured from the moving subtasks, so locked subtasks never shift the others.
-    const from = leaves.length > 0 ? Math.min(...leaves.map((leaf) => this.spanOf(leaf.id)!.start)) : span.start;
+    const from = Math.min(...leaves.map((leaf) => this.spanOf(leaf.id)!.start));
     let day = this.calendar.addWorkingDays(from, this.calendar.workingDaysBetween(span.start, this.calendar.snap(target, null), null), null);
     // The parent's own predecessor follows the leaf rule, measured on the unassigned calendar.
     const predecessor = task.predecessorId === null ? null : this.spanOf(task.predecessorId);
@@ -210,6 +211,7 @@ class Execution {
     }
     // Re-anchor leaves tied to tasks outside the group against where those tasks now are
     // (outside tasks may themselves follow the group).
+    // Single pass by design: rigid for attached chains (see review of 54ed493).
     const shiftedSchedule = computeSchedule(this.result(), this.calendar);
     const spanIn = (taskId: RowId) => shiftedSchedule.get(taskId)?.span ?? null;
     for (const leaf of leaves) {
@@ -319,25 +321,17 @@ class Execution {
     const inherited = constraintsFor(this.result(), { ...task, predecessorId: null });
     const day = Math.max(
       this.calendar.snap(target, resource),
-      this.required(inherited.filter(({ predecessorId }) => !moving.has(predecessorId)), resource, spanOf),
+      requiredStart(
+        this.calendar,
+        resource,
+        inherited.filter(({ predecessorId }) => !moving.has(predecessorId)).map(({ predecessorId, offset }) => ({ span: spanOf(predecessorId), offset })),
+      ),
     );
     const predecessorId = task.predecessorId;
     const predecessor = predecessorId === null || moving.has(predecessorId) ? null : spanOf(predecessorId);
     if (!predecessor) return { userStart: fromDay(day) };
     const anchored = this.anchor(predecessor, day, resource);
     return { userStart: fromDay(anchored.day), offset: anchored.offset };
-  }
-
-  /** The earliest start the constraints allow, as computeSchedule measures it (-Infinity if none apply). */
-  private required(constraints: { predecessorId: RowId; offset: number }[], resource: ResourceId | null, spanOf: (id: RowId) => Span | null): number {
-    let required = -Infinity;
-    for (const { predecessorId, offset } of constraints) {
-      const span = spanOf(predecessorId);
-      if (!span) continue;
-      const natural = this.calendar.nextAfter(span.end, resource);
-      required = Math.max(required, this.calendar.addWorkingDays(natural, offset, resource), this.calendar.nextAfter(span.start, resource));
-    }
-    return required;
   }
 
   /** Clamps `day` to after the predecessor's start and expresses it as an offset from the natural start. */
@@ -376,7 +370,8 @@ class Execution {
       const leafSpan = this.spanOf(leaf.id);
       if (current?.kind !== "task" || !leafSpan || current.locked || current.userStart === null) continue;
       const resource = current.resourceId;
-      const required = this.required(constraintsFor(this.result(), current), resource, remaining);
+      const constraints = constraintsFor(this.result(), current).map(({ predecessorId, offset }) => ({ span: remaining(predecessorId), offset }));
+      const required = requiredStart(this.calendar, resource, constraints);
       const withoutParent = this.calendar.snap(Math.max(toDay(current.userStart), required), resource);
       if (withoutParent !== leafSpan.start) this.patch(current, { userStart: fromDay(leafSpan.start) });
     }

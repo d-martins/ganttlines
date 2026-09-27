@@ -232,6 +232,16 @@ describe("moveTask", () => {
       expect(result).toMatchObject({ ok: true, changes: [] });
     });
 
+    it("rejects dragging a parent whose scheduled subtasks are all locked", () => {
+      const state = project(
+        task("a", { userStart: "2026-10-05", duration: 3 }),
+        task("p", { predecessorId: "a" }),
+        task("l", { parentId: "p", userStart: "2026-10-08", locked: true }),
+        task("u", { parentId: "p" }), // unscheduled
+      );
+      expect(applyCommand(state, cal, { type: "moveTask", id: "p", start: "2026-10-06" })).toMatchObject({ ok: false, reason: "locked" });
+    });
+
     it("clamps a subtask drag to the inherited constraint", () => {
       const state = run(nested, cal, { type: "moveTask", id: "c", start: "2026-10-06" });
       expect(datesIn(state, "c")?.start).toBe("2026-10-08");
