@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { applyChanges } from "../src/changes";
-import { applyCommand } from "../src/commands";
+import { applyCommand, MAX_DATE, MAX_DURATION, MAX_OFFSET, MIN_DATE } from "../src/commands";
 import type { ProjectState, TaskRow } from "../src/model";
 import { computeSchedule } from "../src/schedule";
 import { buildTree, childrenOf } from "../src/tree";
@@ -35,6 +35,15 @@ describe("createRow", () => {
     expect(applyCommand(state, cal, { type: "createRow", id: "s", kind: "section", parentId: "t", afterId: null, title: "" })).toMatchObject({ ok: false, reason: "invalid" });
     expect(applyCommand(state, cal, { type: "createRow", id: "t", kind: "task", parentId: null, afterId: null, title: "" })).toMatchObject({ ok: false, reason: "invalid" });
   });
+
+  it("rejects an empty id", () => {
+    expect(applyCommand(project(), cal, { type: "createRow", id: "", kind: "task", parentId: null, afterId: null, title: "" })).toMatchObject({ ok: false, reason: "invalid" });
+  });
+
+  it("rejects instead of throwing when siblings share a position", () => {
+    const state = project(task("a", { position: "a0" }), task("b", { position: "a0" }));
+    expect(applyCommand(state, cal, { type: "createRow", id: "n", kind: "task", parentId: null, afterId: "a", title: "" })).toMatchObject({ ok: false, reason: "invalid" });
+  });
 });
 
 describe("field edits", () => {
@@ -53,6 +62,35 @@ describe("field edits", () => {
 
   it("reports missing rows", () => {
     expect(applyCommand(project(), cal, { type: "updateTitle", id: "x", title: "" })).toMatchObject({ ok: false, reason: "not_found" });
+  });
+});
+
+describe("input bounds", () => {
+  const base = project(task("a", { userStart: "2026-10-05" }), task("b", { userStart: "2026-10-06", predecessorId: "a" }));
+
+  it("exposes the limits", () => {
+    expect({ MAX_DURATION, MAX_OFFSET, MIN_DATE, MAX_DATE }).toEqual({ MAX_DURATION: 3660, MAX_OFFSET: 3660, MIN_DATE: "1970-01-01", MAX_DATE: "2199-12-31" });
+  });
+
+  it("rejects huge offsets quickly", () => {
+    const started = Date.now();
+    expect(applyCommand(base, cal, { type: "setOffset", id: "b", offset: 1e300 })).toMatchObject({ ok: false, reason: "invalid" });
+    expect(applyCommand(base, cal, { type: "setOffset", id: "b", offset: -(MAX_OFFSET + 1) })).toMatchObject({ ok: false, reason: "invalid" });
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(applyCommand(base, cal, { type: "setOffset", id: "b", offset: MAX_OFFSET })).toMatchObject({ ok: true });
+  });
+
+  it("rejects durations above the limit, directly or by resizing", () => {
+    expect(applyCommand(base, cal, { type: "setDuration", id: "a", duration: 5000 })).toMatchObject({ ok: false, reason: "invalid" });
+    expect(applyCommand(base, cal, { type: "setDuration", id: "a", duration: MAX_DURATION })).toMatchObject({ ok: true });
+    expect(applyCommand(base, cal, { type: "resizeTask", id: "a", edge: "end", date: "2199-12-31" })).toMatchObject({ ok: false, reason: "invalid" });
+  });
+
+  it("rejects dates outside the supported range", () => {
+    expect(applyCommand(base, cal, { type: "moveTask", id: "a", start: "9999-12-31" })).toMatchObject({ ok: false, reason: "invalid" });
+    expect(applyCommand(base, cal, { type: "moveTask", id: "a", start: "1969-12-31" })).toMatchObject({ ok: false, reason: "invalid" });
+    expect(applyCommand(base, cal, { type: "resizeTask", id: "a", edge: "start", date: "1900-01-01" })).toMatchObject({ ok: false, reason: "invalid" });
+    expect(applyCommand(base, cal, { type: "createRow", id: "n", kind: "task", parentId: null, afterId: null, title: "", start: "2200-01-01" })).toMatchObject({ ok: false, reason: "invalid" });
   });
 });
 
@@ -105,6 +143,65 @@ describe("moveTask", () => {
     expect(taskIn(state, "c2").offset).toBe(-1);
   });
 
+  it("moves successors of nested sub-parents with the group", () => {
+    const state = run(
+      project(
+        task("p"),
+        task("q", { parentId: "p" }),
+        task("q1", { parentId: "q", userStart: "2026-10-12", duration: 2 }), // Mon 12 – Tue 13
+        task("r", { parentId: "p", userStart: "2026-10-14", predecessorId: "q" }),
+      ),
+      cal,
+      { type: "moveTask", id: "p", start: "2026-10-05" },
+    );
+    expect(datesIn(state, "q1")?.start).toBe("2026-10-05");
+    expect(datesIn(state, "r")?.start).toBe("2026-10-07");
+    expect(taskIn(state, "r")).toMatchObject({ userStart: "2026-10-07", offset: 0 });
+  });
+
+  it("places successors of a locked inside predecessor like a normal leaf move", () => {
+    const state = run(
+      project(
+        task("p"),
+        task("q", { parentId: "p" }),
+        task("q1", { parentId: "q", userStart: "2026-10-12", duration: 2, locked: true }), // Mon 12 – Tue 13
+        task("r", { parentId: "p", userStart: "2026-10-14", predecessorId: "q" }),
+      ),
+      cal,
+      { type: "moveTask", id: "p", start: "2026-10-05" },
+    );
+    expect(datesIn(state, "q1")?.start).toBe("2026-10-12");
+    expect(taskIn(state, "r")).toMatchObject({ userStart: "2026-10-13", offset: -1 });
+    expect(datesIn(state, "r")?.start).toBe(taskIn(state, "r").userStart);
+  });
+
+  describe("under a parent with a predecessor", () => {
+    const nested = project(
+      task("a", { userStart: "2026-10-05", duration: 3 }), // Mon 5 – Wed 7
+      task("p", { predecessorId: "a" }),
+      task("c", { parentId: "p", userStart: "2026-10-08", duration: 2 }), // Thu 8 – Fri 9
+    );
+
+    it("records dragging the parent as an overlap with its predecessor", () => {
+      const state = run(nested, cal, { type: "moveTask", id: "p", start: "2026-10-06" });
+      expect(taskIn(state, "p").offset).toBe(-2);
+      expect(datesIn(state, "c")?.start).toBe("2026-10-06");
+      expect(taskIn(state, "c").userStart).toBe("2026-10-06");
+    });
+
+    it("clamps a subtask drag to the inherited constraint", () => {
+      const state = run(nested, cal, { type: "moveTask", id: "c", start: "2026-10-06" });
+      expect(datesIn(state, "c")?.start).toBe("2026-10-08");
+      expect(taskIn(state, "c").userStart).toBe("2026-10-08");
+      expect(taskIn(state, "p").offset).toBe(0);
+    });
+  });
+
+  it("rejects instead of throwing when the stored state has a cycle", () => {
+    const cyclic = project(task("a", { userStart: "2026-10-05", predecessorId: "b" }), task("b", { userStart: "2026-10-06", predecessorId: "a" }));
+    expect(applyCommand(cyclic, cal, { type: "moveTask", id: "a", start: "2026-10-07" })).toMatchObject({ ok: false, reason: "cycle" });
+  });
+
   it("rejects moving a parent without scheduled subtasks", () => {
     const state = project(task("p"), task("c", { parentId: "p" }));
     expect(applyCommand(state, cal, { type: "moveTask", id: "p", start: "2026-10-05" })).toMatchObject({ ok: false, reason: "unscheduled" });
@@ -138,6 +235,13 @@ describe("resizeTask, setDuration, convertMilestone", () => {
     expect(applyCommand(state, cal, { type: "resizeTask", id: "a", edge: "end", date: "2026-10-09" })).toMatchObject({ ok: false, reason: "invalid" });
     expect(applyCommand(state, cal, { type: "setDuration", id: "a", duration: 0 })).toMatchObject({ ok: false, reason: "invalid" });
   });
+
+  it("keeps the duration when converting a non-milestone to a task", () => {
+    const state = run(base, cal, { type: "setDuration", id: "a", duration: 5 }, { type: "convertMilestone", id: "a", milestone: false });
+    expect(taskIn(state, "a").duration).toBe(5);
+    const milestone = run(state, cal, { type: "convertMilestone", id: "a", milestone: true }, { type: "convertMilestone", id: "a", milestone: false });
+    expect(taskIn(milestone, "a").duration).toBe(1);
+  });
 });
 
 describe("setLocked", () => {
@@ -148,6 +252,18 @@ describe("setLocked", () => {
       { type: "setLocked", id: "b", locked: true },
     );
     expect(taskIn(state, "b")).toMatchObject({ locked: true, userStart: "2026-10-08" });
+  });
+
+  it("unlocks a task that has become a parent", () => {
+    let state = run(
+      project(task("a", { userStart: "2026-10-05" }), task("b", { userStart: "2026-10-06" })),
+      cal,
+      { type: "setLocked", id: "a", locked: true },
+      { type: "indent", id: "b" },
+    );
+    expect(applyCommand(state, cal, { type: "setLocked", id: "a", locked: true })).toMatchObject({ ok: false, reason: "invalid" });
+    state = run(state, cal, { type: "setLocked", id: "a", locked: false });
+    expect(taskIn(state, "a").locked).toBe(false);
   });
 });
 
@@ -205,6 +321,35 @@ describe("removePredecessor and setOffset", () => {
     expect(datesIn(overlapped, "b")?.start).toBe("2026-10-07");
   });
 
+  it("sets the offset of a locked parent task", () => {
+    const state = run(
+      project(task("a", { userStart: "2026-10-05", duration: 3 }), task("p", { predecessorId: "a", locked: true }), task("c", { parentId: "p", userStart: "2026-10-05" })),
+      cal,
+      { type: "setOffset", id: "p", offset: 1 },
+    );
+    expect(taskIn(state, "p").offset).toBe(1);
+  });
+
+  describe("on a parent task", () => {
+    const parentLinked = project(
+      task("a", { userStart: "2026-10-05", duration: 3 }), // Mon 5 – Wed 7
+      task("p", { predecessorId: "a" }),
+      task("c", { parentId: "p", userStart: "2026-10-05" }), // shown Thu 8
+    );
+
+    it("keeps the subtasks in place when the predecessor is removed", () => {
+      const state = run(parentLinked, cal, { type: "removePredecessor", id: "p" });
+      expect(taskIn(state, "p")).toMatchObject({ predecessorId: null, offset: 0 });
+      expect(datesIn(state, "c")?.start).toBe("2026-10-08");
+    });
+
+    it("keeps the subtasks in place when the predecessor is deleted", () => {
+      const state = run(parentLinked, cal, { type: "deleteRows", ids: ["a"] });
+      expect(taskIn(state, "p").predecessorId).toBeNull();
+      expect(datesIn(state, "c")?.start).toBe("2026-10-08");
+    });
+  });
+
   it("clamps the offset so the task starts after its predecessor's start", () => {
     const state = run(linked, cal, { type: "setOffset", id: "b", offset: -10 });
     expect(taskIn(state, "b")).toMatchObject({ offset: -2, userStart: "2026-10-06" });
@@ -241,6 +386,11 @@ describe("tree commands", () => {
     );
     expect(Object.keys(state.rows)).toEqual(["d"]);
     expect(taskIn(state, "d")).toMatchObject({ predecessorId: null, userStart: "2026-10-08" });
+  });
+
+  it("ignores ids that no longer exist when deleting", () => {
+    const state = run(base, cal, { type: "deleteRows", ids: ["gone", "b"] });
+    expect(orderOf(state, "s")).toEqual(["a", "c"]);
   });
 
   it("duplicates a task right after the original", () => {

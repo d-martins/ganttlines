@@ -3,7 +3,7 @@ import type { Calendar, ResourceId } from "./calendar";
 import { diffRows, type RowChange } from "./changes";
 import { fromDay, toDay, type DayNum, type IsoDate } from "./date";
 import { TASK_COLORS, TASK_DEFAULTS, type ProjectState, type Row, type RowId, type TaskColor, type TaskRow } from "./model";
-import { computeSchedule, hasCycle, type Schedule, type Span } from "./schedule";
+import { computeSchedule, constraintsFor, CycleError, hasCycle, type Schedule, type Span } from "./schedule";
 import { buildTree, childrenOf, descendantLeafTasks, isAncestor, isParentTask, subtreeIds, type Tree } from "./tree";
 
 export type Command =
@@ -26,6 +26,12 @@ export type Command =
   | { type: "moveRow"; id: RowId; parentId: RowId | null; afterId: RowId | null }
   | { type: "deleteRows"; ids: RowId[] }
   | { type: "duplicateTask"; id: RowId; newId: RowId };
+
+/** Input limits: keep every calendar walk bounded, so no command can hang the server. */
+export const MAX_DURATION = 3660;
+export const MAX_OFFSET = 3660;
+export const MIN_DATE: IsoDate = "1970-01-01";
+export const MAX_DATE: IsoDate = "2199-12-31";
 
 export type RejectReason = "not_found" | "invalid" | "locked" | "cycle" | "unscheduled";
 
@@ -50,6 +56,7 @@ export function applyCommand(state: ProjectState, calendar: Calendar, command: C
     return { ok: true, state: next, changes: diffRows(state, next) };
   } catch (error) {
     if (error instanceof Rejection) return { ok: false, reason: error.reason, message: error.message };
+    if (error instanceof CycleError) return { ok: false, reason: "cycle", message: error.message };
     if (error instanceof RangeError) return { ok: false, reason: "invalid", message: error.message };
     throw error;
   }
@@ -84,13 +91,13 @@ class Execution {
       case "setAssignee":
         return this.patch(this.task(command.id), { resourceId: command.resourceId });
       case "moveTask":
-        return this.moveTask(command.id, toDay(command.start));
+        return this.moveTask(command.id, this.day(command.start));
       case "resizeTask":
-        return this.resizeTask(command.id, command.edge, toDay(command.date));
+        return this.resizeTask(command.id, command.edge, this.day(command.date));
       case "setDuration":
         return this.setDuration(command.id, command.duration);
       case "convertMilestone":
-        return this.patch(this.editableLeaf(command.id), { duration: command.milestone ? 0 : 1 });
+        return this.convertMilestone(command.id, command.milestone);
       case "setLocked":
         return this.setLocked(command.id, command.locked);
       case "linkTasks":
@@ -115,6 +122,7 @@ class Execution {
   // ── rows ────────────────────────────────────────────────────────────────
 
   private createRow(command: Extract<Command, { type: "createRow" }>): ProjectState {
+    if (command.id === "") throw new Rejection("invalid", "Row ids cannot be empty");
     if (this.rows[command.id]) throw new Rejection("invalid", `Row ${command.id} already exists`);
     this.assertValidParent(command.kind, command.parentId);
     const position = this.positionAfter(command.parentId, command.afterId);
@@ -123,7 +131,7 @@ class Execution {
       if (command.start !== undefined) throw new Rejection("invalid", "Sections have no dates");
       this.rows[command.id] = { ...base, kind: "section" };
     } else {
-      const userStart = command.start === undefined ? null : fromDay(this.calendar.snap(toDay(command.start), null));
+      const userStart = command.start === undefined ? null : fromDay(this.calendar.snap(this.day(command.start), null));
       this.rows[command.id] = { ...TASK_DEFAULTS, ...base, kind: "task", userStart };
     }
     return this.result();
@@ -156,7 +164,8 @@ class Execution {
 
   private deleteRows(ids: RowId[]): ProjectState {
     const removed = new Set<RowId>();
-    for (const id of ids) for (const subId of subtreeIds(this.tree, this.row(id).id)) removed.add(subId);
+    // Ids that no longer exist are ignored: live sessions may send stale selections.
+    for (const id of ids) if (this.rows[id]) for (const subId of subtreeIds(this.tree, id)) removed.add(subId);
     for (const id of removed) delete this.rows[id];
     for (const row of Object.values(this.rows)) {
       if (row.kind === "task" && row.predecessorId !== null && removed.has(row.predecessorId)) {
@@ -181,15 +190,29 @@ class Execution {
 
     const span = this.spanOf(id);
     if (!span) throw new Rejection("unscheduled", "This parent task has no scheduled subtasks");
-    const delta = this.calendar.workingDaysBetween(span.start, this.calendar.snap(target, null), null);
-    const leaves = descendantLeafTasks(this.tree, id);
-    const inside = new Set(leaves.map((leaf) => leaf.id));
-    for (const leaf of leaves) {
+    // The parent's own predecessor follows the leaf rule, measured on the unassigned calendar.
+    let day = this.calendar.snap(target, null);
+    const predecessor = task.predecessorId === null ? null : this.spanOf(task.predecessorId);
+    if (predecessor) {
+      const anchored = this.anchor(predecessor, day, null);
+      day = anchored.day;
+      this.patch(task, { offset: anchored.offset });
+    }
+    const delta = this.calendar.workingDaysBetween(span.start, day, null);
+    const moving = this.movingIds(id);
+    const moved: RowId[] = [];
+    for (const leaf of descendantLeafTasks(this.tree, id)) {
       const leafSpan = this.spanOf(leaf.id);
       if (!leafSpan || leaf.locked) continue;
       const shifted = this.calendar.addWorkingDays(leafSpan.start, delta, leaf.resourceId);
-      const movesWithPredecessor = leaf.predecessorId !== null && inside.has(leaf.predecessorId);
-      this.patch(leaf, movesWithPredecessor ? { userStart: fromDay(shifted) } : this.placeLeaf(leaf, shifted));
+      this.patch(leaf, this.placeLeaf(leaf, shifted, moving));
+      moved.push(leaf.id);
+    }
+    // Store exactly what the schedule will show, so the drag is never silently undone.
+    const schedule = computeSchedule(this.result(), this.calendar);
+    for (const leafId of moved) {
+      const leafSpan = schedule.get(leafId)?.span;
+      if (leafSpan) this.patch(this.rows[leafId] as TaskRow, { userStart: fromDay(leafSpan.start) });
     }
     return this.result();
   }
@@ -202,19 +225,25 @@ class Execution {
     const resource = task.resourceId;
     if (edge === "end") {
       const end = this.calendar.snapBack(date, resource);
-      return this.patch(task, { duration: this.durationBetween(span.start, end, resource) });
+      return this.patch(task, { duration: this.validDuration(this.durationBetween(span.start, end, resource)) });
     }
     const placement = this.placeLeaf(task, Math.min(date, span.end));
     const start = toDay(placement.userStart);
-    return this.patch(task, { ...placement, duration: this.durationBetween(start, span.end, resource) });
+    return this.patch(task, { ...placement, duration: this.validDuration(this.durationBetween(start, span.end, resource)) });
   }
 
   private setDuration(id: RowId, duration: number): ProjectState {
-    if (!Number.isInteger(duration) || duration < 1) throw new Rejection("invalid", "Duration must be a whole number of days ≥ 1");
-    return this.patch(this.editableLeaf(id), { duration });
+    return this.patch(this.editableLeaf(id), { duration: this.validDuration(duration) });
+  }
+
+  private convertMilestone(id: RowId, milestone: boolean): ProjectState {
+    const task = this.editableLeaf(id);
+    return this.patch(task, { duration: milestone ? 0 : task.duration === 0 ? 1 : task.duration });
   }
 
   private setLocked(id: RowId, locked: boolean): ProjectState {
+    // Unlocking is allowed on any task (a locked leaf may since have become a parent).
+    if (!locked) return this.patch(this.task(id), { locked });
     const task = this.leaf(id);
     const span = this.spanOf(id);
     return this.patch(task, locked && span ? { locked, userStart: fromDay(span.start) } : { locked });
@@ -241,12 +270,16 @@ class Execution {
   }
 
   private setOffset(id: RowId, offset: number): ProjectState {
-    if (!Number.isInteger(offset)) throw new Rejection("invalid", "Offset must be a whole number of days");
+    if (!Number.isInteger(offset) || Math.abs(offset) > MAX_OFFSET) {
+      throw new Rejection("invalid", `Offset must be a whole number of days between -${MAX_OFFSET} and ${MAX_OFFSET}`);
+    }
     const task = this.task(id);
     if (task.predecessorId === null) throw new Rejection("invalid", "This task has no predecessor");
-    if (task.locked) throw new Rejection("locked", "This task's dates are locked");
+    // A parent's locked flag has no effect on scheduling.
+    const isParent = isParentTask(this.tree, task);
+    if (task.locked && !isParent) throw new Rejection("locked", "This task's dates are locked");
     const predecessor = this.spanOf(task.predecessorId);
-    if (isParentTask(this.tree, task) || !predecessor) return this.patch(task, { offset });
+    if (isParent || !predecessor) return this.patch(task, { offset });
 
     const resource = task.resourceId;
     const natural = this.calendar.nextAfter(predecessor.end, resource);
@@ -261,25 +294,72 @@ class Execution {
   // ── helpers ─────────────────────────────────────────────────────────────
 
   /**
-   * Stored inputs for putting a leaf task at `target`: never on/before its predecessor's
-   * start; dropping it before the natural start records the overlap as a negative offset,
-   * dropping it at/after the natural start resets the offset to 0.
+   * Stored inputs for putting a leaf task at `target`: never before the constraints inherited
+   * from ancestor tasks (whose offsets stay as they are), and never on/before its own
+   * predecessor's start; dropping it before the natural start records the overlap as a
+   * negative offset, dropping it at/after the natural start resets the offset to 0.
+   * Predecessors in `moving` move along with the task, so they neither clamp nor re-anchor it.
    */
-  private placeLeaf(task: TaskRow, target: DayNum): { userStart: IsoDate; offset?: number } {
+  private placeLeaf(task: TaskRow, target: DayNum, moving: ReadonlySet<RowId> = new Set()): { userStart: IsoDate; offset?: number } {
     const resource = task.resourceId;
-    const predecessor = task.predecessorId === null ? null : this.spanOf(task.predecessorId);
     let day = this.calendar.snap(target, resource);
+    for (const inherited of constraintsFor(this.result(), { ...task, predecessorId: null })) {
+      const span = moving.has(inherited.predecessorId) ? null : this.spanOf(inherited.predecessorId);
+      if (!span) continue;
+      const natural = this.calendar.nextAfter(span.end, resource);
+      day = Math.max(day, this.calendar.addWorkingDays(natural, inherited.offset, resource), this.calendar.nextAfter(span.start, resource));
+    }
+    const predecessorId = task.predecessorId;
+    const predecessor = predecessorId === null || moving.has(predecessorId) ? null : this.spanOf(predecessorId);
     if (!predecessor) return { userStart: fromDay(day) };
-    day = Math.max(day, this.calendar.nextAfter(predecessor.start, resource));
-    const natural = this.calendar.nextAfter(predecessor.end, resource);
-    const offset = day < natural ? this.calendar.workingDaysBetween(natural, day, resource) : 0;
-    return { userStart: fromDay(day), offset };
+    const anchored = this.anchor(predecessor, day, resource);
+    return { userStart: fromDay(anchored.day), offset: anchored.offset };
   }
 
-  /** Removes the predecessor while keeping the task visually where it is. */
+  /** Clamps `day` to after the predecessor's start and expresses it as an offset from the natural start. */
+  private anchor(predecessor: Span, day: DayNum, resource: ResourceId | null): { day: DayNum; offset: number } {
+    const clamped = Math.max(day, this.calendar.nextAfter(predecessor.start, resource));
+    const natural = this.calendar.nextAfter(predecessor.end, resource);
+    return { day: clamped, offset: clamped < natural ? this.calendar.workingDaysBetween(natural, clamped, resource) : 0 };
+  }
+
+  /** Tasks in the subtree that a drag of `id` actually moves: unlocked scheduled leaves and parents containing one. */
+  private movingIds(id: RowId): Set<RowId> {
+    const movable = (leaf: TaskRow) => !leaf.locked && this.spanOf(leaf.id) !== null;
+    const moving = new Set<RowId>();
+    for (const subId of subtreeIds(this.tree, id)) {
+      const row = this.state.rows[subId];
+      if (row?.kind !== "task") continue;
+      const moves = isParentTask(this.tree, row) ? descendantLeafTasks(this.tree, subId).some(movable) : movable(row);
+      if (moves) moving.add(subId);
+    }
+    return moving;
+  }
+
+  /** Removes the predecessor while keeping the task (or, for a parent, each subtask) visually where it is. */
   private detachPredecessor(task: TaskRow): void {
-    const span = isParentTask(this.tree, task) ? null : this.spanOf(task.id);
+    const isParent = isParentTask(this.tree, task);
+    // Deleted subtasks (deleteRows) are skipped: patching them would bring them back.
+    for (const leaf of isParent ? descendantLeafTasks(this.tree, task.id) : []) {
+      const span = this.spanOf(leaf.id);
+      if (span && !leaf.locked && this.rows[leaf.id]) this.patch(leaf, { userStart: fromDay(span.start) });
+    }
+    const span = isParent ? null : this.spanOf(task.id);
     this.patch(task, span ? { predecessorId: null, offset: 0, userStart: fromDay(span.start) } : { predecessorId: null, offset: 0 });
+  }
+
+  private validDuration(duration: number): number {
+    if (!Number.isInteger(duration) || duration < 1 || duration > MAX_DURATION) {
+      throw new Rejection("invalid", `Duration must be a whole number of days from 1 to ${MAX_DURATION}`);
+    }
+    return duration;
+  }
+
+  /** Parses a date input, rejecting dates outside the supported range. */
+  private day(iso: IsoDate): DayNum {
+    const day = toDay(iso);
+    if (iso < MIN_DATE || iso > MAX_DATE) throw new Rejection("invalid", `Dates must be between ${MIN_DATE} and ${MAX_DATE}`);
+    return day;
   }
 
   private durationBetween(start: DayNum, end: DayNum, resource: ResourceId | null): number {
@@ -295,10 +375,10 @@ class Execution {
   /** A position key right after `afterId` (or first, when null) among the children of `parentId`. */
   private positionAfter(parentId: RowId | null, afterId: RowId | null, movingId?: RowId): string {
     const siblings = childrenOf(this.tree, parentId).filter((sibling) => sibling.id !== movingId);
-    if (afterId === null) return generateKeyBetween(null, siblings[0]?.position ?? null);
+    if (afterId === null) return keyBetween(null, siblings[0]?.position ?? null);
     const index = siblings.findIndex((sibling) => sibling.id === afterId);
     if (index < 0) throw new Rejection("invalid", `Row ${afterId} is not a child of the target parent`);
-    return generateKeyBetween(siblings[index]!.position, siblings[index + 1]?.position ?? null);
+    return keyBetween(siblings[index]!.position, siblings[index + 1]?.position ?? null);
   }
 
   private lastChildId(parentId: RowId): RowId | null {
@@ -343,5 +423,14 @@ class Execution {
 
   private result(): ProjectState {
     return { rows: this.rows };
+  }
+}
+
+/** generateKeyBetween, with its errors (e.g. corrupt or equal sibling positions) turned into rejections. */
+function keyBetween(before: string | null, after: string | null): string {
+  try {
+    return generateKeyBetween(before, after);
+  } catch (error) {
+    throw new Rejection("invalid", `Cannot order rows here: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
