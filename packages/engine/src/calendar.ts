@@ -38,6 +38,9 @@ export class Calendar {
 
   constructor(data: CalendarData) {
     this.weekdays = new Set(data.workingWeekdays);
+    if (!data.workingWeekdays.every((w) => Number.isInteger(w) && w >= 0 && w <= 6)) {
+      throw new RangeError("Working weekdays must be integers from 0 (Sunday) to 6 (Saturday)");
+    }
     if (this.weekdays.size === 0) throw new RangeError("At least one working weekday is required");
     for (const holiday of data.holidays) {
       if (holiday.appliesTo === "all") addRange(this.teamOff, holiday.startDate, holiday.endDate);
@@ -79,6 +82,7 @@ export class Calendar {
 
   /** Signed k such that addWorkingDays(from, k) === to. Both days must be working days. */
   workingDaysBetween(from: DayNum, to: DayNum, resourceId: ResourceId | null): number {
+    if (!Number.isInteger(from) || !Number.isInteger(to)) throw new RangeError("Day numbers must be integers");
     const step = to >= from ? 1 : -1;
     let count = 0;
     for (let day = from; day !== to; ) {
@@ -106,6 +110,8 @@ export class Calendar {
 }
 
 function addRange(target: Set<DayNum>, startDate: IsoDate, endDate: IsoDate): void {
+  const start = toDay(startDate);
   const end = toDay(endDate);
-  for (let day = toDay(startDate); day <= end; day++) target.add(day);
+  if (end < start) throw new RangeError(`Range ends before it starts: ${startDate} … ${endDate}`);
+  for (let day = start; day <= end; day++) target.add(day);
 }

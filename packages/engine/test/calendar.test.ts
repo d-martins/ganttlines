@@ -51,3 +51,37 @@ describe("Calendar", () => {
     expect(() => new Calendar({ workingWeekdays: [], holidays: [], timeOff: [] })).toThrow(RangeError);
   });
 });
+
+describe("Calendar input validation", () => {
+  it("rejects weekdays outside 0–6", () => {
+    expect(() => new Calendar({ workingWeekdays: [7], holidays: [], timeOff: [] })).toThrow(RangeError);
+    expect(() => new Calendar({ workingWeekdays: [1.5], holidays: [], timeOff: [] })).toThrow(RangeError);
+  });
+
+  it("rejects ranges that end before they start", () => {
+    expect(
+      () =>
+        new Calendar({
+          workingWeekdays: MON_FRI,
+          holidays: [{ id: "h", name: "", startDate: "2026-10-09", endDate: "2026-10-05", appliesTo: "all" }],
+          timeOff: [],
+        }),
+    ).toThrow(RangeError);
+  });
+
+  it("rejects fractional day numbers when counting working days", () => {
+    const cal = new Calendar({ workingWeekdays: MON_FRI, holidays: [], timeOff: [] });
+    expect(() => cal.workingDaysBetween(d("2026-10-05"), d("2026-10-09") + 0.5, null)).toThrow(RangeError);
+  });
+
+  it("skips multi-day time off that spans a weekend", () => {
+    const cal = new Calendar({
+      workingWeekdays: MON_FRI,
+      holidays: [],
+      timeOff: [{ id: "t", resourceId: "ana", startDate: "2026-10-09", endDate: "2026-10-13" }],
+    });
+    // Thu 8 + 1 working day for Ana: Fri 9, Mon 12, Tue 13 are off → Wed 14
+    expect(cal.addWorkingDays(d("2026-10-08"), 1, "ana")).toBe(d("2026-10-14"));
+    expect(cal.addWorkingDays(d("2026-10-08"), 1, "rudy")).toBe(d("2026-10-09"));
+  });
+});

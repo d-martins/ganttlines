@@ -22,4 +22,9 @@ describe("date", () => {
     expect(() => toDay("2026-02-30")).toThrow(RangeError);
     expect(() => toDay("27/09/2026")).toThrow(RangeError);
   });
+
+  it("accepts leap days only in leap years", () => {
+    expect(fromDay(toDay("2024-02-29"))).toBe("2024-02-29");
+    expect(() => toDay("2025-02-29")).toThrow(RangeError);
+  });
 });
