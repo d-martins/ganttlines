@@ -54,14 +54,19 @@ export function computeSchedule(state: ProjectState, calendar: Calendar): Schedu
   };
 
   const computeLeaf = (task: TaskRow): Computed => {
-    if (task.userStart === null) return { span: null, violation: false };
     const resource = task.resourceId;
+    // Visit predecessors before anything else — even for unscheduled tasks — so that every
+    // dependency cycle is detected. Predecessors that no longer exist are ignored.
+    const predecessors = constraintsFor(state, task)
+      .filter(({ predecessorId }) => state.rows[predecessorId] !== undefined)
+      .map(({ predecessorId, offset }) => ({ span: compute(predecessorId).span, offset }));
+    if (task.userStart === null) return { span: null, violation: false };
+
     let required = -Infinity;
-    for (const { predecessorId, offset } of constraintsFor(state, task)) {
-      const predecessor = compute(predecessorId).span;
-      if (!predecessor) continue;
-      const natural = calendar.nextAfter(predecessor.end, resource);
-      const floor = calendar.nextAfter(predecessor.start, resource);
+    for (const { span, offset } of predecessors) {
+      if (!span) continue;
+      const natural = calendar.nextAfter(span.end, resource);
+      const floor = calendar.nextAfter(span.start, resource);
       required = Math.max(required, calendar.addWorkingDays(natural, offset, resource), floor);
     }
     const userStart = toDay(task.userStart);

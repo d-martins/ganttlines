@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { computeSchedule, CycleError, hasCycle } from "../src/schedule";
+import { isAncestor } from "../src/tree";
 import { calendar, datesOf, project, section, task } from "./fixtures";
 
 // October 2026: Mon 5, Tue 6, Wed 7, Thu 8, Fri 9, Sat 10, Sun 11, Mon 12 …
@@ -85,6 +86,11 @@ describe("computeSchedule — predecessors", () => {
 
   it("ignores unscheduled predecessors", () => {
     const schedule = computeSchedule(project(task("x"), task("b", { userStart: "2026-10-05", predecessorId: "x" })), cal);
+    expect(datesOf(schedule, "b")?.start).toBe("2026-10-05");
+  });
+
+  it("ignores a predecessor that no longer exists", () => {
+    const schedule = computeSchedule(project(task("b", { userStart: "2026-10-05", predecessorId: "gone" })), cal);
     expect(datesOf(schedule, "b")?.start).toBe("2026-10-05");
   });
 
@@ -176,5 +182,42 @@ describe("cycles", () => {
       task("c", { userStart: "2026-10-05", predecessorId: "a" }),
     );
     expect(hasCycle(state, cal)).toBe(false);
+  });
+
+  it("detects cycles of three tasks", () => {
+    const state = project(
+      task("a", { userStart: "2026-10-05", predecessorId: "c" }),
+      task("b", { userStart: "2026-10-05", predecessorId: "a" }),
+      task("c", { userStart: "2026-10-05", predecessorId: "b" }),
+    );
+    expect(hasCycle(state, cal)).toBe(true);
+  });
+
+  it("detects cycles through a parent's inherited constraint", () => {
+    const state = project(
+      task("x", { userStart: "2026-10-05", predecessorId: "c" }),
+      task("p", { predecessorId: "x" }),
+      task("c", { parentId: "p", userStart: "2026-10-05" }),
+    );
+    expect(hasCycle(state, cal)).toBe(true);
+  });
+
+  it("detects cycles through unscheduled tasks", () => {
+    const bothUnscheduled = project(task("a", { predecessorId: "b" }), task("b", { predecessorId: "a" }));
+    const oneUnscheduled = project(
+      task("a", { userStart: "2026-10-05", predecessorId: "b" }),
+      task("b", { predecessorId: "a" }),
+    );
+    const unscheduledChildOfOwnPredecessor = project(task("p"), task("c", { parentId: "p", predecessorId: "p" }));
+    expect(hasCycle(bothUnscheduled, cal)).toBe(true);
+    expect(hasCycle(oneUnscheduled, cal)).toBe(true);
+    expect(hasCycle(unscheduledChildOfOwnPredecessor, cal)).toBe(true);
+  });
+});
+
+describe("isAncestor", () => {
+  it("terminates even if parent links are corrupted into a loop", () => {
+    const state = project(task("a", { parentId: "b" }), task("b", { parentId: "a" }));
+    expect(isAncestor(state, "x", "a")).toBe(false);
   });
 });

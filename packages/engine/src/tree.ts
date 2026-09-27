@@ -45,8 +45,11 @@ export function descendantLeafTasks(tree: Tree, id: RowId): TaskRow[] {
 }
 
 export function isAncestor(state: ProjectState, ancestorId: RowId, id: RowId): boolean {
-  for (let current = state.rows[id]?.parentId ?? null; current !== null; current = state.rows[current]?.parentId ?? null) {
+  // Bounded by the row count so corrupted parent links can never loop forever.
+  let current = state.rows[id]?.parentId ?? null;
+  for (let steps = Object.keys(state.rows).length; current !== null && steps > 0; steps--) {
     if (current === ancestorId) return true;
+    current = state.rows[current]?.parentId ?? null;
   }
   return false;
 }
