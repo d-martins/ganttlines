@@ -1,5 +1,5 @@
 import cookie from "@fastify/cookie";
-import type { Db } from "@ganttlines/db";
+import { Prisma, type Db } from "@ganttlines/db";
 import Fastify, { type FastifyInstance } from "fastify";
 import { LoginLimiter } from "./auth/login-limiter";
 import { SESSION_COOKIE, SessionStore } from "./auth/sessions";
@@ -20,7 +20,10 @@ export interface AppOptions {
 }
 
 export async function buildApp({ db, config, now, logger = false }: AppOptions): Promise<FastifyInstance> {
-  const app = Fastify({ logger, trustProxy: true });
+  const hops = config.trustProxy;
+  // A hop count N means "trust the N closest proxies" (proxy-addr trust function: hop 0 = direct peer).
+  const trustProxy = typeof hops === "number" ? (_address: string, hop: number) => hop < hops : hops;
+  const app = Fastify({ logger, trustProxy });
   await app.register(cookie);
 
   const context: RouteContext = {
@@ -51,7 +54,13 @@ export async function buildApp({ db, config, now, logger = false }: AppOptions):
   });
 
   app.setErrorHandler((error, request, reply) => {
-    if (error instanceof HttpError) return reply.status(error.status).send({ error: error.code, message: error.message });
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      return reply.status(409).send({ error: "conflict", message: "That already exists" });
+    }
+    if (error instanceof HttpError) {
+      if (error.status >= 500) request.log.error(error);
+      return reply.status(error.status).send({ error: error.code, message: error.message });
+    }
     const status = (error as { statusCode?: number }).statusCode;
     if (status && status >= 400 && status < 500) {
       return reply.status(status).send({ error: "invalid_request", message: (error as Error).message });

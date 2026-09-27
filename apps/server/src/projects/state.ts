@@ -13,7 +13,12 @@ export class CorruptProjectError extends HttpError {
 export async function loadProjectState(db: Db, projectId: string): Promise<ProjectStateDto> {
   const project = await db.project.findUnique({ where: { id: projectId }, include: { rows: true } });
   if (!project) throw notFound("Project");
-  const rows = project.rows.map(toEngineRow);
+  let rows: Row[];
+  try {
+    rows = project.rows.map(toEngineRow);
+  } catch (error) {
+    throw new CorruptProjectError(projectId, (error as Error).message);
+  }
   const problem = findTreeProblem(rows);
   if (problem) throw new CorruptProjectError(projectId, problem);
   const { rows: _rows, ...meta } = project;

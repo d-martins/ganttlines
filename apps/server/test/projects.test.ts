@@ -60,6 +60,15 @@ describe("projects", () => {
     expect(state.json().error).toBe("project_corrupt");
   });
 
+  it("reports rows with an unknown kind as corruption", async () => {
+    const admin = await setupAdmin(t.app);
+    const project = (await t.app.inject({ method: "POST", url: "/api/projects", headers: { cookie: admin }, payload: { name: "Launch" } })).json().project;
+    await t.db.row.create({ data: { ...toDbColumns(rows[1]!), parentId: null, kind: "epic", projectId: project.id } });
+    const state = await t.app.inject({ url: `/api/projects/${project.id}/state`, headers: { cookie: admin } });
+    expect(state.statusCode).toBe(500);
+    expect(state.json().error).toBe("project_corrupt");
+  });
+
   it("returns 404 for unknown projects", async () => {
     const admin = await setupAdmin(t.app);
     const state = await t.app.inject({ url: "/api/projects/00000000-0000-4000-8000-000000000000/state", headers: { cookie: admin } });

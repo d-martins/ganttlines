@@ -12,6 +12,7 @@ describe("loadConfig", () => {
       publicUrl: new URL("http://localhost:3000"),
       port: 3000,
       bind: "127.0.0.1",
+      trustProxy: false,
     });
   });
 
@@ -24,6 +25,14 @@ describe("loadConfig", () => {
       BIND: "0.0.0.0",
     });
     expect(config).toMatchObject({ publicUrl: new URL("https://plan.example.com"), port: 8080, bind: "0.0.0.0" });
+  });
+
+  it("parses TRUST_PROXY as off, on, a hop count or an address list", () => {
+    const base = { DATABASE_URL: "x", SESSION_SECRET: SECRET };
+    expect(loadConfig({ ...base, TRUST_PROXY: "false" }).trustProxy).toBe(false);
+    expect(loadConfig({ ...base, TRUST_PROXY: "true" }).trustProxy).toBe(true);
+    expect(loadConfig({ ...base, TRUST_PROXY: "1" }).trustProxy).toBe(1);
+    expect(loadConfig({ ...base, TRUST_PROXY: "127.0.0.1,10.0.0.0/8" }).trustProxy).toBe("127.0.0.1,10.0.0.0/8");
   });
 
   it("refuses to start without a database URL or a strong session secret", () => {

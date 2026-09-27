@@ -41,7 +41,9 @@ export class SessionStore {
       return { user: session.user, refreshedUntil: null };
     }
     const expiresAt = new Date(now.getTime() + SESSION_TTL_MS);
-    await this.db.session.update({ where: { id }, data: { lastSeenAt: now, expiresAt } });
+    // updateMany: the session may have been revoked concurrently (e.g. logout in another tab).
+    const { count } = await this.db.session.updateMany({ where: { id }, data: { lastSeenAt: now, expiresAt } });
+    if (count === 0) return null;
     return { user: session.user, refreshedUntil: expiresAt };
   }
 

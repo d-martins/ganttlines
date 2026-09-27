@@ -1,6 +1,7 @@
 import { ChangePasswordBody, LoginBody } from "@ganttlines/protocol";
 import type { FastifyInstance } from "fastify";
 import { requireUser } from "../auth/guard";
+import { randomBytes } from "node:crypto";
 import { hashPassword, verifyPassword } from "../auth/passwords";
 import { toUserDto } from "../dto";
 import { HttpError } from "../errors";
@@ -10,6 +11,9 @@ import { clearSessionCookie, setSessionCookie, type RouteContext } from "./conte
 const invalidCredentials = () => new HttpError(401, "invalid_credentials", "Wrong email or password");
 
 export function authRoutes(app: FastifyInstance, { db, config, sessions, loginLimiter }: RouteContext): void {
+  // Unknown emails are checked against this hash so they take as long as real accounts (no account probing).
+  const dummyHash = hashPassword(randomBytes(16).toString("hex"));
+
   app.post("/api/auth/login", async (request, reply) => {
     const body = parseBody(LoginBody, request.body);
     const keys = [`ip:${request.ip}`, `email:${body.email}`];
@@ -17,7 +21,8 @@ export function authRoutes(app: FastifyInstance, { db, config, sessions, loginLi
       throw new HttpError(429, "too_many_attempts", "Too many failed attempts, try again in a few minutes");
     }
     const user = await db.user.findUnique({ where: { email: body.email } });
-    if (!user || !(await verifyPassword(user.passwordHash, body.password))) {
+    const passwordOk = await verifyPassword(user?.passwordHash ?? (await dummyHash), body.password);
+    if (!user || !passwordOk) {
       loginLimiter.recordFailure(keys);
       throw invalidCredentials();
     }
@@ -41,7 +46,15 @@ export function authRoutes(app: FastifyInstance, { db, config, sessions, loginLi
   app.post("/api/auth/password", async (request, reply) => {
     const user = requireUser(request, "guest", { allowPendingPasswordChange: true });
     const body = parseBody(ChangePasswordBody, request.body);
-    if (!(await verifyPassword(user.passwordHash, body.currentPassword))) throw invalidCredentials();
+    const keys = [`user:${user.id}`];
+    if (loginLimiter.isBlocked(keys)) {
+      throw new HttpError(429, "too_many_attempts", "Too many failed attempts, try again in a few minutes");
+    }
+    if (!(await verifyPassword(user.passwordHash, body.currentPassword))) {
+      loginLimiter.recordFailure(keys);
+      throw invalidCredentials();
+    }
+    loginLimiter.reset(keys);
     await db.user.update({
       where: { id: user.id },
       data: { passwordHash: await hashPassword(body.newPassword), mustChangePassword: false },

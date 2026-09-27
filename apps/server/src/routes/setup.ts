@@ -13,6 +13,8 @@ export function setupRoutes(app: FastifyInstance, { db, config, sessions }: Rout
 
   app.post("/api/setup", async (request, reply) => {
     const body = parseBody(SetupBody, request.body);
+    // Cheap early exit so post-setup calls never pay for a password hash (re-checked under the lock below).
+    if ((await db.user.count()) > 0) throw conflict("Setup has already been completed");
     const passwordHash = await hashPassword(body.password);
     const user = await db.$transaction(async (tx) => {
       // Serialise concurrent setup attempts; only the first may create the admin.

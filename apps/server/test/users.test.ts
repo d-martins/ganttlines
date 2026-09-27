@@ -97,6 +97,15 @@ describe("user management (admin)", () => {
     expect(rename.json().user.name).toBe("Boss");
   });
 
+  it("answers 409 (not 500) when the same email is created twice at once", async () => {
+    const admin = await setupAdmin(t.app);
+    const payload = { email: "twin@example.com", name: "Twin", role: "editor" };
+    const statuses = (
+      await Promise.all([1, 2].map(() => t.app.inject({ method: "POST", url: "/api/users", headers: { cookie: admin }, payload })))
+    ).map((response) => response.statusCode);
+    expect(statuses.sort()).toEqual([201, 409]);
+  });
+
   it("resets passwords, signing the user out everywhere", async () => {
     const admin = await setupAdmin(t.app);
     const rudy = await createUser(t.app, admin, { email: "rudy@example.com", name: "Rudy", role: "editor" });

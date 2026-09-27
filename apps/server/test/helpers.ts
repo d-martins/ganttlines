@@ -12,6 +12,7 @@ export const testConfig: Config = {
   publicUrl: new URL(PUBLIC_URL),
   port: 3000,
   bind: "127.0.0.1",
+  trustProxy: false,
 };
 
 export interface TestContext {

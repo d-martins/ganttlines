@@ -1,4 +1,5 @@
 import { CreateUserBody, UpdateUserBody } from "@ganttlines/protocol";
+import type { Prisma } from "@ganttlines/db";
 import type { FastifyInstance } from "fastify";
 import { requireUser } from "../auth/guard";
 import { generateTemporaryPassword, hashPassword } from "../auth/passwords";
@@ -36,12 +37,14 @@ export function userRoutes(app: FastifyInstance, { db, sessions }: RouteContext)
     requireUser(request, "admin");
     const id = parseId(request.params.id, "User");
     const body = parseBody(UpdateUserBody, request.body);
-    const user = await db.user.findUnique({ where: { id } });
-    if (!user) throw notFound("User");
-    if (user.role === "admin" && body.role && body.role !== "admin") await assertAnotherAdmin(id);
-    const updated = await db.user.update({
-      where: { id },
-      data: { ...(body.name ? { name: body.name } : {}), ...(body.role ? { role: body.role } : {}) },
+    const updated = await withUserTableLocked(async (tx) => {
+      const user = await tx.user.findUnique({ where: { id } });
+      if (!user) throw notFound("User");
+      if (user.role === "admin" && body.role && body.role !== "admin") await assertAnotherAdmin(tx, id);
+      return tx.user.update({
+        where: { id },
+        data: { ...(body.name ? { name: body.name } : {}), ...(body.role ? { role: body.role } : {}) },
+      });
     });
     return { user: toUserDto(updated) };
   });
@@ -60,15 +63,28 @@ export function userRoutes(app: FastifyInstance, { db, sessions }: RouteContext)
     const admin = requireUser(request, "admin");
     const id = parseId(request.params.id, "User");
     if (id === admin.id) throw conflict("You cannot delete your own account");
-    const user = await db.user.findUnique({ where: { id } });
-    if (!user) throw notFound("User");
-    if (user.role === "admin") await assertAnotherAdmin(id);
-    await db.user.delete({ where: { id } });
+    await withUserTableLocked(async (tx) => {
+      const user = await tx.user.findUnique({ where: { id } });
+      if (!user) throw notFound("User");
+      if (user.role === "admin") await assertAnotherAdmin(tx, id);
+      await tx.user.delete({ where: { id } });
+    });
     return reply.status(204).send();
   });
 
-  async function assertAnotherAdmin(exceptId: string): Promise<void> {
-    const others = await db.user.count({ where: { role: "admin", NOT: { id: exceptId } } });
+  /**
+   * Runs `work` while holding a lock that serialises role changes and deletions, so two admins
+   * demoting/deleting each other at the same time can never leave the instance without an admin.
+   */
+  function withUserTableLocked<T>(work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+    return db.$transaction(async (tx) => {
+      await tx.$executeRaw`LOCK TABLE "User" IN SHARE ROW EXCLUSIVE MODE`;
+      return work(tx);
+    });
+  }
+
+  async function assertAnotherAdmin(tx: Prisma.TransactionClient, exceptId: string): Promise<void> {
+    const others = await tx.user.count({ where: { role: "admin", NOT: { id: exceptId } } });
     if (others === 0) throw conflict("There must always be at least one admin");
   }
 }

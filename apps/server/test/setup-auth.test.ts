@@ -63,6 +63,44 @@ describe("login, logout and sessions", () => {
     expect(blocked.statusCode).toBe(429);
   });
 
+  it("throttles per client IP and ignores spoofed X-Forwarded-For by default", async () => {
+    await setupAdmin(t.app);
+    for (let i = 0; i < 10; i++) {
+      await t.app.inject({
+        method: "POST",
+        url: "/api/auth/login",
+        headers: { "x-forwarded-for": `10.0.0.${i}` },
+        payload: { email: `nobody${i}@example.com`, password: "wrong" },
+      });
+    }
+    const blocked = await t.app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      headers: { "x-forwarded-for": "10.9.9.9" },
+      payload: { email: ADMIN.email, password: ADMIN.password },
+    });
+    expect(blocked.statusCode).toBe(429);
+  });
+
+  it("throttles guesses of the current password when changing it", async () => {
+    const cookie = await setupAdmin(t.app);
+    for (let i = 0; i < 10; i++) {
+      await t.app.inject({
+        method: "POST",
+        url: "/api/auth/password",
+        headers: { cookie },
+        payload: { currentPassword: "wrong", newPassword: "whatever password" },
+      });
+    }
+    const blocked = await t.app.inject({
+      method: "POST",
+      url: "/api/auth/password",
+      headers: { cookie },
+      payload: { currentPassword: ADMIN.password, newPassword: "whatever password" },
+    });
+    expect(blocked.statusCode).toBe(429);
+  });
+
   it("logs out by revoking the session", async () => {
     const cookie = await setupAdmin(t.app);
     expect((await t.app.inject({ method: "POST", url: "/api/auth/logout", headers: { cookie } })).statusCode).toBe(204);
