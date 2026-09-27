@@ -74,6 +74,21 @@ describe("Calendar input validation", () => {
     expect(() => cal.workingDaysBetween(d("2026-10-05"), d("2026-10-09") + 0.5, null)).toThrow(RangeError);
   });
 
+  it("treats a day as working when no working day exists nearby (long time off)", () => {
+    const cal = new Calendar({
+      workingWeekdays: MON_FRI,
+      holidays: [],
+      timeOff: [{ id: "t", resourceId: "ana", startDate: "2026-01-01", endDate: "2040-01-01" }],
+    });
+    expect(cal.snap(d("2026-10-10"), "ana")).toBe(d("2026-10-10"));
+    expect(cal.snapBack(d("2026-10-10"), "ana")).toBe(d("2025-12-31")); // found within range: no fallback
+    expect(cal.nextAfter(d("2026-10-05"), "ana")).toBe(d("2026-10-06"));
+    expect(cal.addWorkingDays(d("2026-10-05"), 3, "ana")).toBe(d("2026-10-08"));
+    expect(cal.addWorkingDays(d("2026-10-05"), -2, "ana")).toBe(d("2025-12-30"));
+    expect(cal.workingDaysBetween(d("2026-10-05"), d("2026-10-08"), "ana")).toBe(0);
+    expect(cal.snap(d("2026-10-10"), null)).toBe(d("2026-10-12"));
+  });
+
   it("skips multi-day time off that spans a weekend", () => {
     const cal = new Calendar({
       workingWeekdays: MON_FRI,

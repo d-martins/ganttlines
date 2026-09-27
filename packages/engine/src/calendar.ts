@@ -24,7 +24,11 @@ export interface CalendarData {
   timeOff: TimeOff[];
 }
 
-/** Longest run of consecutive non-working days we tolerate before giving up (~10 years). */
+/**
+ * Longest run of consecutive non-working days we search through (~10 years). Beyond it (e.g. a
+ * person marked off for decades) the calendar falls back to treating the day as working, so
+ * scheduling stays total: one resource's calendar can never make the whole project unschedulable.
+ */
 const MAX_NON_WORKING_RUN = 3660;
 
 /**
@@ -80,7 +84,10 @@ export class Calendar {
     return current;
   }
 
-  /** Signed k such that addWorkingDays(from, k) === to. Both days must be working days. */
+  /**
+   * Signed k such that addWorkingDays(from, k) === to. Both days must be working days
+   * (days reached only through the no-working-day fallback are not counted).
+   */
   workingDaysBetween(from: DayNum, to: DayNum, resourceId: ResourceId | null): number {
     if (!Number.isInteger(from) || !Number.isInteger(to)) throw new RangeError("Day numbers must be integers");
     const step = to >= from ? 1 : -1;
@@ -96,7 +103,7 @@ export class Calendar {
     for (let i = 0, day = start; i < MAX_NON_WORKING_RUN; i++, day += step) {
       if (this.isWorkingDay(day, resourceId)) return day;
     }
-    throw new RangeError(`No working day within ${MAX_NON_WORKING_RUN} days of day ${start}`);
+    return start; // fallback: no working day nearby, so `start` is used as if it were working
   }
 
   private offFor(resourceId: ResourceId): Set<DayNum> {

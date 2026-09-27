@@ -46,6 +46,15 @@ describe("createRow", () => {
   });
 });
 
+describe("calendars without working days", () => {
+  it("keeps scheduling and accepting commands when an assignee is off for years", () => {
+    const longLeave = calendar({ timeOff: [{ id: "t", resourceId: "ana", startDate: "2026-01-01", endDate: "2040-01-01" }] });
+    const state = project(task("a", { userStart: "2026-10-05", duration: 2, resourceId: "ana" }), task("b", { userStart: "2026-10-05" }));
+    expect(datesOf(computeSchedule(state, longLeave), "a")).toEqual({ start: "2026-10-05", end: "2026-10-06" });
+    expect(applyCommand(state, longLeave, { type: "updateTitle", id: "b", title: "B" })).toMatchObject({ ok: true });
+  });
+});
+
 describe("field edits", () => {
   it("updates title, description, color, collapse and assignee", () => {
     const state = run(
