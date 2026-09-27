@@ -25,9 +25,9 @@ export interface CalendarData {
 }
 
 /**
- * Longest run of consecutive non-working days we search through (~10 years). Beyond it (e.g. a
- * person marked off for decades) the calendar falls back to treating the day as working, so
- * scheduling stays total: one resource's calendar can never make the whole project unschedulable.
+ * Longest run of consecutive non-working days a calendar may contain (~10 years). Longer
+ * holiday / time-off stretches are ignored (see `dropLongRuns`), so every walk finds a working
+ * day quickly and one calendar can never make a project unschedulable.
  */
 const MAX_NON_WORKING_RUN = 3660;
 
@@ -51,6 +51,9 @@ export class Calendar {
       else for (const id of holiday.appliesTo) addRange(this.offFor(id), holiday.startDate, holiday.endDate);
     }
     for (const entry of data.timeOff) addRange(this.offFor(entry.resourceId), entry.startDate, entry.endDate);
+    // Team first (weekday gaps alone are ≤ 6 days), then each resource on top of the team calendar.
+    dropLongRuns(this.teamOff, (day) => !this.isWorkingDay(day, null));
+    for (const [resourceId, off] of this.resourceOff) dropLongRuns(off, (day) => !this.isWorkingDay(day, resourceId));
   }
 
   isWorkingDay(day: DayNum, resourceId: ResourceId | null): boolean {
@@ -84,10 +87,7 @@ export class Calendar {
     return current;
   }
 
-  /**
-   * Signed k such that addWorkingDays(from, k) === to. Both days must be working days
-   * (days reached only through the no-working-day fallback are not counted).
-   */
+  /** Signed k such that addWorkingDays(from, k) === to. Both days must be working days. */
   workingDaysBetween(from: DayNum, to: DayNum, resourceId: ResourceId | null): number {
     if (!Number.isInteger(from) || !Number.isInteger(to)) throw new RangeError("Day numbers must be integers");
     const step = to >= from ? 1 : -1;
@@ -100,10 +100,11 @@ export class Calendar {
   }
 
   private scan(start: DayNum, step: 1 | -1, resourceId: ResourceId | null): DayNum {
-    for (let i = 0, day = start; i < MAX_NON_WORKING_RUN; i++, day += step) {
+    for (let i = 0, day = start; i <= MAX_NON_WORKING_RUN; i++, day += step) {
       if (this.isWorkingDay(day, resourceId)) return day;
     }
-    return start; // fallback: no working day nearby, so `start` is used as if it were working
+    // Unreachable safety net: the constructor guarantees no longer non-working runs.
+    return start;
   }
 
   private offFor(resourceId: ResourceId): Set<DayNum> {
@@ -121,4 +122,23 @@ function addRange(target: Set<DayNum>, startDate: IsoDate, endDate: IsoDate): vo
   const end = toDay(endDate);
   if (end < start) throw new RangeError(`Range ends before it starts: ${startDate} … ${endDate}`);
   for (let day = start; day <= end; day++) target.add(day);
+}
+
+/**
+ * Removes from `off` every day inside a maximal run of consecutive non-working days (as
+ * `isOff` reports them) longer than MAX_NON_WORKING_RUN. Only runs that contain a day of
+ * `off` are visited, so the cost is proportional to the size of `off`.
+ */
+function dropLongRuns(off: Set<DayNum>, isOff: (day: DayNum) => boolean): void {
+  const days = [...off].sort((a, b) => a - b);
+  let coveredUntil = -Infinity;
+  for (const day of days) {
+    if (day <= coveredUntil) continue;
+    let start = day;
+    while (isOff(start - 1)) start--;
+    let end = day;
+    while (isOff(end + 1)) end++;
+    coveredUntil = end;
+    if (end - start + 1 > MAX_NON_WORKING_RUN) for (let d = start; d <= end; d++) off.delete(d);
+  }
 }

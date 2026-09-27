@@ -46,12 +46,40 @@ describe("createRow", () => {
   });
 });
 
-describe("calendars without working days", () => {
+describe("calendars with long time off", () => {
   it("keeps scheduling and accepting commands when an assignee is off for years", () => {
     const longLeave = calendar({ timeOff: [{ id: "t", resourceId: "ana", startDate: "2026-01-01", endDate: "2040-01-01" }] });
     const state = project(task("a", { userStart: "2026-10-05", duration: 2, resourceId: "ana" }), task("b", { userStart: "2026-10-05" }));
     expect(datesOf(computeSchedule(state, longLeave), "a")).toEqual({ start: "2026-10-05", end: "2026-10-06" });
     expect(applyCommand(state, longLeave, { type: "updateTitle", id: "b", title: "B" })).toMatchObject({ ok: true });
+  });
+});
+
+describe("assignees with a stretch of time off longer than the scan limit", () => {
+  const leftCal = calendar({ timeOff: [{ id: "t", resourceId: "ana", startDate: "2020-01-01", endDate: "2045-12-31" }] });
+  const linked = project(
+    task("a", { userStart: "2026-10-05", duration: 3, resourceId: "ana" }), // Mon 5 – Wed 7
+    task("b", { userStart: "2026-10-05", resourceId: "ana", predecessorId: "a" }), // Thu 8
+  );
+
+  it("schedules long tasks quickly", () => {
+    const state = project(task("a", { userStart: "2026-10-05", duration: 3660, resourceId: "ana" }));
+    const started = Date.now();
+    const schedule = computeSchedule(state, leftCal);
+    const elapsed = Date.now() - started;
+    expect(schedule.get("a")?.span).not.toBeNull();
+    expect(elapsed).toBeLessThan(200);
+  });
+
+  it("records an overlap drag as a negative offset", () => {
+    const state = run(linked, leftCal, { type: "moveTask", id: "b", start: "2026-10-06" });
+    expect(taskIn(state, "b")).toMatchObject({ userStart: "2026-10-06", offset: -2 });
+    expect(datesOf(computeSchedule(state, leftCal), "b")?.start).toBe("2026-10-06");
+  });
+
+  it("resizes to the expected duration", () => {
+    const state = run(linked, leftCal, { type: "resizeTask", id: "a", edge: "end", date: "2026-10-11" });
+    expect(taskIn(state, "a").duration).toBe(5); // Mon 5 – Fri 9
   });
 });
 

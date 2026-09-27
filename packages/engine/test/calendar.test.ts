@@ -74,19 +74,36 @@ describe("Calendar input validation", () => {
     expect(() => cal.workingDaysBetween(d("2026-10-05"), d("2026-10-09") + 0.5, null)).toThrow(RangeError);
   });
 
-  it("treats a day as working when no working day exists nearby (long time off)", () => {
+  describe("non-working stretches longer than the scan limit", () => {
     const cal = new Calendar({
       workingWeekdays: MON_FRI,
-      holidays: [],
-      timeOff: [{ id: "t", resourceId: "ana", startDate: "2026-01-01", endDate: "2040-01-01" }],
+      holidays: [
+        { id: "long", name: "", startDate: "2050-01-01", endDate: "2064-12-31", appliesTo: "all" }, // 15 years
+        { id: "short", name: "", startDate: "2030-01-08", endDate: "2030-01-08", appliesTo: "all" },
+      ],
+      timeOff: [
+        { id: "left", resourceId: "ana", startDate: "2020-01-01", endDate: "2045-12-31" },
+        { id: "leave", resourceId: "rudy", startDate: "2026-10-05", endDate: "2026-10-16" }, // two weeks
+      ],
     });
-    expect(cal.snap(d("2026-10-10"), "ana")).toBe(d("2026-10-10"));
-    expect(cal.snapBack(d("2026-10-10"), "ana")).toBe(d("2025-12-31")); // found within range: no fallback
-    expect(cal.nextAfter(d("2026-10-05"), "ana")).toBe(d("2026-10-06"));
-    expect(cal.addWorkingDays(d("2026-10-05"), 3, "ana")).toBe(d("2026-10-08"));
-    expect(cal.addWorkingDays(d("2026-10-05"), -2, "ana")).toBe(d("2025-12-30"));
-    expect(cal.workingDaysBetween(d("2026-10-05"), d("2026-10-08"), "ana")).toBe(0);
-    expect(cal.snap(d("2026-10-10"), null)).toBe(d("2026-10-12"));
+
+    it("ignores a resource's stretch: its calendar falls back to the team calendar there", () => {
+      expect(cal.isWorkingDay(d("2030-01-07"), "ana")).toBe(true); // Monday
+      expect(cal.isWorkingDay(d("2030-01-05"), "ana")).toBe(false); // Saturday
+      expect(cal.isWorkingDay(d("2030-01-08"), "ana")).toBe(false); // team holiday still applies
+      expect(cal.snapBack(d("2030-01-05"), "ana")).toBe(d("2030-01-04"));
+      expect(cal.workingDaysBetween(d("2030-01-07"), d("2030-01-10"), "ana")).toBe(2);
+    });
+
+    it("ignores an all-team holiday stretch", () => {
+      expect(cal.isWorkingDay(d("2055-01-04"), null)).toBe(true); // Monday
+      expect(cal.isWorkingDay(d("2055-01-04"), "rudy")).toBe(true);
+    });
+
+    it("still applies normal time off", () => {
+      expect(cal.isWorkingDay(d("2026-10-07"), "rudy")).toBe(false);
+      expect(cal.addWorkingDays(d("2026-10-02"), 1, "rudy")).toBe(d("2026-10-19"));
+    });
   });
 
   it("skips multi-day time off that spans a weekend", () => {
