@@ -8,6 +8,7 @@ import { forbidden, HttpError } from "./errors";
 import { authRoutes } from "./routes/auth";
 import { setSessionCookie, type RouteContext } from "./routes/context";
 import { setupRoutes } from "./routes/setup";
+import { userRoutes } from "./routes/users";
 
 export interface AppOptions {
   db: Db;
@@ -61,5 +62,6 @@ export async function buildApp({ db, config, now, logger = false }: AppOptions):
   app.get("/api/health", async () => ({ ok: true }));
   setupRoutes(app, context);
   authRoutes(app, context);
+  userRoutes(app, context);
   return app;
 }

@@ -56,3 +56,23 @@ export const ADMIN = { email: "admin@example.com", name: "Admin", password: "cor
 export async function setupAdmin(app: FastifyInstance): Promise<string> {
   return sessionCookie(await app.inject({ method: "POST", url: "/api/setup", payload: ADMIN }));
 }
+
+/** Creates a user as admin, then logs in as them and changes the temporary password. */
+export async function createUser(
+  app: FastifyInstance,
+  adminCookie: string,
+  user: { email: string; name: string; role: "admin" | "editor" | "viewer" | "guest" },
+): Promise<{ id: string; cookie: string; password: string }> {
+  const created = await app.inject({ method: "POST", url: "/api/users", headers: { cookie: adminCookie }, payload: user });
+  const { user: dto, temporaryPassword } = created.json<{ user: { id: string }; temporaryPassword: string }>();
+  const login = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: user.email, password: temporaryPassword } });
+  const cookie = sessionCookie(login);
+  const password = "a brand new password";
+  await app.inject({
+    method: "POST",
+    url: "/api/auth/password",
+    headers: { cookie },
+    payload: { currentPassword: temporaryPassword, newPassword: password },
+  });
+  return { id: dto.id, cookie, password };
+}

@@ -1,0 +1,74 @@
+import { CreateUserBody, UpdateUserBody } from "@ganttlines/protocol";
+import type { FastifyInstance } from "fastify";
+import { requireUser } from "../auth/guard";
+import { generateTemporaryPassword, hashPassword } from "../auth/passwords";
+import { toUserDto } from "../dto";
+import { conflict, notFound } from "../errors";
+import { createLinkedResource } from "../resources";
+import { parseBody, parseId } from "../validation";
+import type { RouteContext } from "./context";
+
+/** Admin-only user management. New users get a temporary password they must change. */
+export function userRoutes(app: FastifyInstance, { db, sessions }: RouteContext): void {
+  app.get("/api/users", async (request) => {
+    requireUser(request, "admin");
+    const users = await db.user.findMany({ orderBy: { createdAt: "asc" } });
+    return { users: users.map(toUserDto) };
+  });
+
+  app.post("/api/users", async (request, reply) => {
+    requireUser(request, "admin");
+    const body = parseBody(CreateUserBody, request.body);
+    if (await db.user.findUnique({ where: { email: body.email } })) throw conflict("A user with that email already exists");
+    const temporaryPassword = generateTemporaryPassword();
+    const passwordHash = await hashPassword(temporaryPassword);
+    const user = await db.$transaction(async (tx) => {
+      const created = await tx.user.create({
+        data: { email: body.email, name: body.name, role: body.role, passwordHash, mustChangePassword: true },
+      });
+      if (body.createResource) await createLinkedResource(tx, created.id, created.name);
+      return created;
+    });
+    return reply.status(201).send({ user: toUserDto(user), temporaryPassword });
+  });
+
+  app.patch<{ Params: { id: string } }>("/api/users/:id", async (request) => {
+    requireUser(request, "admin");
+    const id = parseId(request.params.id, "User");
+    const body = parseBody(UpdateUserBody, request.body);
+    const user = await db.user.findUnique({ where: { id } });
+    if (!user) throw notFound("User");
+    if (user.role === "admin" && body.role && body.role !== "admin") await assertAnotherAdmin(id);
+    const updated = await db.user.update({
+      where: { id },
+      data: { ...(body.name ? { name: body.name } : {}), ...(body.role ? { role: body.role } : {}) },
+    });
+    return { user: toUserDto(updated) };
+  });
+
+  app.post<{ Params: { id: string } }>("/api/users/:id/reset-password", async (request) => {
+    requireUser(request, "admin");
+    const id = parseId(request.params.id, "User");
+    if (!(await db.user.findUnique({ where: { id } }))) throw notFound("User");
+    const temporaryPassword = generateTemporaryPassword();
+    await db.user.update({ where: { id }, data: { passwordHash: await hashPassword(temporaryPassword), mustChangePassword: true } });
+    await sessions.revokeAllForUser(id);
+    return { temporaryPassword };
+  });
+
+  app.delete<{ Params: { id: string } }>("/api/users/:id", async (request, reply) => {
+    const admin = requireUser(request, "admin");
+    const id = parseId(request.params.id, "User");
+    if (id === admin.id) throw conflict("You cannot delete your own account");
+    const user = await db.user.findUnique({ where: { id } });
+    if (!user) throw notFound("User");
+    if (user.role === "admin") await assertAnotherAdmin(id);
+    await db.user.delete({ where: { id } });
+    return reply.status(204).send();
+  });
+
+  async function assertAnotherAdmin(exceptId: string): Promise<void> {
+    const others = await db.user.count({ where: { role: "admin", NOT: { id: exceptId } } });
+    if (others === 0) throw conflict("There must always be at least one admin");
+  }
+}
