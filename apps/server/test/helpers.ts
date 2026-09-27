@@ -1,0 +1,58 @@
+import { createDb, type Db } from "@ganttlines/db";
+import type { FastifyInstance, LightMyRequestResponse } from "fastify";
+import { afterAll, beforeEach, inject } from "vitest";
+import { buildApp } from "../src/app";
+import type { Config } from "../src/config";
+
+export const PUBLIC_URL = "http://localhost:3000";
+
+export const testConfig: Config = {
+  databaseUrl: "",
+  sessionSecret: "test-secret-test-secret-test-secret-000",
+  publicUrl: new URL(PUBLIC_URL),
+  port: 3000,
+  bind: "127.0.0.1",
+};
+
+export interface TestContext {
+  db: Db;
+  app: FastifyInstance;
+  /** Mutable clock used by the app; advance it to test session expiry. */
+  clock: { now: Date };
+}
+
+/** One app + DB client per test file; every table is emptied before each test. */
+export function useTestApp(): TestContext {
+  const context = {} as TestContext;
+  const db = createDb(inject("databaseUrl"));
+  context.db = db;
+  context.clock = { now: new Date("2026-10-01T09:00:00Z") };
+
+  beforeEach(async () => {
+    await db.$executeRawUnsafe(`TRUNCATE "Row", "Project", "Session", "Resource", "User" CASCADE`);
+    context.clock.now = new Date("2026-10-01T09:00:00Z");
+    await context.app?.close();
+    context.app = await buildApp({ db, config: testConfig, now: () => context.clock.now });
+  });
+
+  afterAll(async () => {
+    await context.app?.close();
+    await db.$disconnect();
+  });
+
+  return context;
+}
+
+/** Extracts the session cookie ("gp_session=…") from a response, for use in later requests. */
+export function sessionCookie(response: LightMyRequestResponse): string {
+  const cookie = response.cookies.find((c) => c.name === "gp_session");
+  if (!cookie) throw new Error(`No session cookie in response (${response.statusCode}: ${response.body})`);
+  return `gp_session=${cookie.value}`;
+}
+
+export const ADMIN = { email: "admin@example.com", name: "Admin", password: "correct horse battery" };
+
+/** Completes first-run setup and returns the admin's cookie. */
+export async function setupAdmin(app: FastifyInstance): Promise<string> {
+  return sessionCookie(await app.inject({ method: "POST", url: "/api/setup", payload: ADMIN }));
+}
