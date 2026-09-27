@@ -76,6 +76,12 @@ class Execution {
   }
 
   run(command: Command): ProjectState {
+    this.apply(command);
+    this.settleFormerParents();
+    return this.result();
+  }
+
+  private apply(command: Command): ProjectState {
     switch (command.type) {
       case "createRow":
         return this.createRow(command);
@@ -303,6 +309,25 @@ class Execution {
   }
 
   // ── helpers ─────────────────────────────────────────────────────────────
+
+  /**
+   * A task that stopped being a parent (its last subtask was deleted or moved away) keeps
+   * the dates it was shown with, instead of reverting to its stale own start and duration.
+   */
+  private settleFormerParents(): void {
+    const after = buildTree(this.result());
+    for (const before of Object.values(this.state.rows)) {
+      const current = this.rows[before.id];
+      if (current?.kind !== "task" || !isParentTask(this.tree, before) || isParentTask(after, current)) continue;
+      const span = this.spanOf(before.id);
+      if (!span) continue;
+      let duration = 0;
+      for (let day = span.start; day <= span.end && duration < MAX_DURATION; day++) {
+        if (this.calendar.isWorkingDay(day, current.resourceId)) duration++;
+      }
+      this.patch(current, { userStart: fromDay(span.start), duration: Math.max(1, duration) });
+    }
+  }
 
   /**
    * Stored inputs for putting a leaf task at `target`: never before the constraints inherited

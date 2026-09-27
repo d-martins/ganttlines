@@ -473,6 +473,26 @@ describe("tree commands", () => {
     expect(orderOf(state, "s")).toEqual(["a", "c"]);
   });
 
+  it("keeps a task where it was shown when its last subtask is deleted", () => {
+    const state = run(
+      project(task("p", { userStart: "2026-09-01" }), task("c", { parentId: "p", userStart: "2026-10-05", duration: 3 })),
+      cal,
+      { type: "deleteRows", ids: ["c"] },
+    );
+    expect(taskIn(state, "p")).toMatchObject({ userStart: "2026-10-05", duration: 3 });
+    expect(datesIn(state, "p")).toEqual({ start: "2026-10-05", end: "2026-10-07" });
+  });
+
+  it("keeps a task where it was shown when its last subtask is outdented", () => {
+    const state = run(
+      project(task("p"), task("c", { parentId: "p", userStart: "2026-10-08", duration: 3 })), // Thu 8 – Mon 12
+      cal,
+      { type: "outdent", id: "c" },
+    );
+    expect(taskIn(state, "p")).toMatchObject({ userStart: "2026-10-08", duration: 3 });
+    expect(datesIn(state, "p")).toEqual({ start: "2026-10-08", end: "2026-10-12" });
+  });
+
   it("duplicates a task right after the original", () => {
     const state = run(base, cal, { type: "duplicateTask", id: "a", newId: "a2" });
     expect(orderOf(state, "s")).toEqual(["a", "a2", "b", "c"]);
