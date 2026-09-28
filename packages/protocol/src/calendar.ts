@@ -5,6 +5,9 @@ import { LIMITS } from "./api";
 /** Longest single holiday / time-off entry (longer absences: mark the team member inactive). */
 export const MAX_RANGE_DAYS = 366;
 
+/** Upper bounds on stored calendar entries (the engine expands them into day sets). */
+export const CALENDAR_LIMITS = { holidays: 1_000, timeOff: 5_000 } as const;
+
 const date = z.iso.date().refine((value) => value >= MIN_DATE && value <= MAX_DATE, `Dates must be between ${MIN_DATE} and ${MAX_DATE}`);
 const name = z.string().trim().min(1).max(LIMITS.nameMax);
 const color = z.string().regex(/^#[0-9a-f]{6}$/i, "Colors are #rrggbb");

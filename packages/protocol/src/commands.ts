@@ -45,6 +45,9 @@ export const CommandSchema = z.discriminatedUnion("type", [
 /** Body of POST /api/projects/:id/commands. `commandId` makes retries idempotent. */
 export const ProjectCommandBody = z.strictObject({ commandId: id, command: CommandSchema });
 
+/** Body of POST /api/projects/:id/undo and /redo; `commandId` identifies the undo/redo itself. */
+export const UndoBody = z.strictObject({ commandId: id });
+
 /** Parsed wire command → engine command (drops keys zod reports as explicitly undefined). */
 export function toEngineCommand(parsed: z.output<typeof CommandSchema>): Command {
   return Object.fromEntries(Object.entries(parsed).filter(([, value]) => value !== undefined)) as Command;
