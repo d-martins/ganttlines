@@ -41,6 +41,16 @@ describe("projects", () => {
     expect((await t.app.inject({ url: "/api/projects", headers: { cookie: guest.cookie } })).json().projects).toEqual([]);
   });
 
+  it("does not let viewers rename projects, nor guests read project state", async () => {
+    const admin = await setupAdmin(t.app);
+    const project = (await t.app.inject({ method: "POST", url: "/api/projects", headers: { cookie: admin }, payload: { name: "Launch" } })).json().project;
+    const viewer = await createUser(t.app, admin, { email: "v@example.com", name: "Vi", role: "viewer" });
+    const guest = await createUser(t.app, admin, { email: "g@example.com", name: "Gu", role: "guest" });
+    const rename = await t.app.inject({ method: "PATCH", url: `/api/projects/${project.id}`, headers: { cookie: viewer.cookie }, payload: { name: "X" } });
+    expect(rename.statusCode).toBe(403);
+    expect((await t.app.inject({ url: `/api/projects/${project.id}/state`, headers: { cookie: guest.cookie } })).statusCode).toBe(403);
+  });
+
   it("loads a project's full state as engine rows", async () => {
     const admin = await setupAdmin(t.app);
     const project = (await t.app.inject({ method: "POST", url: "/api/projects", headers: { cookie: admin }, payload: { name: "Launch" } })).json().project;
@@ -79,6 +89,11 @@ describe("projects", () => {
 describe("findTreeProblem", () => {
   it("accepts a valid tree", () => {
     expect(findTreeProblem(rows)).toBeNull();
+  });
+
+  it("detects missing predecessors", () => {
+    const [, task] = rows as [Row, Row];
+    expect(findTreeProblem([rows[0]!, { ...task, predecessorId: "33333333-3333-4333-8333-333333333333" } as Row])).toMatch(/missing predecessor/);
   });
 
   it("detects missing parents, parent loops and sections inside tasks", () => {

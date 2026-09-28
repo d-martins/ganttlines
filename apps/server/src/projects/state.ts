@@ -1,7 +1,5 @@
-import { toEngineRow, type Db } from "@ganttlines/db";
-import type { Row } from "@ganttlines/engine";
-import type { ProjectStateDto } from "@ganttlines/protocol";
-import { toProjectDto } from "../dto";
+import { toEngineRow, type Db, type Project } from "@ganttlines/db";
+import type { ProjectState, Row } from "@ganttlines/engine";
 import { HttpError, notFound } from "../errors";
 
 export class CorruptProjectError extends HttpError {
@@ -10,8 +8,17 @@ export class CorruptProjectError extends HttpError {
   }
 }
 
-export async function loadProjectState(db: Db, projectId: string): Promise<ProjectStateDto> {
-  const project = await db.project.findUnique({ where: { id: projectId }, include: { rows: true } });
+export interface StoredProject {
+  meta: Project;
+  state: ProjectState;
+}
+
+/** Reads a project and its rows in one consistent snapshot, refusing corrupted data. */
+export async function readProject(db: Db, projectId: string): Promise<StoredProject> {
+  const project = await db.$transaction(
+    (tx) => tx.project.findUnique({ where: { id: projectId }, include: { rows: true } }),
+    { isolationLevel: "RepeatableRead" },
+  );
   if (!project) throw notFound("Project");
   let rows: Row[];
   try {
@@ -22,13 +29,19 @@ export async function loadProjectState(db: Db, projectId: string): Promise<Proje
   const problem = findTreeProblem(rows);
   if (problem) throw new CorruptProjectError(projectId, problem);
   const { rows: _rows, ...meta } = project;
-  return { project: toProjectDto(meta), rows };
+  return { meta, state: { rows: Object.fromEntries(rows.map((row) => [row.id, row])) } };
 }
 
-/** Parent links must point to rows of the same project and never loop; sections never sit inside tasks. */
+/**
+ * Parent links must point to rows of the same project and never loop; sections never sit inside
+ * tasks; predecessors must be tasks of the same project.
+ */
 export function findTreeProblem(rows: readonly Row[]): string | null {
   const byId = new Map(rows.map((row) => [row.id, row]));
   for (const row of rows) {
+    if (row.kind === "task" && row.predecessorId !== null && byId.get(row.predecessorId)?.kind !== "task") {
+      return `task ${row.id} has a missing predecessor ${row.predecessorId}`;
+    }
     if (row.parentId === null) continue;
     const parent = byId.get(row.parentId);
     if (!parent) return `row ${row.id} has a missing parent ${row.parentId}`;

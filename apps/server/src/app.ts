@@ -6,8 +6,10 @@ import { SESSION_COOKIE, SessionStore } from "./auth/sessions";
 import { InstanceService } from "./calendar/instance-service";
 import type { Config } from "./config";
 import { forbidden, HttpError } from "./errors";
+import { ProjectService } from "./projects/project-service";
 import { authRoutes } from "./routes/auth";
 import { calendarRoutes } from "./routes/calendar";
+import { commandRoutes } from "./routes/commands";
 import { setSessionCookie, type RouteContext } from "./routes/context";
 import { projectRoutes } from "./routes/projects";
 import { setupRoutes } from "./routes/setup";
@@ -37,6 +39,7 @@ export async function buildApp({ db, config, now, logger = false }: AppOptions):
     sessions: new SessionStore(db, config.sessionSecret, now),
     loginLimiter: new LoginLimiter(now ? () => now().getTime() : undefined),
     instance,
+    projects: new ProjectService(db, instance),
   };
 
   // Expired sessions are also deleted when presented; this catches the ones that never come back.
@@ -87,6 +90,7 @@ export async function buildApp({ db, config, now, logger = false }: AppOptions):
   authRoutes(app, context);
   userRoutes(app, context);
   projectRoutes(app, context);
+  commandRoutes(app, context);
   calendarRoutes(app, context);
   return app;
 }

@@ -4,6 +4,7 @@ import type { LoginLimiter } from "../auth/login-limiter";
 import { SESSION_COOKIE, type SessionStore } from "../auth/sessions";
 import type { InstanceService } from "../calendar/instance-service";
 import type { Config } from "../config";
+import type { ProjectService } from "../projects/project-service";
 
 /** Shared dependencies handed to every route module. */
 export interface RouteContext {
@@ -12,6 +13,7 @@ export interface RouteContext {
   sessions: SessionStore;
   loginLimiter: LoginLimiter;
   instance: InstanceService;
+  projects: ProjectService;
 }
 
 export function setSessionCookie(reply: FastifyReply, config: Config, token: string, expires: Date): void {
