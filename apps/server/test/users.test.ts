@@ -106,6 +106,18 @@ describe("user management (admin)", () => {
     expect(statuses.sort()).toEqual([201, 409]);
   });
 
+  it("refuses to delete yourself or the last admin", async () => {
+    const admin = await setupAdmin(t.app);
+    const me = (await t.app.inject({ url: "/api/auth/me", headers: { cookie: admin } })).json().user;
+    expect((await t.app.inject({ method: "DELETE", url: `/api/users/${me.id}`, headers: { cookie: admin } })).statusCode).toBe(409);
+    const second = await createUser(t.app, admin, { email: "second@example.com", name: "Second", role: "admin" });
+    await t.app.inject({ method: "PATCH", url: `/api/users/${second.id}`, headers: { cookie: admin }, payload: { role: "editor" } });
+    const other = await createUser(t.app, admin, { email: "third@example.com", name: "Third", role: "admin" });
+    expect((await t.app.inject({ method: "DELETE", url: `/api/users/${me.id}`, headers: { cookie: other.cookie } })).statusCode).toBe(204);
+    const lastAdmin = await t.app.inject({ method: "DELETE", url: `/api/users/${other.id}`, headers: { cookie: other.cookie } });
+    expect(lastAdmin.statusCode).toBe(409);
+  });
+
   it("resets passwords, signing the user out everywhere", async () => {
     const admin = await setupAdmin(t.app);
     const rudy = await createUser(t.app, admin, { email: "rudy@example.com", name: "Rudy", role: "editor" });

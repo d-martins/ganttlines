@@ -47,6 +47,12 @@ export class SessionStore {
     return { user: session.user, refreshedUntil: expiresAt };
   }
 
+  /** Removes sessions that expired without being presented again; returns how many. */
+  async deleteExpired(): Promise<number> {
+    const { count } = await this.db.session.deleteMany({ where: { expiresAt: { lte: this.now() } } });
+    return count;
+  }
+
   async revoke(token: string): Promise<void> {
     await this.db.session.deleteMany({ where: { id: this.digest(token) } });
   }

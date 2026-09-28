@@ -19,6 +19,8 @@ export interface AppOptions {
   logger?: boolean;
 }
 
+const SESSION_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+
 export async function buildApp({ db, config, now, logger = false }: AppOptions): Promise<FastifyInstance> {
   const hops = config.trustProxy;
   // A hop count N means "trust the N closest proxies" (proxy-addr trust function: hop 0 = direct peer).
@@ -32,6 +34,13 @@ export async function buildApp({ db, config, now, logger = false }: AppOptions):
     sessions: new SessionStore(db, config.sessionSecret, now),
     loginLimiter: new LoginLimiter(now ? () => now().getTime() : undefined),
   };
+
+  // Expired sessions are also deleted when presented; this catches the ones that never come back.
+  const cleanup = setInterval(() => {
+    context.sessions.deleteExpired().catch((error: unknown) => app.log.error(error));
+  }, SESSION_CLEANUP_INTERVAL_MS);
+  cleanup.unref();
+  app.addHook("onClose", async () => clearInterval(cleanup));
 
   app.decorateRequest("user", null);
   app.decorateRequest("sessionToken", null);

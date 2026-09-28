@@ -124,6 +124,36 @@ describe("login, logout and sessions", () => {
     expect(await t.db.session.count()).toBe(0);
   });
 
+  it("deletes sessions that expired without coming back", async () => {
+    await setupAdmin(t.app);
+    const { SessionStore } = await import("../src/auth/sessions");
+    const store = new SessionStore(t.db, "x".repeat(32), () => new Date("2026-11-15T00:00:00Z"));
+    expect(await store.deleteExpired()).toBe(1);
+    expect(await t.db.session.count()).toBe(0);
+  });
+
+  it("lets users who must change their password still log out", async () => {
+    const admin = await setupAdmin(t.app);
+    const created = (
+      await t.app.inject({ method: "POST", url: "/api/users", headers: { cookie: admin }, payload: { email: "r@example.com", name: "R", role: "editor" } })
+    ).json();
+    const cookie = sessionCookie(
+      await t.app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "r@example.com", password: created.temporaryPassword } }),
+    );
+    expect((await t.app.inject({ method: "POST", url: "/api/auth/logout", headers: { cookie } })).statusCode).toBe(204);
+  });
+
+  it("accepts same-origin state-changing requests", async () => {
+    await setupAdmin(t.app);
+    const response = await t.app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      headers: { origin: "http://localhost:3000" },
+      payload: { email: ADMIN.email, password: ADMIN.password },
+    });
+    expect(response.statusCode).toBe(200);
+  });
+
   it("rejects cross-origin state-changing requests", async () => {
     await setupAdmin(t.app);
     const response = await t.app.inject({
