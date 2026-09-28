@@ -2,6 +2,7 @@ import { CreateUserBody, UpdateUserBody } from "@ganttlines/protocol";
 import type { Prisma } from "@ganttlines/db";
 import type { FastifyInstance } from "fastify";
 import { actorOf } from "../actor";
+import { insertResource } from "../calendar/instance-service";
 import { requireUser } from "../auth/guard";
 import { generateTemporaryPassword, hashPassword } from "../auth/passwords";
 import { toUserDto } from "../dto";
@@ -23,10 +24,15 @@ export function userRoutes(app: FastifyInstance, { db, sessions, instance }: Rou
     if (await db.user.findUnique({ where: { email: body.email } })) throw conflict("A user with that email already exists");
     const temporaryPassword = generateTemporaryPassword();
     const passwordHash = await hashPassword(temporaryPassword);
-    const user = await db.user.create({
-      data: { email: body.email, name: body.name, role: body.role, passwordHash, mustChangePassword: true },
-    });
-    if (body.createResource) await instance.createResource(actorOf(admin), { name: user.name, userId: user.id });
+    const data = { email: body.email, name: body.name, role: body.role, passwordHash, mustChangePassword: true };
+    // With a team member, both are created in one instance mutation (so neither exists without the other).
+    const user = body.createResource
+      ? await instance.mutate(actorOf(admin), "createUser", { email: body.email }, async (tx) => {
+          const created = await tx.user.create({ data });
+          await insertResource(tx, { name: created.name, userId: created.id });
+          return created;
+        })
+      : await db.user.create({ data });
     return reply.status(201).send({ user: toUserDto(user), temporaryPassword });
   });
 

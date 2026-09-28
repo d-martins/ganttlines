@@ -1,4 +1,4 @@
-import { ProjectCommandBody, toEngineCommand } from "@ganttlines/protocol";
+import { ProjectCommandBody, toEngineCommand, UndoBody } from "@ganttlines/protocol";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { actorOf } from "../actor";
@@ -9,7 +9,7 @@ import type { RouteContext } from "./context";
 
 const Since = z.coerce.number().int().min(0);
 
-/** Row commands (editors) and catch-up of applied changes (viewers). */
+/** Row commands, undo/redo (editors) and catch-up of applied changes (viewers). */
 export function commandRoutes(app: FastifyInstance, { projects }: RouteContext): void {
   app.post<{ Params: { id: string } }>("/api/projects/:id/commands", async (request) => {
     const user = requireUser(request, "editor");
@@ -17,6 +17,15 @@ export function commandRoutes(app: FastifyInstance, { projects }: RouteContext):
     const body = parseBody(ProjectCommandBody, request.body);
     return projects.apply(projectId, actorOf(user), body.commandId, toEngineCommand(body.command));
   });
+
+  for (const direction of ["undo", "redo"] as const) {
+    app.post<{ Params: { id: string } }>(`/api/projects/:id/${direction}`, async (request) => {
+      const user = requireUser(request, "editor");
+      const projectId = parseId(request.params.id, "Project");
+      const { commandId } = parseBody(UndoBody, request.body);
+      return projects[direction](projectId, actorOf(user), commandId);
+    });
+  }
 
   app.get<{ Params: { id: string }; Querystring: { since?: string } }>("/api/projects/:id/changes", async (request) => {
     requireUser(request, "viewer");

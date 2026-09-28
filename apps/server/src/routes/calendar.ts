@@ -1,9 +1,16 @@
 import type { Prisma } from "@ganttlines/db";
-import { CreateResourceBody, HolidayBody, TimeOffBody, UpdateResourceBody, WorkingWeekdaysBody } from "@ganttlines/protocol";
+import {
+  CALENDAR_LIMITS,
+  CreateResourceBody,
+  HolidayBody,
+  TimeOffBody,
+  UpdateResourceBody,
+  WorkingWeekdaysBody,
+} from "@ganttlines/protocol";
 import type { FastifyInstance } from "fastify";
 import { actorOf } from "../actor";
 import { requireUser } from "../auth/guard";
-import { badRequest, notFound } from "../errors";
+import { badRequest, conflict, notFound } from "../errors";
 import { parseBody, parseId } from "../validation";
 import type { RouteContext } from "./context";
 
@@ -65,6 +72,7 @@ export function calendarRoutes(app: FastifyInstance, { instance }: RouteContext)
     const user = requireUser(request, "editor");
     const body = parseBody(HolidayBody, request.body);
     const holiday = await instance.mutate(actorOf(user), "createHoliday", body, async (tx) => {
+      if ((await tx.holiday.count()) >= CALENDAR_LIMITS.holidays) throw conflict(`At most ${CALENDAR_LIMITS.holidays} holidays`);
       await assertResourcesExist(tx, body.appliesTo);
       return tx.holiday.create({ data: holidayColumns(body) });
     });
@@ -97,6 +105,7 @@ export function calendarRoutes(app: FastifyInstance, { instance }: RouteContext)
     const user = requireUser(request, "editor");
     const body = parseBody(TimeOffBody, request.body);
     const entry = await instance.mutate(actorOf(user), "createTimeOff", body, async (tx) => {
+      if ((await tx.timeOff.count()) >= CALENDAR_LIMITS.timeOff) throw conflict(`At most ${CALENDAR_LIMITS.timeOff} time-off entries`);
       await assertResourcesExist(tx, [body.resourceId]);
       return tx.timeOff.create({ data: body });
     });

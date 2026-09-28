@@ -19,6 +19,13 @@ describe("first-run setup", () => {
     expect(await t.db.resource.count({ where: { user: { email: ADMIN.email } } })).toBe(1);
   });
 
+  it("records setup as one instance change that creates the admin and their team member", async () => {
+    await setupAdmin(t.app);
+    expect(await t.db.commandLog.findMany({ where: { projectId: null }, select: { name: true, actorLabel: true } })).toEqual([
+      { name: "setup", actorLabel: ADMIN.name },
+    ]);
+  });
+
   it("can only run once", async () => {
     await setupAdmin(t.app);
     const again = await t.app.inject({ method: "POST", url: "/api/setup", payload: { ...ADMIN, email: "x@example.com" } });

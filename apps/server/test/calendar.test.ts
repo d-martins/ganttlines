@@ -125,6 +125,20 @@ describe("team calendar", () => {
     expect(responses.map((r) => r.statusCode)).toEqual([400, 400, 400, 400]);
   });
 
+  it("caps the number of holidays", async () => {
+    const { editor } = await asEditor();
+    await t.db.holiday.createMany({
+      data: Array.from({ length: 1000 }, (_, i) => ({ name: `H${i}`, startDate: "2030-01-01", endDate: "2030-01-01", appliesToAll: true, resourceIds: [] })),
+    });
+    const response = await t.app.inject({
+      method: "POST",
+      url: "/api/holidays",
+      headers: { cookie: editor },
+      payload: { name: "One more", startDate: "2030-01-02", endDate: "2030-01-02", appliesTo: "all" },
+    });
+    expect(response.statusCode).toBe(409);
+  });
+
   it("bumps the instance version and logs every change", async () => {
     const { editor } = await asEditor();
     const before = (await t.app.inject({ url: "/api/calendar", headers: { cookie: editor } })).json().instanceVersion;
