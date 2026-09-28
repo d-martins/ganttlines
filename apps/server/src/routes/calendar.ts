@@ -10,6 +10,7 @@ import {
 import type { FastifyInstance } from "fastify";
 import { actorOf } from "../actor";
 import { requireUser } from "../auth/guard";
+import { requireInstanceRead } from "../auth/request-access";
 import { badRequest, conflict, notFound } from "../errors";
 import { parseBody, parseId } from "../validation";
 import type { RouteContext } from "./context";
@@ -20,14 +21,15 @@ type Tx = Prisma.TransactionClient;
  * Team members and the team calendar. Editors manage people, holidays and time off; only admins
  * change the working weekdays. Every change bumps the instance version (see InstanceService).
  */
-export function calendarRoutes(app: FastifyInstance, { instance }: RouteContext): void {
+export function calendarRoutes(app: FastifyInstance, context: RouteContext): void {
+  const { instance } = context;
   app.get("/api/calendar", async (request) => {
-    requireUser(request, "viewer");
+    await requireInstanceRead(request, context);
     return (await instance.current()).dto;
   });
 
   app.get("/api/resources", async (request) => {
-    requireUser(request, "viewer");
+    await requireInstanceRead(request, context);
     return { resources: await instance.resources() };
   });
 

@@ -1,8 +1,9 @@
 import { ClientMessage, toEngineCommand } from "@ganttlines/protocol";
 import type { FastifyInstance } from "fastify";
 import type { RawData } from "ws";
-import { actorOf } from "../actor";
+import type { ProjectAccess } from "../auth/access";
 import { requireUser } from "../auth/guard";
+import { credentialsOf, requireInstanceRead } from "../auth/request-access";
 import { HttpError } from "../errors";
 import type { Connection } from "../realtime/hub";
 import type { RouteContext } from "./context";
@@ -18,7 +19,8 @@ const CLOSE_POLICY_VIOLATION = 1008;
  * The live-editing WebSocket. Signed-in viewers (and above) join one project at a time, get
  * caught up, then receive every patch; editors send commands and undo/redo through it.
  */
-export function realtimeRoutes(app: FastifyInstance, { projects, instance, hub }: RouteContext): void {
+export function realtimeRoutes(app: FastifyInstance, context: RouteContext): void {
+  const { projects, instance, hub, access } = context;
   const announcePresence = (projectId: string) => {
     hub.broadcast(projectId, { type: "presence", projectId, viewers: hub.viewers(projectId) });
     if (hub.roomSize(projectId) === 0) {
@@ -51,6 +53,13 @@ export function realtimeRoutes(app: FastifyInstance, { projects, instance, hub }
 
     if (message.type === "join") {
       leave(connection);
+      const granted = await access.resolve(connection.credentials, message.projectId).catch((error: unknown) => error);
+      if (!isAccess(granted)) {
+        const text = granted instanceof HttpError && granted.status < 500 ? granted.message : "Could not open the project";
+        return hub.send(connection, { type: "error", message: text });
+      }
+      connection.viewer = { id: granted.key, name: granted.actor.label };
+      connection.linkId = granted.linkId;
       // Join first so no live patch is missed; clients ignore versions they already have.
       connection.projectId = message.projectId;
       try {
@@ -80,9 +89,11 @@ export function realtimeRoutes(app: FastifyInstance, { projects, instance, hub }
     const projectId = connection.projectId;
     const reject = (error: string, text: string) => hub.send(connection, { type: "reject", commandId: message.commandId, error, message: text });
     if (!projectId) return reject("invalid", "Join a project first");
-    if (connection.user.role !== "editor" && connection.user.role !== "admin") return reject("forbidden", "You can only view this project");
+    // Re-checked for every message: a link's collaboration setting can change while connected.
+    const granted = await access.resolve(connection.credentials, projectId).catch((error: unknown) => error);
+    if (!isAccess(granted) || !granted.canEdit) return reject("forbidden", "You can only view this project");
     try {
-      const actor = actorOf(connection.user);
+      const actor = granted.actor;
       if (message.type === "command") {
         const result = await projects.apply(projectId, actor, message.commandId, toEngineCommand(message.command));
         hub.send(connection, { type: "ack", commandId: message.commandId, version: result.version });
@@ -102,14 +113,19 @@ export function realtimeRoutes(app: FastifyInstance, { projects, instance, hub }
     {
       websocket: true,
       preValidation: async (request) => {
-        requireUser(request, "viewer");
+        const share = shareTokenOf(request.query);
+        if (share) await requireInstanceRead(request, context, share);
+        else requireUser(request, "viewer");
       },
     },
     (socket, request) => {
+      const share = shareTokenOf(request.query);
       const connection: Connection = {
         socket,
-        user: request.user!,
+        credentials: credentialsOf(request, access, share),
         sessionToken: request.sessionToken,
+        linkId: null,
+        viewer: null,
         projectId: null,
         closed: false,
         pending: 0,
@@ -132,4 +148,13 @@ export function realtimeRoutes(app: FastifyInstance, { projects, instance, hub }
       });
     },
   );
+}
+
+function shareTokenOf(query: unknown): string | null {
+  const share = (query as { share?: unknown } | null)?.share;
+  return typeof share === "string" && share.length > 0 ? share : null;
+}
+
+function isAccess(value: unknown): value is ProjectAccess {
+  return typeof value === "object" && value !== null && "canEdit" in value;
 }

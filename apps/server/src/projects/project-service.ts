@@ -2,7 +2,7 @@ import { Prisma, toDbColumns, type Db, type Project } from "@ganttlines/db";
 import { applyCommand, diffRows, hasCycle, type Command, type ProjectState, type Row, type RowChange } from "@ganttlines/engine";
 import type { ChangesDto, CommandResultDto, ProjectDto, ProjectStateDto } from "@ganttlines/protocol";
 import { createHash } from "node:crypto";
-import type { Actor } from "../actor";
+import { actorKey, type Actor } from "../actor";
 import type { InstanceService } from "../calendar/instance-service";
 import { toProjectDto } from "../dto";
 import { conflict, HttpError } from "../errors";
@@ -85,7 +85,8 @@ export class ProjectService {
         if (!result.ok) throw new HttpError(422, result.reason, result.message);
         if (result.changes.length === 0) return { version: stored.meta.version, changes: [] };
         const applied = await this.commit(stored, actor, commandId, command.type, command, result.state, result.changes);
-        if (actor.userId) this.undoStacks.pushCommand(projectId, actor.userId, commandId);
+        const key = actorKey(actor);
+        if (key) this.undoStacks.pushCommand(projectId, key, commandId);
         return applied;
       });
     });
@@ -142,12 +143,12 @@ export class ProjectService {
 
   private revert(projectId: string, actor: Actor, commandId: string, direction: "undo" | "redo"): Promise<UndoResultDto> {
     return this.run(projectId, async (stored) => {
-      const userId = actor.userId;
-      if (!userId) throw new HttpError(422, "invalid", "Undo needs a signed-in user");
+      const userId = actorKey(actor);
+      if (!userId) throw new HttpError(422, "invalid", "Undo needs a known user or visitor");
       // A retried undo/redo (same commandId) returns its first outcome instead of reverting another change.
-      const digest = digestOf({ direction, userId });
+      const digest = digestOf({ direction, by: userId });
       const previous = await this.previousOutcome(projectId, commandId, digest, (logged) =>
-        digestOf({ direction: logged.name, userId: logged.actorUserId }),
+        digestOf({ direction: logged.name, by: (logged.payload as { by?: unknown } | null)?.by }),
       );
       if (previous) return { skipped: 0, ...previous };
       return this.remember(projectId, commandId, digest, async () => {
@@ -170,7 +171,7 @@ export class ProjectService {
         }
         const changes = diffRows(stored.state, state);
         if (changes.length === 0) throw discard(new HttpError(409, "conflict", `Nothing left to ${direction}: it was all changed since`));
-        const result = await this.commit(stored, actor, commandId, direction, { target, skipped }, state, changes);
+        const result = await this.commit(stored, actor, commandId, direction, { target, skipped, by: userId }, state, changes);
         this.undoStacks.pop(direction, projectId, userId);
         if (direction === "undo") this.undoStacks.pushUndone(projectId, userId, target);
         else this.undoStacks.pushRedone(projectId, userId, target);

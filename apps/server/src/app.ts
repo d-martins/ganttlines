@@ -2,6 +2,7 @@ import cookie from "@fastify/cookie";
 import websocket from "@fastify/websocket";
 import { Prisma, type Db } from "@ganttlines/db";
 import Fastify, { type FastifyInstance } from "fastify";
+import { AccessService } from "./auth/access";
 import { LoginLimiter } from "./auth/login-limiter";
 import { SESSION_COOKIE, SessionStore } from "./auth/sessions";
 import { InstanceService } from "./calendar/instance-service";
@@ -16,6 +17,7 @@ import { setSessionCookie, type RouteContext } from "./routes/context";
 import { projectRoutes } from "./routes/projects";
 import { realtimeRoutes } from "./routes/realtime";
 import { setupRoutes } from "./routes/setup";
+import { sharingRoutes } from "./routes/sharing";
 import { userRoutes } from "./routes/users";
 
 export interface AppOptions {
@@ -53,6 +55,8 @@ export async function buildApp({ db, config, now, logger = false }: AppOptions):
     instance,
     projects,
     hub,
+    access: new AccessService(db, config.sessionSecret),
+    shareLimiter: new LoginLimiter(now ? () => now().getTime() : undefined),
   };
 
   // Expired sessions are also deleted when presented; this catches the ones that never come back.
@@ -109,5 +113,6 @@ export async function buildApp({ db, config, now, logger = false }: AppOptions):
   commandRoutes(app, context);
   calendarRoutes(app, context);
   realtimeRoutes(app, context);
+  sharingRoutes(app, context);
   return app;
 }
