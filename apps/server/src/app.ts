@@ -1,4 +1,5 @@
 import cookie from "@fastify/cookie";
+import websocket from "@fastify/websocket";
 import { Prisma, type Db } from "@ganttlines/db";
 import Fastify, { type FastifyInstance } from "fastify";
 import { LoginLimiter } from "./auth/login-limiter";
@@ -7,11 +8,13 @@ import { InstanceService } from "./calendar/instance-service";
 import type { Config } from "./config";
 import { forbidden, HttpError } from "./errors";
 import { ProjectService } from "./projects/project-service";
+import { Hub } from "./realtime/hub";
 import { authRoutes } from "./routes/auth";
 import { calendarRoutes } from "./routes/calendar";
 import { commandRoutes } from "./routes/commands";
 import { setSessionCookie, type RouteContext } from "./routes/context";
 import { projectRoutes } from "./routes/projects";
+import { realtimeRoutes } from "./routes/realtime";
 import { setupRoutes } from "./routes/setup";
 import { userRoutes } from "./routes/users";
 
@@ -31,15 +34,25 @@ export async function buildApp({ db, config, now, logger = false }: AppOptions):
   const trustProxy = typeof hops === "number" ? (_address: string, hop: number) => hop < hops : hops;
   const app = Fastify({ logger, trustProxy });
   await app.register(cookie);
+  await app.register(websocket, { options: { maxPayload: 1024 * 1024 } });
 
   const instance = new InstanceService(db);
+  const projects = new ProjectService(db, instance);
+  const hub = new Hub();
+  // Every committed change is pushed to the people looking at it.
+  projects.onApplied(({ projectId, version, commandId, actor, changes }) =>
+    hub.broadcast(projectId, { type: "patch", projectId, version, commandId, actor, changes }),
+  );
+  projects.onMetaChange((project) => hub.broadcast(project.id, { type: "project", project }));
+  instance.onChange((snapshot) => hub.broadcastAll({ type: "instance", version: snapshot.version }));
   const context: RouteContext = {
     db,
     config,
     sessions: new SessionStore(db, config.sessionSecret, now),
     loginLimiter: new LoginLimiter(now ? () => now().getTime() : undefined),
     instance,
-    projects: new ProjectService(db, instance),
+    projects,
+    hub,
   };
 
   // Expired sessions are also deleted when presented; this catches the ones that never come back.
@@ -53,10 +66,13 @@ export async function buildApp({ db, config, now, logger = false }: AppOptions):
   app.decorateRequest("sessionToken", null);
 
   // Reject cross-site state-changing requests (defence in depth on top of SameSite=Lax cookies).
+  // WebSocket upgrades are GETs that carry the session cookie, so they must come from our own origin.
   app.addHook("onRequest", async (request) => {
-    if (request.method === "GET" || request.method === "HEAD") return;
+    const upgrade = request.headers.upgrade?.toLowerCase() === "websocket";
+    if (!upgrade && (request.method === "GET" || request.method === "HEAD")) return;
     const origin = request.headers.origin;
-    if (origin !== undefined && origin !== config.publicUrl.origin) throw forbidden("Cross-origin request rejected");
+    const allowed = upgrade ? origin === config.publicUrl.origin : origin === undefined || origin === config.publicUrl.origin;
+    if (!allowed) throw forbidden("Cross-origin request rejected");
   });
 
   app.addHook("onRequest", async (request, reply) => {
@@ -92,5 +108,6 @@ export async function buildApp({ db, config, now, logger = false }: AppOptions):
   projectRoutes(app, context);
   commandRoutes(app, context);
   calendarRoutes(app, context);
+  realtimeRoutes(app, context);
   return app;
 }

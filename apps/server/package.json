@@ -11,17 +11,20 @@
   },
   "dependencies": {
     "@fastify/cookie": "^11",
+    "@fastify/websocket": "^11",
     "@ganttlines/db": "workspace:^",
     "@ganttlines/engine": "workspace:^",
     "@ganttlines/protocol": "workspace:^",
     "@node-rs/argon2": "^2",
     "fastify": "^5",
     "tsx": "^4",
+    "ws": "^8",
     "zod": "^4"
   },
   "devDependencies": {
     "@testcontainers/postgresql": "^12",
     "@types/node": "^24",
+    "@types/ws": "^8",
     "typescript": "~5.9.3",
     "vite": "^8",
     "vitest": "^5"

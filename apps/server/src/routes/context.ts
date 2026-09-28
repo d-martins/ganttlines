@@ -5,6 +5,7 @@ import { SESSION_COOKIE, type SessionStore } from "../auth/sessions";
 import type { InstanceService } from "../calendar/instance-service";
 import type { Config } from "../config";
 import type { ProjectService } from "../projects/project-service";
+import type { Hub } from "../realtime/hub";
 
 /** Shared dependencies handed to every route module. */
 export interface RouteContext {
@@ -14,6 +15,7 @@ export interface RouteContext {
   loginLimiter: LoginLimiter;
   instance: InstanceService;
   projects: ProjectService;
+  hub: Hub;
 }
 
 export function setSessionCookie(reply: FastifyReply, config: Config, token: string, expires: Date): void {

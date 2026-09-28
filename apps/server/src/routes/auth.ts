@@ -10,7 +10,7 @@ import { clearSessionCookie, setSessionCookie, type RouteContext } from "./conte
 
 const invalidCredentials = () => new HttpError(401, "invalid_credentials", "Wrong email or password");
 
-export function authRoutes(app: FastifyInstance, { db, config, sessions, loginLimiter }: RouteContext): void {
+export function authRoutes(app: FastifyInstance, { db, config, sessions, loginLimiter, hub }: RouteContext): void {
   // Unknown emails are checked against this hash so they take as long as real accounts (no account probing).
   const dummyHash = hashPassword(randomBytes(16).toString("hex"));
 
@@ -33,7 +33,10 @@ export function authRoutes(app: FastifyInstance, { db, config, sessions, loginLi
   });
 
   app.post("/api/auth/logout", async (request, reply) => {
-    if (request.sessionToken) await sessions.revoke(request.sessionToken);
+    if (request.sessionToken) {
+      await sessions.revoke(request.sessionToken);
+      hub.closeSession(request.sessionToken);
+    }
     clearSessionCookie(reply);
     return reply.status(204).send();
   });
@@ -60,6 +63,7 @@ export function authRoutes(app: FastifyInstance, { db, config, sessions, loginLi
       data: { passwordHash: await hashPassword(body.newPassword), mustChangePassword: false },
     });
     await sessions.revokeAllForUser(user.id, request.sessionToken ?? undefined);
+    hub.closeUser(user.id, request.sessionToken);
     return reply.status(204).send();
   });
 }
