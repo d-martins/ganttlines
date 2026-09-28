@@ -1,0 +1,57 @@
+import { MAX_DATE, MIN_DATE, toDay, type Holiday, type TimeOff } from "@ganttlines/engine";
+import { z } from "zod";
+import { LIMITS } from "./api";
+
+/** Longest single holiday / time-off entry (longer absences: mark the team member inactive). */
+export const MAX_RANGE_DAYS = 366;
+
+const date = z.iso.date().refine((value) => value >= MIN_DATE && value <= MAX_DATE, `Dates must be between ${MIN_DATE} and ${MAX_DATE}`);
+const name = z.string().trim().min(1).max(LIMITS.nameMax);
+const color = z.string().regex(/^#[0-9a-f]{6}$/i, "Colors are #rrggbb");
+
+/** Date ranges must not be reversed and must span at most MAX_RANGE_DAYS days (inclusive). */
+function checkRange(value: { startDate: string; endDate: string }, ctx: z.RefinementCtx): void {
+  if (value.endDate < value.startDate) {
+    ctx.addIssue({ code: "custom", message: "The end date is before the start date", path: ["endDate"] });
+  } else if (toDay(value.endDate) - toDay(value.startDate) >= MAX_RANGE_DAYS) {
+    ctx.addIssue({ code: "custom", message: `A single entry can span at most ${MAX_RANGE_DAYS} days`, path: ["endDate"] });
+  }
+}
+
+export const CreateResourceBody = z.strictObject({ name, avatarColor: color.optional() });
+export const UpdateResourceBody = z.strictObject({ name: name.optional(), avatarColor: color.optional(), inactive: z.boolean().optional() });
+export const WorkingWeekdaysBody = z.strictObject({
+  workingWeekdays: z.array(z.int().min(0).max(6)).min(1).max(7).refine((days) => new Set(days).size === days.length, "Duplicate weekday"),
+});
+export const HolidayBody = z
+  .strictObject({ name, startDate: date, endDate: date, appliesTo: z.union([z.literal("all"), z.array(z.uuid()).min(1).max(1000)]) })
+  .superRefine(checkRange);
+export const TimeOffBody = z
+  .strictObject({ resourceId: z.uuid(), startDate: date, endDate: date, note: z.string().max(500).default("") })
+  .superRefine(checkRange);
+
+export type CreateResourceBody = z.infer<typeof CreateResourceBody>;
+export type UpdateResourceBody = z.infer<typeof UpdateResourceBody>;
+export type WorkingWeekdaysBody = z.infer<typeof WorkingWeekdaysBody>;
+export type HolidayBody = z.infer<typeof HolidayBody>;
+export type TimeOffBody = z.input<typeof TimeOffBody>;
+
+export interface ResourceDto {
+  id: string;
+  name: string;
+  avatarColor: string;
+  inactive: boolean;
+  userId: string | null;
+}
+
+export interface TimeOffDto extends TimeOff {
+  note: string;
+}
+
+/** Response of GET /api/calendar — the instance-wide calendar every project schedules against. */
+export interface CalendarDto {
+  instanceVersion: number;
+  workingWeekdays: number[];
+  holidays: Holiday[];
+  timeOff: TimeOffDto[];
+}
