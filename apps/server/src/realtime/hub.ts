@@ -11,6 +11,10 @@ export interface Connection {
   sessionToken: string | null;
   /** The project this connection currently shows (one at a time). */
   projectId: string | null;
+  /** Set as soon as the server decides to close it; queued messages are then dropped. */
+  closed: boolean;
+  /** Messages received but not handled yet (bounded, see MAX_PENDING_MESSAGES). */
+  pending: number;
 }
 
 /** All open WebSocket connections, grouped into project rooms. */
@@ -61,9 +65,16 @@ export class Hub {
     this.closeWhere((c) => c.sessionToken === sessionToken);
   }
 
+  /** Stops the connection immediately (no further messages are handled) and closes the socket. */
+  close(connection: Connection, code: number, reason: string): void {
+    connection.closed = true;
+    connection.projectId = null;
+    connection.socket.close(code, reason);
+  }
+
   private closeWhere(predicate: (connection: Connection) => boolean): void {
     for (const connection of [...this.connections]) {
-      if (predicate(connection)) connection.socket.close(CLOSE_SESSION_ENDED, "Session ended");
+      if (predicate(connection)) this.close(connection, CLOSE_SESSION_ENDED, "Session ended");
     }
   }
 }

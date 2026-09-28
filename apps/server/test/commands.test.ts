@@ -147,6 +147,17 @@ describe("robustness", () => {
     expect((await send(editor, other.id, createTask(randomUUID(), "A"), commandId)).statusCode).toBe(409);
   });
 
+  it("does not confuse no-op outcomes across projects that reuse a commandId", async () => {
+    const { editor, projectId } = await editorWithProject();
+    const other = (await t.app.inject({ method: "POST", url: "/api/projects", headers: { cookie: editor }, payload: { name: "Other" } })).json().project;
+    const id = randomUUID();
+    await send(editor, projectId, createTask(id, "Same"));
+    const commandId = randomUUID();
+    await send(editor, projectId, { type: "updateTitle", id, title: "Same" }, commandId); // no-op in project 1
+    const elsewhere = await send(editor, other.id, { type: "updateTitle", id, title: "Same" }, commandId);
+    expect(elsewhere.json().error).toBe("not_found"); // evaluated for project 2, not project 1's answer
+  });
+
   it("stays usable after a failed write (row id already used in another project)", async () => {
     const { editor, projectId } = await editorWithProject();
     const other = (await t.app.inject({ method: "POST", url: "/api/projects", headers: { cookie: editor }, payload: { name: "Other" } })).json().project;

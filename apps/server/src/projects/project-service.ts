@@ -1,7 +1,7 @@
 import { Prisma, toDbColumns, type Db, type Project } from "@ganttlines/db";
 import { applyCommand, diffRows, hasCycle, type Command, type ProjectState, type Row, type RowChange } from "@ganttlines/engine";
 import type { ChangesDto, CommandResultDto, ProjectDto, ProjectStateDto } from "@ganttlines/protocol";
-import { isDeepStrictEqual } from "node:util";
+import { createHash } from "node:crypto";
 import type { Actor } from "../actor";
 import type { InstanceService } from "../calendar/instance-service";
 import { toProjectDto } from "../dto";
@@ -33,7 +33,8 @@ export interface UndoResultDto extends CommandResultDto {
   skipped: number;
 }
 
-type Outcome = { ok: true; result: CommandResultDto; payload: unknown } | { ok: false; error: HttpError; payload: unknown };
+/** Outcome of a command that is not in the command log; `digest` identifies the exact request. */
+type Outcome = { ok: true; result: UndoResultDto | CommandResultDto; digest: string } | { ok: false; error: HttpError; digest: string };
 
 /**
  * Authoritative project state: an in-memory copy per project (loaded on first use) that every
@@ -74,9 +75,10 @@ export class ProjectService {
   /** Applies a command. Retrying with the same `commandId` returns the original outcome. */
   apply(projectId: string, actor: Actor, commandId: string, command: Command): Promise<CommandResultDto> {
     return this.run(projectId, async (stored) => {
-      const previous = await this.previousOutcome(projectId, commandId, command);
+      const digest = digestOf(command);
+      const previous = await this.previousOutcome(projectId, commandId, digest, (logged) => digestOf(logged.payload));
       if (previous) return previous;
-      return this.remember(commandId, command, async () => {
+      return this.remember(projectId, commandId, digest, async () => {
         if (stored.meta.archivedAt) throw conflict("This project is archived");
         await this.checkReferences(stored, command);
         const result = applyCommand(stored.state, (await this.instance.current()).calendar, command);
@@ -140,25 +142,40 @@ export class ProjectService {
 
   private revert(projectId: string, actor: Actor, commandId: string, direction: "undo" | "redo"): Promise<UndoResultDto> {
     return this.run(projectId, async (stored) => {
-      if (!actor.userId) throw new HttpError(422, "invalid", "Undo needs a signed-in user");
-      if (stored.meta.archivedAt) throw conflict("This project is archived");
-      const target =
-        direction === "undo" ? this.undoStacks.popUndo(projectId, actor.userId) : this.undoStacks.popRedo(projectId, actor.userId);
-      if (!target) throw new HttpError(422, "invalid", direction === "undo" ? "Nothing to undo" : "Nothing to redo");
-      const logged = await this.db.commandLog.findUnique({ where: { commandId: target } });
-      if (!logged || logged.projectId !== projectId) throw new HttpError(422, "invalid", "That change is no longer available");
+      const userId = actor.userId;
+      if (!userId) throw new HttpError(422, "invalid", "Undo needs a signed-in user");
+      // A retried undo/redo (same commandId) returns its first outcome instead of reverting another change.
+      const digest = digestOf({ direction, userId });
+      const previous = await this.previousOutcome(projectId, commandId, digest, (logged) =>
+        digestOf({ direction: logged.name, userId: logged.actorUserId }),
+      );
+      if (previous) return { skipped: 0, ...previous };
+      return this.remember(projectId, commandId, digest, async () => {
+        if (stored.meta.archivedAt) throw conflict("This project is archived");
+        const target = this.undoStacks.peek(direction, projectId, userId);
+        if (!target) throw new HttpError(422, "invalid", direction === "undo" ? "Nothing to undo" : "Nothing to redo");
+        // From here on the entry is consumed when the revert definitively cannot apply (so the next
+        // undo moves on), but kept if the commit fails for an unexpected reason (so it can be retried).
+        const discard = (error: HttpError) => {
+          this.undoStacks.pop(direction, projectId, userId);
+          return error;
+        };
+        const logged = await this.db.commandLog.findUnique({ where: { commandId: target } });
+        if (!logged || logged.projectId !== projectId) throw discard(new HttpError(422, "invalid", "That change is no longer available"));
 
-      const { state, skipped } = revertChanges(stored.state, logged.changes as unknown as RowChange[], direction);
-      const problem = findTreeProblem(Object.values(state.rows));
-      if (problem || hasCycle(state, (await this.instance.current()).calendar)) {
-        throw new HttpError(409, "conflict", `Can't ${direction} this any more: the board changed since`);
-      }
-      const changes = diffRows(stored.state, state);
-      if (changes.length === 0) throw new HttpError(409, "conflict", `Nothing left to ${direction}: it was all changed since`);
-      const result = await this.commit(stored, actor, commandId, direction, { target }, state, changes);
-      if (direction === "undo") this.undoStacks.pushUndone(projectId, actor.userId, target);
-      else this.undoStacks.pushRedone(projectId, actor.userId, target);
-      return { ...result, skipped };
+        const { state, skipped } = revertChanges(stored.state, logged.changes as unknown as RowChange[], direction);
+        const problem = findTreeProblem(Object.values(state.rows));
+        if (problem || hasCycle(state, (await this.instance.current()).calendar)) {
+          throw discard(new HttpError(409, "conflict", `Can't ${direction} this any more: the board changed since`));
+        }
+        const changes = diffRows(stored.state, state);
+        if (changes.length === 0) throw discard(new HttpError(409, "conflict", `Nothing left to ${direction}: it was all changed since`));
+        const result = await this.commit(stored, actor, commandId, direction, { target, skipped }, state, changes);
+        this.undoStacks.pop(direction, projectId, userId);
+        if (direction === "undo") this.undoStacks.pushUndone(projectId, userId, target);
+        else this.undoStacks.pushRedone(projectId, userId, target);
+        return { ...result, skipped };
+      }) as Promise<UndoResultDto>;
     });
   }
 
@@ -216,38 +233,50 @@ export class ProjectService {
     return { version, changes };
   }
 
-  /** The earlier outcome of this commandId (from the log, or from recent no-ops/rejections). */
-  private async previousOutcome(projectId: string, commandId: string, command: Command): Promise<CommandResultDto | undefined> {
-    const payload = JSON.parse(JSON.stringify(command)) as unknown;
-    const recent = this.recent.get(commandId);
+  /**
+   * The earlier outcome of this commandId in this project (from the command log, or from recent
+   * no-ops/rejections), or undefined if it is new. A commandId reused for a different request is a conflict.
+   */
+  private async previousOutcome(
+    projectId: string,
+    commandId: string,
+    digest: string,
+    loggedDigest: (logged: { payload: unknown; name: string; actorUserId: string | null }) => string,
+  ): Promise<UndoResultDto | CommandResultDto | undefined> {
+    const recent = this.recent.get(`${projectId}:${commandId}`);
     if (recent) {
-      if (!isDeepStrictEqual(recent.payload, payload)) throw conflict("This commandId was already used for something else");
+      if (recent.digest !== digest) throw conflict("This commandId was already used for something else");
       if (!recent.ok) throw recent.error;
       return recent.result;
     }
     const logged = await this.db.commandLog.findUnique({ where: { commandId } });
     if (!logged) return undefined;
-    if (logged.projectId !== projectId || !isDeepStrictEqual(logged.payload, payload)) {
+    if (logged.projectId !== projectId || loggedDigest(logged) !== digest) {
       throw conflict("This commandId was already used for something else");
     }
-    return { version: logged.version, changes: logged.changes as unknown as RowChange[] };
+    const skipped = (logged.payload as { skipped?: unknown } | null)?.skipped;
+    return {
+      version: logged.version,
+      changes: logged.changes as unknown as RowChange[],
+      ...(typeof skipped === "number" ? { skipped } : {}),
+    };
   }
 
-  /** Remembers no-op and rejected outcomes so a retried commandId gets the same answer. */
-  private async remember(commandId: string, command: Command, work: () => Promise<CommandResultDto>): Promise<CommandResultDto> {
-    const payload = JSON.parse(JSON.stringify(command)) as unknown;
+  /** Remembers no-op and rejected outcomes (they are not in the log) so a retry gets the same answer. */
+  private async remember<T extends CommandResultDto>(projectId: string, commandId: string, digest: string, work: () => Promise<T>): Promise<T> {
+    const key = `${projectId}:${commandId}`;
     try {
       const result = await work();
-      if (result.changes.length === 0) this.rememberOutcome(commandId, { ok: true, result, payload });
+      if (result.changes.length === 0) this.rememberOutcome(key, { ok: true, result, digest });
       return result;
     } catch (error) {
-      if (error instanceof HttpError) this.rememberOutcome(commandId, { ok: false, error, payload });
+      if (error instanceof HttpError) this.rememberOutcome(key, { ok: false, error, digest });
       throw error;
     }
   }
 
-  private rememberOutcome(commandId: string, outcome: Outcome): void {
-    this.recent.set(commandId, outcome);
+  private rememberOutcome(key: string, outcome: Outcome): void {
+    this.recent.set(key, outcome);
     if (this.recent.size > RECENT_OUTCOMES) this.recent.delete(this.recent.keys().next().value!);
   }
 
@@ -270,6 +299,22 @@ export class ProjectService {
     if (!resource) throw new HttpError(422, "invalid", "That team member does not exist");
     if (resource.inactive) throw new HttpError(422, "invalid", "That team member is inactive");
   }
+}
+
+/** Stable fingerprint of a request (JSON with sorted keys), so stored payloads compare regardless of key order. */
+function digestOf(value: unknown): string {
+  return createHash("sha256").update(canonicalJson(value)).digest("hex");
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, v]) => v !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
 }
 
 function notify<T>(listener: (value: T) => void, value: T): void {

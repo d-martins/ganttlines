@@ -145,6 +145,30 @@ describe("other live updates", () => {
 });
 
 describe("closing connections", () => {
+  it("drops queued messages once a user's access changes", async () => {
+    const { admin, ana, projectId } = await team();
+    const a = await connect(t.app, ana.cookie);
+    a.send({ type: "join", projectId, version: 0 });
+    await a.next("joined");
+    for (let i = 0; i < 90; i++) a.send({ type: "command", commandId: randomUUID(), command: createTask(randomUUID(), `T${i}`) });
+    await a.next("ack"); // the queue is being worked through
+    await t.app.inject({ method: "PATCH", url: `/api/users/${ana.id}`, headers: { cookie: admin }, payload: { role: "viewer" } });
+    // Right after the demotion at most the command already being applied can still finish.
+    const atDemotion = await t.db.row.count({ where: { projectId } });
+    await a.closed;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(await t.db.row.count({ where: { projectId } })).toBeLessThanOrEqual(atDemotion + 1);
+  });
+
+  it("closes connections that flood the server", async () => {
+    const { ana, projectId } = await team();
+    const a = await connect(t.app, ana.cookie);
+    a.send({ type: "join", projectId, version: 0 });
+    await a.next("joined");
+    for (let i = 0; i < 150; i++) a.send({ type: "command", commandId: randomUUID(), command: createTask(randomUUID()) });
+    expect(await a.closed).toBe(1008);
+  });
+
   it("closes a session's sockets on logout", async () => {
     const { ana } = await team();
     const a = await connect(t.app, ana.cookie);

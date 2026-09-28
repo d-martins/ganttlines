@@ -16,6 +16,7 @@ export interface Reverted {
 export function revertChanges(state: ProjectState, changes: readonly RowChange[], direction: "undo" | "redo"): Reverted {
   const rows: Record<RowId, Row> = { ...state.rows };
   const ordered = direction === "undo" ? [...changes].reverse() : changes;
+  const removals = new Set<RowId>();
   let skipped = 0;
   for (const change of ordered) {
     const expected = direction === "undo" ? change.after : change.before;
@@ -23,7 +24,9 @@ export function revertChanges(state: ProjectState, changes: readonly RowChange[]
     const current = rows[change.rowId];
     if (change.field === "*") {
       if (target === null) {
-        if (current && isDeepStrictEqual(current, expected) && !isReferenced(rows, change.rowId)) delete rows[change.rowId];
+        // Removed together at the end, so a parent and its children (or a predecessor and the
+        // successor detached by the same command) are handled as one set, whatever their order.
+        if (current && isDeepStrictEqual(current, expected)) removals.add(change.rowId);
         else skipped++;
       } else if (!current) {
         rows[change.rowId] = target as Row;
@@ -36,11 +39,34 @@ export function revertChanges(state: ProjectState, changes: readonly RowChange[]
     if (current && isDeepStrictEqual(value, expected)) rows[change.rowId] = { ...current, [change.field]: target } as Row;
     else skipped++;
   }
+  skipped += removeUnreferenced(rows, removals);
   return { state: { rows }, skipped };
 }
 
-function isReferenced(rows: Readonly<Record<RowId, Row>>, id: RowId): boolean {
-  return Object.values(rows).some((row) => row.parentId === id || (row.kind === "task" && row.predecessorId === id));
+/**
+ * Deletes the `candidates` that no remaining row points to (as parent or predecessor). A candidate
+ * that is still referenced from outside the set is kept — and so are the candidates it points to.
+ * Returns how many candidates had to be kept.
+ */
+function removeUnreferenced(rows: Record<RowId, Row>, candidates: Set<RowId>): number {
+  const initial = candidates.size;
+  for (let changed = true; changed; ) {
+    changed = false;
+    const referenced = new Set<RowId>();
+    for (const row of Object.values(rows)) {
+      if (candidates.has(row.id)) continue;
+      if (row.parentId !== null) referenced.add(row.parentId);
+      if (row.kind === "task" && row.predecessorId !== null) referenced.add(row.predecessorId);
+    }
+    for (const id of candidates) {
+      if (referenced.has(id)) {
+        candidates.delete(id);
+        changed = true;
+      }
+    }
+  }
+  for (const id of candidates) delete rows[id];
+  return initial - candidates.size;
 }
 
 /** Bounded per-user, per-project undo/redo history of command ids. */
@@ -57,12 +83,20 @@ export class UndoStacks {
     stack.redo = [];
   }
 
+  peek(direction: "undo" | "redo", projectId: string, userId: string): string | undefined {
+    return this.get(projectId, userId)[direction].at(-1);
+  }
+
+  pop(direction: "undo" | "redo", projectId: string, userId: string): string | undefined {
+    return this.get(projectId, userId)[direction].pop();
+  }
+
   popUndo(projectId: string, userId: string): string | undefined {
-    return this.get(projectId, userId).undo.pop();
+    return this.pop("undo", projectId, userId);
   }
 
   popRedo(projectId: string, userId: string): string | undefined {
-    return this.get(projectId, userId).redo.pop();
+    return this.pop("redo", projectId, userId);
   }
 
   pushUndone(projectId: string, userId: string, commandId: string): void {

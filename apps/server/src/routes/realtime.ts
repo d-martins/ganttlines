@@ -9,6 +9,10 @@ import type { RouteContext } from "./context";
 
 /** Cached projects nobody has open are dropped after this long. */
 const IDLE_EVICTION_MS = 10 * 60 * 1000;
+/** A connection with more unhandled messages than this is flooding the server and gets closed. */
+export const MAX_PENDING_MESSAGES = 100;
+/** WebSocket close code for policy violations. */
+const CLOSE_POLICY_VIOLATION = 1008;
 
 /**
  * The live-editing WebSocket. Signed-in viewers (and above) join one project at a time, get
@@ -31,6 +35,8 @@ export function realtimeRoutes(app: FastifyInstance, { projects, instance, hub }
   };
 
   const handle = async (connection: Connection, raw: RawData) => {
+    // The server may have closed this connection (logout, role change…) while the message waited.
+    if (connection.closed || connection.socket.readyState !== connection.socket.OPEN) return;
     let json: unknown;
     try {
       json = JSON.parse(raw.toString());
@@ -48,6 +54,7 @@ export function realtimeRoutes(app: FastifyInstance, { projects, instance, hub }
       // Join first so no live patch is missed; clients ignore versions they already have.
       connection.projectId = message.projectId;
       try {
+        const { version: instanceVersion } = await instance.current();
         const catchUp = await projects.changesSince(message.projectId, message.version);
         if ("reload" in catchUp) {
           hub.send(connection, { type: "reload", projectId: message.projectId });
@@ -58,13 +65,14 @@ export function realtimeRoutes(app: FastifyInstance, { projects, instance, hub }
           type: "joined",
           projectId: message.projectId,
           version: catchUp.version,
-          instanceVersion: (await instance.current()).version,
+          instanceVersion,
           viewers: hub.viewers(message.projectId),
         });
         announcePresence(message.projectId);
       } catch (error) {
         connection.projectId = null;
-        hub.send(connection, { type: "error", message: error instanceof HttpError ? error.message : "Could not open the project" });
+        const known = error instanceof HttpError && error.status < 500;
+        hub.send(connection, { type: "error", message: known ? error.message : "Could not open the project" });
       }
       return;
     }
@@ -98,12 +106,25 @@ export function realtimeRoutes(app: FastifyInstance, { projects, instance, hub }
       },
     },
     (socket, request) => {
-      const connection: Connection = { socket, user: request.user!, sessionToken: request.sessionToken, projectId: null };
+      const connection: Connection = {
+        socket,
+        user: request.user!,
+        sessionToken: request.sessionToken,
+        projectId: null,
+        closed: false,
+        pending: 0,
+      };
       hub.add(connection);
       // One message at a time per connection, so a join always completes before the next command.
-      let pending = Promise.resolve();
+      let queue = Promise.resolve();
       socket.on("message", (raw: RawData) => {
-        pending = pending.then(() => handle(connection, raw)).catch((error: unknown) => app.log.error(error));
+        if (connection.closed) return;
+        if (connection.pending >= MAX_PENDING_MESSAGES) return hub.close(connection, CLOSE_POLICY_VIOLATION, "Too many pending messages");
+        connection.pending++;
+        queue = queue
+          .then(() => handle(connection, raw))
+          .catch((error: unknown) => app.log.error(error))
+          .finally(() => connection.pending--);
       });
       socket.on("close", () => {
         hub.remove(connection);

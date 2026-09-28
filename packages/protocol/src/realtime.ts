@@ -24,8 +24,12 @@ export interface Viewer {
 }
 
 /**
- * Messages the server sends. Clients apply `patch`es in version order and ignore versions they
- * already have (a catch-up and a live patch can overlap right after `join`).
+ * Messages the server sends. Patch ordering rules for clients:
+ * - apply a patch only when its version is exactly the local version + 1;
+ * - ignore patches whose version is ≤ the local version (catch-up and live patches can overlap);
+ * - before `joined` (or while reloading `/state` after `reload`), hold patches that leave a gap;
+ * - after `joined`, a gap means something was missed: join again with the local version.
+ * Close code 4001 means the session ended or access changed (sign in again); 1008 means flooding.
  */
 export type ServerMessage =
   | { type: "joined"; projectId: string; version: number; instanceVersion: number; viewers: Viewer[] }

@@ -77,6 +77,32 @@ describe("undo and redo", () => {
     expect((await undo(ana, projectId)).statusCode).toBe(409); // re-creating the child needs its deleted parent
   });
 
+  it("returns the first result when an undo is retried with the same commandId", async () => {
+    const { ana, projectId } = await twoEditorsWithProject();
+    await send(ana, projectId, createTask(randomUUID(), "A"));
+    await send(ana, projectId, createTask(randomUUID(), "B"));
+    const undoId = randomUUID();
+    const first = await t.app.inject({ method: "POST", url: `/api/projects/${projectId}/undo`, headers: { cookie: ana }, payload: { commandId: undoId } });
+    const retry = await t.app.inject({ method: "POST", url: `/api/projects/${projectId}/undo`, headers: { cookie: ana }, payload: { commandId: undoId } });
+    expect(retry.statusCode).toBe(200);
+    expect(retry.json()).toEqual(first.json());
+    expect((await rows(ana, projectId)).map((row) => row.title)).toEqual(["A"]); // only B was undone
+    expect((await undo(ana, projectId)).statusCode).toBe(200); // A is still undoable
+  });
+
+  it("redoes the deletion of a parent together with its children", async () => {
+    const { ana, projectId } = await twoEditorsWithProject();
+    const parent = "00000000-0000-4000-8000-000000000001";
+    const children = ["00000000-0000-4000-8000-000000000002", "00000000-0000-4000-8000-000000000003"];
+    await send(ana, projectId, createTask(parent, "Parent"));
+    for (const child of children) await send(ana, projectId, { ...createTask(child, "Child"), parentId: parent });
+    await send(ana, projectId, { type: "deleteRows", ids: [parent] });
+    expect((await undo(ana, projectId)).json()).toMatchObject({ skipped: 0 });
+    expect(await rows(ana, projectId)).toHaveLength(3);
+    expect((await redo(ana, projectId)).json()).toMatchObject({ skipped: 0 });
+    expect(await rows(ana, projectId)).toEqual([]);
+  });
+
   it("clears redo when a new change is made", async () => {
     const { ana, projectId } = await twoEditorsWithProject();
     await send(ana, projectId, createTask(randomUUID(), "A"));
