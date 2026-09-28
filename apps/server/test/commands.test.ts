@@ -102,7 +102,9 @@ describe("project commands", () => {
     const ana = (await t.app.inject({ method: "POST", url: "/api/resources", headers: { cookie: editor }, payload: { name: "Ana" } })).json().resource;
     expect((await send(editor, projectId, { type: "setAssignee", id, resourceId: ana.id })).statusCode).toBe(200);
     await t.app.inject({ method: "PATCH", url: `/api/resources/${ana.id}`, headers: { cookie: editor }, payload: { inactive: true } });
-    const inactive = await send(editor, projectId, { type: "setAssignee", id, resourceId: ana.id });
+    const other = randomUUID();
+    await send(editor, projectId, createTask(other));
+    const inactive = await send(editor, projectId, { type: "setAssignee", id: other, resourceId: ana.id });
     expect(inactive.statusCode).toBe(422);
     const unknown = await send(editor, projectId, { type: "setAssignee", id, resourceId: randomUUID() });
     expect(unknown.statusCode).toBe(422);
@@ -122,6 +124,57 @@ describe("project commands", () => {
     expect((await send(viewer.cookie, projectId, createTask(randomUUID()))).statusCode).toBe(403);
     await t.app.inject({ method: "PATCH", url: `/api/projects/${projectId}`, headers: { cookie: editor }, payload: { archived: true } });
     expect((await send(editor, projectId, createTask(randomUUID()))).statusCode).toBe(409);
+  });
+});
+
+describe("robustness", () => {
+  it("recovers when the database moved on without the server (stale cache)", async () => {
+    const { editor, projectId } = await editorWithProject();
+    await send(editor, projectId, createTask(randomUUID()));
+    await t.db.project.update({ where: { id: projectId }, data: { version: 7 } });
+    const stale = await send(editor, projectId, createTask(randomUUID()));
+    expect(stale.statusCode).toBe(409);
+    const retried = await send(editor, projectId, createTask(randomUUID()));
+    expect(retried.json().version).toBe(8);
+  });
+
+  it("refuses to reuse a commandId for a different command, in any project", async () => {
+    const { editor, projectId } = await editorWithProject();
+    const other = (await t.app.inject({ method: "POST", url: "/api/projects", headers: { cookie: editor }, payload: { name: "Other" } })).json().project;
+    const commandId = randomUUID();
+    await send(editor, projectId, createTask(randomUUID(), "A"), commandId);
+    expect((await send(editor, projectId, createTask(randomUUID(), "B"), commandId)).statusCode).toBe(409);
+    expect((await send(editor, other.id, createTask(randomUUID(), "A"), commandId)).statusCode).toBe(409);
+  });
+
+  it("stays usable after a failed write (row id already used in another project)", async () => {
+    const { editor, projectId } = await editorWithProject();
+    const other = (await t.app.inject({ method: "POST", url: "/api/projects", headers: { cookie: editor }, payload: { name: "Other" } })).json().project;
+    const id = randomUUID();
+    await send(editor, other.id, createTask(id));
+    expect((await send(editor, projectId, createTask(id))).statusCode).toBe(409);
+    const next = await send(editor, projectId, createTask(randomUUID()));
+    expect(next.json().version).toBe(1);
+  });
+
+  it("keeps a task's current assignee even after they were deactivated", async () => {
+    const { editor, projectId } = await editorWithProject();
+    const id = randomUUID();
+    await send(editor, projectId, createTask(id));
+    const ana = (await t.app.inject({ method: "POST", url: "/api/resources", headers: { cookie: editor }, payload: { name: "Ana" } })).json().resource;
+    await send(editor, projectId, { type: "setAssignee", id, resourceId: ana.id });
+    await t.app.inject({ method: "PATCH", url: `/api/resources/${ana.id}`, headers: { cookie: editor }, payload: { inactive: true } });
+    const same = await send(editor, projectId, { type: "setAssignee", id, resourceId: ana.id });
+    expect(same.json()).toEqual({ version: 2, changes: [] });
+  });
+
+  it("deletes many rows in one command", async () => {
+    const { editor, projectId } = await editorWithProject();
+    const ids = Array.from({ length: 60 }, () => randomUUID());
+    for (const id of ids) await send(editor, projectId, createTask(id));
+    const response = await send(editor, projectId, { type: "deleteRows", ids });
+    expect(response.statusCode).toBe(200);
+    expect(await t.db.row.count({ where: { projectId } })).toBe(0);
   });
 });
 
@@ -145,6 +198,12 @@ describe("catching up", () => {
     const response = (await fresh.inject({ url: `/api/projects/${projectId}/changes?since=10`, headers: { cookie: editor } })).json();
     await fresh.close();
     expect(response).toEqual({ version: 600, reload: true });
+  });
+
+  it("asks clients that claim to be ahead to reload", async () => {
+    const { editor, projectId } = await editorWithProject();
+    const response = (await t.app.inject({ url: `/api/projects/${projectId}/changes?since=99`, headers: { cookie: editor } })).json();
+    expect(response).toEqual({ version: 0, reload: true });
   });
 
   it("validates `since`", async () => {

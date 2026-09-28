@@ -68,7 +68,7 @@ export function calendarRoutes(app: FastifyInstance, { instance }: RouteContext)
       await assertResourcesExist(tx, body.appliesTo);
       return tx.holiday.create({ data: holidayColumns(body) });
     });
-    return reply.status(201).send({ holiday: { id: holiday.id, ...body } });
+    return reply.status(201).send({ holiday: holidayDto(holiday.id, body) });
   });
 
   app.put<{ Params: { id: string } }>("/api/holidays/:id", async (request) => {
@@ -80,7 +80,7 @@ export function calendarRoutes(app: FastifyInstance, { instance }: RouteContext)
       await assertResourcesExist(tx, body.appliesTo);
       await tx.holiday.update({ where: { id }, data: holidayColumns(body) });
     });
-    return { holiday: { id, ...body } };
+    return { holiday: holidayDto(id, body) };
   });
 
   app.delete<{ Params: { id: string } }>("/api/holidays/:id", async (request, reply) => {
@@ -124,6 +124,10 @@ export function calendarRoutes(app: FastifyInstance, { instance }: RouteContext)
     });
     return reply.status(204).send();
   });
+}
+
+function holidayDto(id: string, body: HolidayBody) {
+  return { id, ...body, appliesTo: body.appliesTo === "all" ? "all" : [...new Set(body.appliesTo)] };
 }
 
 function holidayColumns(body: HolidayBody) {

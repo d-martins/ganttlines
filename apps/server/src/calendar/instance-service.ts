@@ -28,10 +28,14 @@ export class InstanceService {
 
   /** The current calendar (loaded from the database on first use). */
   current(): Promise<InstanceSnapshot> {
-    this.snapshot ??= this.load().catch((error: unknown) => {
-      this.snapshot = undefined;
-      throw error;
-    });
+    if (!this.snapshot) {
+      // Loaded through the queue so it can never interleave with a mutation.
+      const loading = this.queue.run("instance", () => this.load());
+      this.snapshot = loading;
+      loading.catch(() => {
+        if (this.snapshot === loading) this.snapshot = undefined;
+      });
+    }
     return this.snapshot;
   }
 
@@ -80,20 +84,24 @@ export class InstanceService {
     });
   }
 
-  private async load(): Promise<InstanceSnapshot> {
-    const settings = await this.db.settings.findUnique({ where: { id: 1 } });
-    return build(await readCalendar(this.db), settings?.instanceVersion ?? 0);
+  private load(): Promise<InstanceSnapshot> {
+    return this.db.$transaction(
+      async (tx) => {
+        const settings = await tx.settings.findUnique({ where: { id: 1 } });
+        return build(await readCalendar(tx), settings?.instanceVersion ?? 0);
+      },
+      { isolationLevel: "RepeatableRead" },
+    );
   }
 }
 
-async function readCalendar(db: Db | Tx): Promise<CalendarDto & { instanceVersion: 0 }> {
+async function readCalendar(db: Db | Tx): Promise<Omit<CalendarDto, "instanceVersion">> {
   const [settings, holidays, timeOff] = await Promise.all([
     db.settings.findUnique({ where: { id: 1 } }),
     db.holiday.findMany({ orderBy: [{ startDate: "asc" }, { id: "asc" }] }),
     db.timeOff.findMany({ orderBy: [{ startDate: "asc" }, { id: "asc" }] }),
   ]);
   return {
-    instanceVersion: 0,
     workingWeekdays: settings?.workingWeekdays ?? [1, 2, 3, 4, 5],
     holidays: holidays.map((h) => ({
       id: h.id,
@@ -108,7 +116,7 @@ async function readCalendar(db: Db | Tx): Promise<CalendarDto & { instanceVersio
   };
 }
 
-function build(data: CalendarDto, version: number): InstanceSnapshot {
+function build(data: Omit<CalendarDto, "instanceVersion">, version: number): InstanceSnapshot {
   const calendarData: CalendarData = { workingWeekdays: data.workingWeekdays, holidays: data.holidays, timeOff: data.timeOff };
   let calendar: Calendar;
   try {
