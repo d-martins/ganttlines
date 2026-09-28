@@ -30,7 +30,9 @@ export function useTestApp(): TestContext {
   context.clock = { now: new Date("2026-10-01T09:00:00Z") };
 
   beforeEach(async () => {
-    await db.$executeRawUnsafe(`TRUNCATE "Row", "Project", "Session", "Resource", "User" CASCADE`);
+    await db.$executeRawUnsafe(
+      `TRUNCATE "CommandLog", "TimeOff", "Holiday", "Settings", "Row", "Project", "Session", "Resource", "User" CASCADE`,
+    );
     context.clock.now = new Date("2026-10-01T09:00:00Z");
     await context.app?.close();
     context.app = await buildApp({ db, config: testConfig, now: () => context.clock.now });

@@ -1,16 +1,16 @@
 import { CreateUserBody, UpdateUserBody } from "@ganttlines/protocol";
 import type { Prisma } from "@ganttlines/db";
 import type { FastifyInstance } from "fastify";
+import { actorOf } from "../actor";
 import { requireUser } from "../auth/guard";
 import { generateTemporaryPassword, hashPassword } from "../auth/passwords";
 import { toUserDto } from "../dto";
 import { conflict, notFound } from "../errors";
-import { createLinkedResource } from "../resources";
 import { parseBody, parseId } from "../validation";
 import type { RouteContext } from "./context";
 
 /** Admin-only user management. New users get a temporary password they must change. */
-export function userRoutes(app: FastifyInstance, { db, sessions }: RouteContext): void {
+export function userRoutes(app: FastifyInstance, { db, sessions, instance }: RouteContext): void {
   app.get("/api/users", async (request) => {
     requireUser(request, "admin");
     const users = await db.user.findMany({ orderBy: { createdAt: "asc" } });
@@ -18,18 +18,15 @@ export function userRoutes(app: FastifyInstance, { db, sessions }: RouteContext)
   });
 
   app.post("/api/users", async (request, reply) => {
-    requireUser(request, "admin");
+    const admin = requireUser(request, "admin");
     const body = parseBody(CreateUserBody, request.body);
     if (await db.user.findUnique({ where: { email: body.email } })) throw conflict("A user with that email already exists");
     const temporaryPassword = generateTemporaryPassword();
     const passwordHash = await hashPassword(temporaryPassword);
-    const user = await db.$transaction(async (tx) => {
-      const created = await tx.user.create({
-        data: { email: body.email, name: body.name, role: body.role, passwordHash, mustChangePassword: true },
-      });
-      if (body.createResource) await createLinkedResource(tx, created.id, created.name);
-      return created;
+    const user = await db.user.create({
+      data: { email: body.email, name: body.name, role: body.role, passwordHash, mustChangePassword: true },
     });
+    if (body.createResource) await instance.createResource(actorOf(admin), { name: user.name, userId: user.id });
     return reply.status(201).send({ user: toUserDto(user), temporaryPassword });
   });
 

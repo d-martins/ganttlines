@@ -3,9 +3,11 @@ import { Prisma, type Db } from "@ganttlines/db";
 import Fastify, { type FastifyInstance } from "fastify";
 import { LoginLimiter } from "./auth/login-limiter";
 import { SESSION_COOKIE, SessionStore } from "./auth/sessions";
+import { InstanceService } from "./calendar/instance-service";
 import type { Config } from "./config";
 import { forbidden, HttpError } from "./errors";
 import { authRoutes } from "./routes/auth";
+import { calendarRoutes } from "./routes/calendar";
 import { setSessionCookie, type RouteContext } from "./routes/context";
 import { projectRoutes } from "./routes/projects";
 import { setupRoutes } from "./routes/setup";
@@ -28,11 +30,13 @@ export async function buildApp({ db, config, now, logger = false }: AppOptions):
   const app = Fastify({ logger, trustProxy });
   await app.register(cookie);
 
+  const instance = new InstanceService(db);
   const context: RouteContext = {
     db,
     config,
     sessions: new SessionStore(db, config.sessionSecret, now),
     loginLimiter: new LoginLimiter(now ? () => now().getTime() : undefined),
+    instance,
   };
 
   // Expired sessions are also deleted when presented; this catches the ones that never come back.
@@ -83,5 +87,6 @@ export async function buildApp({ db, config, now, logger = false }: AppOptions):
   authRoutes(app, context);
   userRoutes(app, context);
   projectRoutes(app, context);
+  calendarRoutes(app, context);
   return app;
 }
