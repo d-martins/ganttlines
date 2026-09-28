@@ -26,6 +26,7 @@ model User {
   createdAt          DateTime  @default(now())
   sessions           Session[]
   resource           Resource?
+  commands           CommandLog[]
 }
 
 model Session {
@@ -48,6 +49,7 @@ model Resource {
   userId      String?  @unique @db.Uuid
   user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   createdAt   DateTime @default(now())
+  timeOff     TimeOff[]
 }
 
 model Project {
@@ -58,6 +60,7 @@ model Project {
   archivedAt DateTime?
   createdAt  DateTime  @default(now())
   rows       Row[]
+  commands   CommandLog[]
 }
 
 model Row {
@@ -81,4 +84,54 @@ model Row {
   description   String  @default("")
 
   @@index([projectId])
+}
+
+/// Singleton (id = 1): instance-wide calendar settings and the instance-scope version counter.
+model Settings {
+  id              Int   @id @default(1)
+  workingWeekdays Int[] @default([1, 2, 3, 4, 5])
+  instanceVersion Int   @default(0)
+}
+
+model Holiday {
+  id           String   @id @default(uuid()) @db.Uuid
+  name         String
+  startDate    String
+  endDate      String
+  /// true = applies to everyone; otherwise only to `resourceIds`
+  appliesToAll Boolean
+  resourceIds  String[] @db.Uuid
+  createdAt    DateTime @default(now())
+}
+
+model TimeOff {
+  id         String   @id @default(uuid()) @db.Uuid
+  resourceId String   @db.Uuid
+  resource   Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  startDate  String
+  endDate    String
+  note       String   @default("")
+  createdAt  DateTime @default(now())
+
+  @@index([resourceId])
+}
+
+/// Every applied command. Project commands have projectId + project version; instance-scope
+/// commands (resources, calendar) have projectId = null and the instance version.
+model CommandLog {
+  id          Int      @id @default(autoincrement())
+  projectId   String?  @db.Uuid
+  project     Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  version     Int
+  commandId   String   @unique @db.Uuid
+  actorUserId String?  @db.Uuid
+  actorUser   User?    @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  /// display name at the time of the command (kept when the user is deleted)
+  actorLabel  String
+  name        String
+  payload     Json
+  changes     Json
+  createdAt   DateTime @default(now())
+
+  @@unique([projectId, version])
 }
