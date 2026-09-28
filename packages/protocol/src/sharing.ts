@@ -15,8 +15,17 @@ export const CreateShareLinkBody = z.strictObject({
   label: label.default(""),
 });
 export const UpdateShareLinkBody = z.strictObject({ collaboration: z.boolean().optional(), label: label.optional() });
-/** An anonymous visitor's display name, chosen on first visit. */
-export const VisitorBody = z.strictObject({ name: z.string().trim().min(1).max(60) });
+/**
+ * An anonymous visitor's display name, chosen on first visit. Control and bidirectional-override
+ * characters are removed and whitespace collapsed, so a name cannot hide the "(anonymous)" suffix.
+ */
+export const VisitorBody = z.strictObject({
+  name: z
+    .string()
+    .max(200)
+    .transform((value) => value.replace(/[\p{Cc}\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu, " ").replace(/\s+/g, " ").trim())
+    .pipe(z.string().min(1).max(60)),
+});
 
 export type CreateShareLinkBody = z.input<typeof CreateShareLinkBody>;
 export type UpdateShareLinkBody = z.infer<typeof UpdateShareLinkBody>;

@@ -6,7 +6,7 @@ import { actorOf } from "../actor";
 import { VISITOR_COOKIE } from "../auth/access";
 import { requireUser } from "../auth/guard";
 import { credentialsOf, throttleShareTokens } from "../auth/request-access";
-import { badRequest, notFound } from "../errors";
+import { badRequest, HttpError, notFound } from "../errors";
 import { parseBody, parseId } from "../validation";
 import type { RouteContext } from "./context";
 
@@ -96,8 +96,9 @@ export function sharingRoutes(app: FastifyInstance, context: RouteContext): void
   async function findLink(request: FastifyRequest, token: string): Promise<ShareLink> {
     const credentials = { ...credentialsOf(request, access), shareToken: token };
     return throttleShareTokens(request, context, credentials, async () => {
-      const link = await access.link(token);
+      const link = await access.find(token);
       if (!link) throw notFound("Share link");
+      if (link.revokedAt) throw new HttpError(410, "link_revoked", "This share link was turned off");
       return link;
     });
   }

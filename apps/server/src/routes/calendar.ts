@@ -24,8 +24,10 @@ type Tx = Prisma.TransactionClient;
 export function calendarRoutes(app: FastifyInstance, context: RouteContext): void {
   const { instance } = context;
   app.get("/api/calendar", async (request) => {
-    await requireInstanceRead(request, context);
-    return (await instance.current()).dto;
+    const reader = await requireInstanceRead(request, context);
+    const calendar = (await instance.current()).dto;
+    // Share-link visitors see when people are away, not why (time-off notes are personal).
+    return reader === "link" ? { ...calendar, timeOff: calendar.timeOff.map((entry) => ({ ...entry, note: "" })) } : calendar;
   });
 
   app.get("/api/resources", async (request) => {

@@ -34,8 +34,11 @@ export interface ProjectAccess {
  * authenticated links to any signed-in user (incl. guests), anonymous links to visitors who picked
  * a display name. Collaborative links allow editing.
  */
+/** Cached link rows (active or revoked; unknown tokens are not cached). */
+const MAX_CACHED_LINKS = 10_000;
+
 export class AccessService {
-  private readonly linksByHash = new Map<string, ShareLink | null>();
+  private readonly linksByHash = new Map<string, Promise<ShareLink | null>>();
 
   constructor(
     private readonly db: Db,
@@ -51,19 +54,40 @@ export class AccessService {
     return createHmac("sha256", this.secret).update(`share:${token}`).digest("hex");
   }
 
-  /** The active (unrevoked) link for a token, or null. Cached; call `invalidate` after changes. */
+  /** The active (unrevoked) link for a token, or null. */
   async link(token: string): Promise<ShareLink | null> {
-    if (token.length > 100) return null;
-    const hash = this.hashToken(token);
-    if (!this.linksByHash.has(hash)) {
-      const link = await this.db.shareLink.findUnique({ where: { tokenHash: hash } });
-      this.linksByHash.set(hash, link && !link.revokedAt ? link : null);
-    }
-    return this.linksByHash.get(hash) ?? null;
+    const link = await this.find(token);
+    return link && !link.revokedAt ? link : null;
   }
 
-  invalidate(linkId: string): void {
-    for (const [hash, link] of this.linksByHash) if (!link || link.id === linkId) this.linksByHash.delete(hash);
+  /**
+   * The stored link for a token, revoked or not (null if unknown). Lookups are cached as promises,
+   * and `invalidate` drops them, so a lookup that was in flight during a revoke is never cached.
+   */
+  find(token: string): Promise<ShareLink | null> {
+    if (token.length > 100) return Promise.resolve(null);
+    const hash = this.hashToken(token);
+    let lookup = this.linksByHash.get(hash);
+    if (!lookup) {
+      if (this.linksByHash.size >= MAX_CACHED_LINKS) this.linksByHash.clear();
+      const pending = this.db.shareLink.findUnique({ where: { tokenHash: hash } });
+      lookup = pending;
+      this.linksByHash.set(hash, pending);
+      pending.then(
+        (link) => {
+          if (!link && this.linksByHash.get(hash) === pending) this.linksByHash.delete(hash);
+        },
+        () => {
+          if (this.linksByHash.get(hash) === pending) this.linksByHash.delete(hash);
+        },
+      );
+    }
+    return lookup;
+  }
+
+  /** Call after a link changes or is revoked. */
+  invalidate(_linkId: string): void {
+    this.linksByHash.clear();
   }
 
   signVisitor(visitor: Visitor): string {
@@ -89,19 +113,21 @@ export class AccessService {
   /** Access to `projectId`, or the error explaining why not. */
   async resolve(credentials: Credentials, projectId: string): Promise<ProjectAccess | HttpError> {
     const { user } = credentials;
-    const activeUser = user && !user.mustChangePassword ? user : null;
-    if (activeUser && activeUser.role !== "guest") {
-      return {
-        projectId,
-        canEdit: activeUser.role === "editor" || activeUser.role === "admin",
-        actor: actorOf(activeUser),
-        key: `user:${activeUser.id}`,
-        linkId: null,
-      };
+    const link = credentials.shareToken ? await this.find(credentials.shareToken) : null;
+    if (credentials.shareToken) {
+      if (!link || link.projectId !== projectId) return notFound("Share link");
+      if (link.revokedAt) return new HttpError(410, "link_revoked", "This share link was turned off");
     }
-    if (!credentials.shareToken) return user ? new HttpError(403, "forbidden", "You don't have access to this project") : unauthorized();
-    const link = await this.link(credentials.shareToken);
-    if (!link || link.projectId !== projectId) return notFound("Share link");
+    if (user && !user.mustChangePassword && user.role !== "guest") {
+      const byRole = user.role === "editor" || user.role === "admin";
+      // A collaborative link lets any signed-in user who opens it edit, like it does for guests.
+      const byLink = link?.collaboration === true;
+      return { projectId, canEdit: byRole || byLink, actor: actorOf(user), key: `user:${user.id}`, linkId: byRole ? null : (link?.id ?? null) };
+    }
+    if (!link) {
+      if (user?.mustChangePassword) return new HttpError(403, "password_change_required", "Please change your password first");
+      return user ? new HttpError(403, "forbidden", "You don't have access to this project") : unauthorized();
+    }
     return this.viaLink(link, credentials) ?? new HttpError(403, "forbidden", "You don't have access to this project");
   }
 
@@ -113,14 +139,22 @@ export class AccessService {
     return access;
   }
 
-  /** Instance data (team calendar, team members): any signed-in non-guest, or any valid link visitor. */
-  async requireInstanceRead(credentials: Credentials): Promise<void> {
+  /**
+   * Instance data (team calendar, team members): any signed-in non-guest ("member"), or any valid
+   * link visitor ("link" — callers must hide personal details such as time-off notes).
+   */
+  async requireInstanceRead(credentials: Credentials): Promise<"member" | "link"> {
     const { user } = credentials;
-    if (user && !user.mustChangePassword && user.role !== "guest") return;
-    if (!credentials.shareToken) throw user ? new HttpError(403, "forbidden", "You don't have access to this") : unauthorized();
-    const link = await this.link(credentials.shareToken);
+    if (user && !user.mustChangePassword && user.role !== "guest") return "member";
+    if (!credentials.shareToken) {
+      if (user?.mustChangePassword) throw new HttpError(403, "password_change_required", "Please change your password first");
+      throw user ? new HttpError(403, "forbidden", "You don't have access to this") : unauthorized();
+    }
+    const link = await this.find(credentials.shareToken);
     if (!link) throw notFound("Share link");
+    if (link.revokedAt) throw new HttpError(410, "link_revoked", "This share link was turned off");
     if (!this.viaLink(link, credentials)) throw new HttpError(403, "forbidden", "You don't have access to this");
+    return "link";
   }
 
   private viaLink(link: ShareLink, { user, visitor }: Credentials): ProjectAccess | null {

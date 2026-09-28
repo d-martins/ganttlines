@@ -30,12 +30,19 @@ export async function requireProjectAccess(
   return throttleShareTokens(request, context, credentials, () => context.access.require(credentials, projectId, level));
 }
 
-export async function requireInstanceRead(request: FastifyRequest, context: AccessContext, shareToken?: string | null): Promise<void> {
+export async function requireInstanceRead(
+  request: FastifyRequest,
+  context: AccessContext,
+  shareToken?: string | null,
+): Promise<"member" | "link"> {
   const credentials = credentialsOf(request, context.access, shareToken);
   return throttleShareTokens(request, context, credentials, () => context.access.requireInstanceRead(credentials));
 }
 
-/** Unknown share tokens count as failures per client IP; too many → 429 (like failed logins). */
+/**
+ * Unknown share tokens (404) count as failures per client IP; too many → 429 (like failed logins).
+ * Revoked links (410) do not count, so reconnecting tabs cannot lock out everyone behind one IP.
+ */
 export async function throttleShareTokens<T>(
   request: FastifyRequest,
   { shareLimiter }: AccessContext,

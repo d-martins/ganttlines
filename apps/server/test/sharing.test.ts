@@ -92,7 +92,65 @@ describe("anonymous links", () => {
   });
 });
 
+describe("scope of a link visitor", () => {
+  it("cannot reach anything beyond the shared board (spec §2.4)", async () => {
+    const { projectId, token } = await projectWithLink({ access: "anonymous", collaboration: true });
+    const headers = viaLink(token, await visit(token));
+    const id = "00000000-0000-4000-8000-000000000000";
+    const outOfScope: [string, string, object?][] = [
+      ["PATCH", `/api/projects/${projectId}`, { name: "Hacked" }],
+      ["POST", "/api/projects", { name: "New" }],
+      ["GET", "/api/projects"],
+      ["GET", `/api/projects/${projectId}/share-links`],
+      ["POST", `/api/projects/${projectId}/share-links`, { access: "anonymous" }],
+      ["PATCH", `/api/share-links/${id}`, { collaboration: true }],
+      ["DELETE", `/api/share-links/${id}`],
+      ["POST", "/api/resources", { name: "X" }],
+      ["POST", "/api/holidays", { name: "X", startDate: "2026-10-05", endDate: "2026-10-05", appliesTo: "all" }],
+      ["POST", "/api/time-off", { resourceId: id, startDate: "2026-10-05", endDate: "2026-10-05" }],
+      ["PUT", "/api/calendar/working-weekdays", { workingWeekdays: [1] }],
+      ["GET", "/api/users"],
+      ["GET", "/api/auth/me"],
+    ];
+    for (const [method, url, payload] of outOfScope) {
+      const response = await t.app.inject({ method: method as "GET", url, headers, ...(payload ? { payload } : {}) });
+      expect([401, 403], `${method} ${url} → ${response.statusCode}`).toContain(response.statusCode);
+    }
+  });
+
+  it("sees when team members are away, but not their time-off notes", async () => {
+    const { admin, token } = await projectWithLink({ access: "anonymous" });
+    const ana = (await t.app.inject({ method: "POST", url: "/api/resources", headers: { cookie: admin }, payload: { name: "Ana" } })).json().resource;
+    await t.app.inject({ method: "POST", url: "/api/time-off", headers: { cookie: admin }, payload: { resourceId: ana.id, startDate: "2026-10-05", endDate: "2026-10-06", note: "Surgery" } });
+    const viaShare = (await t.app.inject({ url: "/api/calendar", headers: viaLink(token, await visit(token)) })).json();
+    expect(viaShare.timeOff).toEqual([expect.objectContaining({ resourceId: ana.id, startDate: "2026-10-05", note: "" })]);
+    expect((await t.app.inject({ url: "/api/calendar", headers: { cookie: admin } })).json().timeOff[0].note).toBe("Surgery");
+  });
+
+  it("cleans display names so they cannot hide the '(anonymous)' suffix", async () => {
+    const { projectId, token } = await projectWithLink({ access: "anonymous", collaboration: true });
+    const visitor = await visit(token, "Ana\u202e  \nAdmin");
+    await command(projectId, viaLink(token, visitor), createTask(randomUUID()));
+    expect((await t.db.commandLog.findFirst({ where: { projectId } }))?.actorLabel).toBe("Ana Admin (anonymous)");
+  });
+});
+
 describe("authenticated links and guests", () => {
+  it("let signed-in viewers edit through a collaborative link", async () => {
+    const { admin, projectId, token } = await projectWithLink({ access: "authenticated", collaboration: true });
+    const viewer = await createUser(t.app, admin, { email: "v@example.com", name: "Vi", role: "viewer" });
+    expect((await command(projectId, { cookie: viewer.cookie }, createTask(randomUUID()))).statusCode).toBe(403);
+    expect((await command(projectId, viaLink(token, viewer.cookie), createTask(randomUUID()))).statusCode).toBe(200);
+  });
+
+  it("tell users who must change their password to do so", async () => {
+    const { admin, projectId } = await projectWithLink({ access: "authenticated" });
+    const created = (await t.app.inject({ method: "POST", url: "/api/users", headers: { cookie: admin }, payload: { email: "p@example.com", name: "P", role: "editor" } })).json();
+    const login = await t.app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "p@example.com", password: created.temporaryPassword } });
+    const cookie = `gp_session=${login.cookies.find((c) => c.name === "gp_session")!.value}`;
+    expect((await t.app.inject({ url: `/api/projects/${projectId}/state`, headers: { cookie } })).json().error).toBe("password_change_required");
+  });
+
   it("need a signed-in user, and give guests access to that one project", async () => {
     const { admin, projectId, token } = await projectWithLink({ access: "authenticated" });
     const guest = await createUser(t.app, admin, { email: "client@example.com", name: "Client", role: "guest" });
@@ -117,8 +175,16 @@ describe("changing and revoking links", () => {
     await t.app.inject({ method: "PATCH", url: `/api/share-links/${link.id}`, headers: { cookie: admin }, payload: { collaboration: false } });
     expect((await command(projectId, viaLink(token, visitor), createTask(randomUUID()))).statusCode).toBe(403);
     await t.app.inject({ method: "DELETE", url: `/api/share-links/${link.id}`, headers: { cookie: admin } });
-    expect((await t.app.inject({ url: `/api/projects/${projectId}/state`, headers: viaLink(token, visitor) })).statusCode).toBe(404);
-    expect((await t.app.inject({ url: `/api/share/${token}` })).statusCode).toBe(404);
+    expect((await t.app.inject({ url: `/api/projects/${projectId}/state`, headers: viaLink(token, visitor) })).statusCode).toBe(410);
+    expect((await t.app.inject({ url: `/api/share/${token}` })).json().error).toBe("link_revoked");
+  });
+
+  it("does not count revoked links as guesses (reconnecting tabs must not lock out an IP)", async () => {
+    const { admin, projectId, link, token } = await projectWithLink({ access: "anonymous" });
+    const other = (await t.app.inject({ method: "POST", url: `/api/projects/${projectId}/share-links`, headers: { cookie: admin }, payload: { access: "anonymous" } })).json();
+    await t.app.inject({ method: "DELETE", url: `/api/share-links/${link.id}`, headers: { cookie: admin } });
+    for (let i = 0; i < 12; i++) await t.app.inject({ url: `/api/share/${token}` });
+    expect((await t.app.inject({ url: `/api/share/${other.token}` })).statusCode).toBe(200);
   });
 
   it("throttles guessing tokens", async () => {
