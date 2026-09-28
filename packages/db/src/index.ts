@@ -1,6 +1,6 @@
 export { createDb, type Db } from "./client";
 export { toDbColumns, toEngineRow } from "./rows";
-export { Prisma, Role } from "../generated/prisma/client";
+export { LinkAccess, Prisma, Role } from "../generated/prisma/client";
 export type {
   CommandLog,
   Holiday,
@@ -9,6 +9,7 @@ export type {
   Row as DbRow,
   Session,
   Settings,
+  ShareLink,
   TimeOff,
   User,
 } from "../generated/prisma/client";

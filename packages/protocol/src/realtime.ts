@@ -18,8 +18,9 @@ export const ClientMessage = z.discriminatedUnion("type", [
 ]);
 export type ClientMessage = z.infer<typeof ClientMessage>;
 
+/** Someone looking at a project: `id` is stable per person (user or anonymous visitor). */
 export interface Viewer {
-  userId: string;
+  id: string;
   name: string;
 }
 

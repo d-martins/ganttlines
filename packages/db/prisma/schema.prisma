@@ -27,6 +27,7 @@ model User {
   sessions           Session[]
   resource           Resource?
   commands           CommandLog[]
+  shareLinks         ShareLink[]
 }
 
 model Session {
@@ -61,6 +62,7 @@ model Project {
   createdAt  DateTime  @default(now())
   rows       Row[]
   commands   CommandLog[]
+  shareLinks ShareLink[]
 }
 
 model Row {
@@ -134,4 +136,28 @@ model CommandLog {
   createdAt   DateTime @default(now())
 
   @@unique([projectId, version])
+}
+
+enum LinkAccess {
+  anonymous
+  authenticated
+}
+
+/// A link that opens one project's board. Only an HMAC of the token is stored.
+model ShareLink {
+  id              String     @id @default(uuid()) @db.Uuid
+  projectId       String     @db.Uuid
+  project         Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tokenHash       String     @unique
+  access          LinkAccess
+  /// false = view only; true = the board can be edited through the link
+  collaboration   Boolean    @default(false)
+  label           String     @default("")
+  createdByUserId String?    @db.Uuid
+  createdBy       User?      @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdByLabel  String
+  createdAt       DateTime   @default(now())
+  revokedAt       DateTime?
+
+  @@index([projectId])
 }
