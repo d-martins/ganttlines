@@ -88,7 +88,8 @@ describe("details panel", () => {
     await user.clear(days);
     await user.type(days, "4{Enter}");
     expect(sentCommands().at(-1)).toEqual({ type: "setDuration", id: "hooks", duration: 4 });
-    await user.selectOptions(within(panel()).getByRole("combobox", { name: "Predecessor" }), "#2 ui");
+    await user.click(within(panel()).getByRole("button", { name: "Predecessor: None" }));
+    await user.type(screen.getByRole("combobox", { name: "Find a predecessor" }), "ui{Enter}");
     expect(sentCommands().at(-1)).toEqual({ type: "linkTasks", fromId: "ui", toId: "hooks" });
     await user.type(within(panel()).getByRole("textbox", { name: "Description" }), "Billing events");
     await user.click(title); // leaving the description saves it
@@ -188,7 +189,7 @@ describe("details panel", () => {
     const { user } = await panelBoard(ROWS, VIEWER);
     await selectRow(user, "hooks");
     expect(within(panel()).getByRole("textbox", { name: "Task title" })).toBeDisabled();
-    expect(within(panel()).getByRole("combobox", { name: "Predecessor" })).toBeDisabled();
+    expect(within(panel()).queryByRole("button", { name: /^Predecessor/ })).not.toBeInTheDocument(); // shown as text
     expect(within(panel()).queryByRole("button", { name: /^Add a/ })).not.toBeInTheDocument();
     expect(within(panel()).getByRole("textbox", { name: "Write a comment" })).toBeEnabled();
   });

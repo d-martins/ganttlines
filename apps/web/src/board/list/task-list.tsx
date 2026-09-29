@@ -1,17 +1,19 @@
 import { TASK_COLORS, type Calendar, type RowId, type TaskColor, type TaskRow } from "@ganttlines/engine";
 import * as Popover from "@radix-ui/react-popover";
 import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, GripVertical, IndentDecrease, IndentIncrease, Plus, Search } from "lucide-react";
-import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { computeSchedule, CycleError } from "@ganttlines/engine";
+import { useEffect, useMemo, useRef, useState, type HTMLAttributes, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type Ref } from "react";
 import { Avatar } from "../../ui/avatar";
 import { useFocusReturnOnKeyboardClose } from "../../ui/popover-focus";
 import { IconButton } from "../../ui/button";
 import { AssigneePicker } from "../assignee-picker";
 import { useBoard, useRun } from "../board-context";
+import { PredecessorPicker } from "../predecessor-picker";
 import { setCollapsed } from "../collapse";
 import { taskColors } from "../format";
 import type { BoardRow } from "../model";
 import { useSelection } from "../selection";
-import { addAtEnd, addRowBelow, addSubtask, deleteRow, dropMove, setCalendarDays, setPredecessor, setWorkingDays, type DropZone } from "./list-actions";
+import { addAtEnd, addRowBelow, addSubtask, deleteRow, dropMove, setCalendarDays, setWorkingDays, type DropZone } from "./list-actions";
 
 /**
  * Column template shared by the header and the rows: # · title · assignee · WD · CD · predecessor · color.
@@ -169,6 +171,14 @@ function InlineInput({
 }
 
 type Column = "wd" | "cd" | "pred";
+
+/** After a picker closes, carry on from its cell — unless focus already went somewhere else. */
+function refocusCell(cell: string) {
+  setTimeout(() => {
+    if (document.activeElement && document.activeElement !== document.body) return;
+    document.querySelector<HTMLElement>(`[data-cell="${CSS.escape(cell)}"]`)?.focus();
+  });
+}
 interface DragState {
   id: RowId;
   target: { index: number; zone: DropZone } | null;
@@ -197,6 +207,15 @@ export function ListRows({
   const { selectedId, editingId, draftId, select, edit, center } = useSelection();
   const [cell, setCell] = useState<{ id: RowId; column: Column } | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
+  // Dates shown in the predecessor picker.
+  const schedule = useMemo(() => {
+    try {
+      return computeSchedule(state, calendar);
+    } catch (error) {
+      if (error instanceof CycleError) return null;
+      throw error;
+    }
+  }, [state, calendar]);
 
   // A row being edited can vanish (deleted by someone else): stop editing it.
   useEffect(() => {
@@ -437,6 +456,7 @@ export function ListRows({
               ) : (
                 <CellButton
                   editable={canEdit && !!task && !entry.isParent}
+                  hint={canEdit ? (entry.isParent || !task ? "Worked out from the tasks inside" : undefined) : undefined}
                   label={`Working days of “${row.title || "Untitled"}”`}
                   cell={`${row.id}:wd`}
                   onEdit={() => setCell({ id: row.id, column: "wd" })}
@@ -462,6 +482,17 @@ export function ListRows({
               ) : (
                 <CellButton
                   editable={canEdit && !!task && !entry.isParent && task.duration > 0 && entry.span !== null}
+                  hint={
+                    !canEdit
+                      ? undefined
+                      : entry.isParent || !task
+                        ? "Worked out from the tasks inside"
+                        : task.duration === 0
+                          ? "A milestone is a single day"
+                          : entry.span === null
+                            ? "Give it dates first (drag it onto the chart or set a start)"
+                            : undefined
+                  }
                   label={`Calendar days of “${row.title || "Untitled"}”`}
                   cell={`${row.id}:cd`}
                   onEdit={() => setCell({ id: row.id, column: "cd" })}
@@ -471,20 +502,27 @@ export function ListRows({
               )}
             </span>
             <span role="gridcell" aria-label={predecessor ? `After ${predecessor}` : "No predecessor"} className="text-right text-xs tabular-nums">
-              {editingCell === "pred" && task ? (
-                <InlineInput
-                  initial={predecessor.replace("−", "-")}
-                  label="Predecessor"
-                  cell={`${row.id}:pred`}
-                  className="w-full text-right text-xs"
-                  onCommit={(value) => {
-                    setCell(null);
-                    if (value.trim() !== predecessor.replace("−", "-")) setPredecessor(board, state, task, value, numbers);
+              {task && canEdit ? (
+                // A searchable list of tasks (like the assignee picker), opened by a double-click or Space / Enter.
+                <PredecessorPicker
+                  task={task}
+                  state={state}
+                  schedule={schedule}
+                  numbers={numbers}
+                  withOffset
+                  open={editingCell === "pred"}
+                  onOpenChange={(open) => {
+                    setCell(open ? { id: row.id, column: "pred" } : null);
+                    if (!open) refocusCell(`${row.id}:pred`);
                   }}
-                  onCancel={() => setCell(null)}
+                  trigger={
+                    <CellButton editable label={`Predecessor of “${row.title || "Untitled"}”`} cell={`${row.id}:pred`} onEdit={() => setCell({ id: row.id, column: "pred" })}>
+                      {predecessor}
+                    </CellButton>
+                  }
                 />
               ) : (
-                <CellButton editable={canEdit && !!task} label={`Predecessor of “${row.title || "Untitled"}”`} cell={`${row.id}:pred`} onEdit={() => setCell({ id: row.id, column: "pred" })}>
+                <CellButton editable={false} label="" cell="" onEdit={() => undefined}>
                   {predecessor}
                 </CellButton>
               )}
@@ -511,11 +549,35 @@ export function ListRows({
 }
 
 /** A value that turns into a text box on a double-click or Space / Enter (if editable); a click selects the row. */
-function CellButton({ editable, label, cell, onEdit, children }: { editable: boolean; label: string; cell: string; onEdit: () => void; children: string }) {
+function CellButton({
+  editable,
+  label,
+  cell,
+  onEdit,
+  children,
+  hint,
+  ...anchor
+}: {
+  editable: boolean;
+  label: string;
+  cell: string;
+  onEdit: () => void;
+  children: string;
+  /** why a read-only value can't be edited (shown on hover) */
+  hint?: string | undefined;
+  ref?: Ref<HTMLButtonElement>;
+} & HTMLAttributes<HTMLButtonElement>) {
   // Same box as the button, so editable and read-only values line up.
-  if (!editable) return <span className="block h-6 truncate px-1 leading-6">{children}</span>;
+  if (!editable) {
+    return (
+      <span title={hint} className={`block h-6 truncate px-1 leading-6 ${hint ? "cursor-help" : ""}`}>
+        {children}
+      </span>
+    );
+  }
   return (
     <button
+      {...anchor}
       type="button"
       data-cell={cell}
       aria-label={label}

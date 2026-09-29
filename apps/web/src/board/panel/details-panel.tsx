@@ -7,9 +7,10 @@ import { currentUser } from "../../api/queries";
 import { Avatar } from "../../ui/avatar";
 import { IconButton } from "../../ui/button";
 import { AssigneePicker } from "../assignee-picker";
+import { PredecessorPicker } from "../predecessor-picker";
 import { useBoard, useRun } from "../board-context";
 import { formatDay, taskColors } from "../format";
-import { addSubtask, setPredecessor, setWorkingDays } from "../list/list-actions";
+import { addSubtask, setWorkingDays } from "../list/list-actions";
 import { useSelection } from "../selection";
 import { Activity } from "./activity";
 import { Comments } from "./comments";
@@ -185,9 +186,8 @@ function TaskFields({ task, isParent, schedule, numbers }: { task: TaskRow; isPa
   const leaf = !isParent;
   const milestone = leaf && task.duration === 0;
   const datesLocked = leaf && task.locked;
-  const others = Object.values(state.rows)
-    .filter((row): row is TaskRow => row.kind === "task" && row.id !== task.id)
-    .sort((a, b) => (numbers.get(a.id) ?? 0) - (numbers.get(b.id) ?? 0));
+  const predecessor = task.predecessorId ? state.rows[task.predecessorId] : undefined;
+  const predecessorLabel = predecessor ? `#${numbers.get(predecessor.id)} ${predecessor.title || "Untitled"}` : "None";
 
   return (
     <div className="flex flex-col gap-2">
@@ -247,24 +247,21 @@ function TaskFields({ task, isParent, schedule, numbers }: { task: TaskRow; isPa
         </Field>
       )}
       <Field label="Predecessor">
-        <select
-          aria-label="Predecessor"
-          disabled={!canEdit}
-          value={task.predecessorId ?? ""}
-          onChange={(event) =>
-            event.target.value
-              ? setPredecessor(board, state, task, `#${numbers.get(event.target.value)} ${task.offset >= 0 ? "+" : "-"}${Math.abs(task.offset)}`, numbers)
-              : setPredecessor(board, state, task, "", numbers)
-          }
-          className={INPUT}
-        >
-          <option value="">None</option>
-          {others.map((other) => (
-            <option key={other.id} value={other.id}>
-              #{numbers.get(other.id)} {other.title || "Untitled"}
-            </option>
-          ))}
-        </select>
+        {canEdit ? (
+          <PredecessorPicker
+            task={task}
+            state={state}
+            schedule={schedule}
+            numbers={numbers}
+            trigger={
+              <button type="button" aria-label={`Predecessor: ${predecessorLabel}`} className={`${INPUT} truncate text-left`}>
+                {predecessorLabel}
+              </button>
+            }
+          />
+        ) : (
+          <span>{predecessorLabel}</span>
+        )}
       </Field>
       {task.predecessorId ? (
         <Field label="Offset (days)">

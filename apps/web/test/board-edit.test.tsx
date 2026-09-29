@@ -127,20 +127,27 @@ describe("editing the task list", () => {
     await user.dblClick(screen.getByRole("button", { name: "Working days of “hooks”" }));
     await user.keyboard("{Control>}a{/Control}0{Enter}");
     expect(sentCommands().at(-1)).toEqual({ type: "convertMilestone", id: "hooks", milestone: true });
+    // The predecessor opens a searchable list of tasks (row number or title), like the assignee picker.
     await user.dblClick(screen.getByRole("button", { name: "Predecessor of “hooks”" }));
-    await user.keyboard("#2 +1{Enter}");
-    expect(sentCommands().slice(-2)).toEqual([
-      { type: "linkTasks", fromId: "ui", toId: "hooks" },
-      { type: "setOffset", id: "hooks", offset: 1 },
-    ]);
+    const search = screen.getByRole("combobox", { name: "Find a predecessor" });
+    expect(screen.getByRole("option", { selected: true })).toHaveTextContent("No predecessor");
+    expect(screen.queryByRole("option", { name: /design/ })).not.toBeInTheDocument(); // sections can't be predecessors
+    await user.type(search, "#2{Enter}");
+    expect(sentCommands().at(-1)).toEqual({ type: "linkTasks", fromId: "ui", toId: "hooks" });
+    await user.keyboard(" "); // Space on the focused cell opens it again, now with the offset
+    expect(screen.getByRole("option", { selected: true })).toHaveTextContent("#2 ui");
+    const offset = screen.getByRole("spinbutton", { name: "Offset from the predecessor" });
+    await user.clear(offset);
+    await user.type(offset, "1{Enter}");
+    expect(sentCommands().at(-1)).toEqual({ type: "setOffset", id: "hooks", offset: 1 });
     expect(within(listRow("hooks")).getByText("#2 +1")).toBeInTheDocument();
   });
 
   it("explains edits the engine refuses and doesn't send them", async () => {
-    const { user } = await editableBoard();
+    const { user } = await editableBoard([...ROWS, task("idea", { parentId: "design", position: "a2" })]);
     await user.dblClick(screen.getByRole("button", { name: "Predecessor of “hooks”" }));
-    await user.keyboard("#1{Enter}");
-    expect(await screen.findByRole("alert")).toHaveTextContent("Row #1 is a section");
+    await user.type(screen.getByRole("combobox", { name: "Find a predecessor" }), "idea{Enter}");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Both tasks need dates before they can be linked");
     expect(sentCommands()).toEqual([]);
   });
 
