@@ -194,7 +194,7 @@ export function ListRows({
   const board = useBoard();
   const { state, calendar, resources, resourceMap, canEdit, canCreateResources } = board;
   const run = useRun();
-  const { selectedId, editingId, draftId, select, edit } = useSelection();
+  const { selectedId, editingId, draftId, select, edit, center } = useSelection();
   const [cell, setCell] = useState<{ id: RowId; column: Column } | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
 
@@ -260,7 +260,11 @@ export function ListRows({
             aria-level={entry.depth + 1}
             aria-selected={selected}
             aria-expanded={entry.hasChildren ? !entry.collapsed : undefined}
-            onClick={() => select(row.id)}
+            onClick={() => {
+              // A click on the row that's already selected brings its bar into the middle of the chart.
+              if (selected) center(row.id);
+              select(row.id);
+            }}
             onDoubleClick={() => canEdit && edit(row.id)}
             className={`group ${COLUMNS} absolute right-0 left-0 px-1 text-sm ${selected ? "bg-accent-soft" : "hover:bg-surface"} ${drag?.id === row.id ? "opacity-50" : ""}`}
             style={{ top: (firstRow + index) * rowHeight, height: rowHeight }}
@@ -356,6 +360,7 @@ export function ListRows({
                       onClick={(event) => {
                         if (!selected) return;
                         event.stopPropagation();
+                        center(row.id);
                         edit(row.id);
                       }}
                       className={`min-w-0 truncate rounded-sm text-left ${row.title ? "" : "text-muted italic"}`}

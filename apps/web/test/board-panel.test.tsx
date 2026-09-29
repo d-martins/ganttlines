@@ -1,6 +1,6 @@
 import type { Command } from "@ganttlines/engine";
 import type { CommentDto, ProjectStateDto } from "@ganttlines/protocol";
-import { render, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { describeEntry } from "../src/board/panel/activity";
 import { MarkdownLite } from "../src/board/panel/markdown-lite";
@@ -109,6 +109,35 @@ describe("details panel", () => {
     await user.keyboard("{ArrowDown}");
     expect(panel()).toHaveAccessibleName("Details of “hooks”");
     expect(screen.getByRole("treegrid", { name: "Tasks" })).toHaveFocus();
+  });
+
+  it("opens from the list only: a click on the chart selects, and retargets the panel only if it's open", async () => {
+    const { user } = await panelBoard();
+    const hooksBar = screen.getByRole("button", { name: /^hooks,/ });
+    fireEvent.pointerDown(hooksBar, { button: 0, clientX: 10, clientY: 0 });
+    fireEvent.pointerUp(window, { clientX: 10, clientY: 0 });
+    expect(screen.getAllByRole("row").find((row) => row.getAttribute("aria-selected") === "true")).toHaveTextContent("hooks");
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    await selectRow(user, "ui");
+    expect(panel()).toHaveAccessibleName("Details of “ui”");
+    fireEvent.pointerDown(hooksBar, { button: 0, clientX: 10, clientY: 0 });
+    fireEvent.pointerUp(window, { clientX: 10, clientY: 0 });
+    expect(panel()).toHaveAccessibleName("Details of “hooks”");
+  });
+
+  it("centers the chart on a row's bar when its already selected row is clicked again", async () => {
+    const { user } = await panelBoard();
+    const scrollTo = vi.fn();
+    const scroller = screen.getByTestId("board-scroller");
+    scroller.scrollTo = scrollTo as unknown as typeof scroller.scrollTo;
+    await selectRow(user, "hooks");
+    expect(scrollTo).not.toHaveBeenCalled();
+    await selectRow(user, "hooks");
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+    const { left, behavior } = scrollTo.mock.calls[0]![0] as ScrollToOptions;
+    // hooks: Oct 12–13; the chart starts Mon Aug 31 at 32 px a day, so its middle is at 42 days × 32 px + 32
+    expect(left).toBe(42 * 32 + 32 - (1200 - 480) / 2);
+    expect(behavior).toBe("smooth");
   });
 
   it("shows, posts and live-updates comments", async () => {

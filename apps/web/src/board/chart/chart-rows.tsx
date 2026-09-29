@@ -130,7 +130,7 @@ export function ChartRows({
       useChartDrag.setState({ drag: null });
       if (!moved) {
         // A click, not a drag: select the row, and focus the bar so the keyboard works on it next.
-        select(rowId);
+        select(rowId, false);
         if (kind === "move") pressed.focus({ preventScroll: true });
         return;
       }
@@ -209,7 +209,7 @@ export function ChartRows({
             onPointerLeave={() => hover?.index === absoluteIndex && setHover(null)}
             onClick={() => {
               if (unscheduledLeaf && canEdit && hover?.index === absoluteIndex) run({ type: "moveTask", id: row.id, start: fromDay(hover.day) });
-              select(row.id);
+              select(row.id, false);
             }}
           >
             {entry.ghost ? <GhostBar ghost={entry.ghost} timeline={timeline} style={style} /> : null}
@@ -228,7 +228,7 @@ export function ChartRows({
                         "aria-describedby": BAR_HELP_ID,
                         onPointerDown: (event) => (movable ? startDrag(event, entry, absoluteIndex, "move") : undefined),
                         onKeyDown: (event) => onBarKey(event, entry),
-                        onFocus: (event) => event.currentTarget.matches(":focus-visible") && select(row.id),
+                        onFocus: (event) => event.currentTarget.matches(":focus-visible") && select(row.id, false),
                         className: `${movable ? "cursor-grab active:cursor-grabbing" : ""} focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus)]`,
                       }
                     : undefined

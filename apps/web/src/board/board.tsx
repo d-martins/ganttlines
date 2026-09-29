@@ -71,7 +71,7 @@ export function Board({
     return result.ok ? result.state : state;
   }, [state, calendar, dragCommand]);
   const model = useMemo(() => boardModel(displayed, calendar, baseline, query, collapsed), [displayed, calendar, baseline, query, collapsed]);
-  const { selectedId, select } = useSelection();
+  const { selectedId, select, centerRequest } = useSelection();
   const onListKey = useListKeys(model.rows);
   const todayDay = today();
   const highlightDays = useMemo(() => highlights.map((highlight) => ({ day: toDay(highlight.date), highlight })), [highlights]);
@@ -143,6 +143,20 @@ export function Board({
   // One spare row under the last task holds "+ Add task / + Add section".
   const bodyHeight = Math.max((model.rows.length + (canEdit ? 1 : 0)) * rowHeight, viewport.height - HEADER_HEIGHT);
   const selectedIndex = model.rows.findIndex((entry) => entry.row.id === selectedId);
+
+  // Center the chart on a row's bar when asked (a click on the already selected row).
+  useEffect(() => {
+    const element = scroller.current;
+    const span = centerRequest ? model.rows.find((entry) => entry.row.id === centerRequest.id)?.span : null;
+    if (!element || !span) return;
+    const middle = (timeline.x(span.start) + timeline.xEnd(span.end)) / 2;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const left = Math.max(middle - chartWidth / 2, 0);
+    if (typeof element.scrollTo === "function") element.scrollTo({ left, behavior: reduce ? "auto" : "smooth" });
+    else element.scrollLeft = left;
+    // Only a new request moves the chart; later edits to the row don't.
+    // (model/timeline/chartWidth are read at request time.)
+  }, [centerRequest]);
 
   // Keep the selected row on screen (keyboard moves, new rows).
   useEffect(() => {
