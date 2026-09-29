@@ -15,6 +15,30 @@
   --accent-soft: #e3ecfb;
   --danger: #c62828;
   --focus: #1f6fd6;
+  /* Chart. Task colors are dark enough for white titles (AA) except the light ones, which use dark ink. */
+  --grid: #eef0f4;
+  --weekend: #f4f5f8;
+  --holiday: #eceff4;
+  --holiday-stripe: #dde1e8;
+  --time-off-stripe: rgba(91, 100, 116, 0.16);
+  --today: #e5484d;
+  --dependency: #8a93a3;
+  --violation: #d32f2f;
+  --parent: #3a4150;
+  --section: #8a93a3;
+  --baseline: rgba(29, 35, 48, 0.28);
+  --skipped: #c3c8d1;
+  --task-blue: #1f6fd6;
+  --task-purple: #7e3fc4;
+  --task-pink: #c2307a;
+  --task-red: #c62828;
+  --task-orange: #f2994a;
+  --task-yellow: #f2c94c;
+  --task-green: #1e8449;
+  --task-teal: #0f7f86;
+  --task-gray: #5b6474;
+  --task-ink: #ffffff;
+  --task-ink-light: #1d2330;
   color-scheme: light;
 }
 
@@ -31,6 +55,30 @@
   --accent-soft: #23344d;
   --danger: #ff7b7b;
   --focus: #6fb2ff;
+  --grid: #2c2d31;
+  --weekend: #25262a;
+  --holiday: #2a2b30;
+  --holiday-stripe: #34353b;
+  --time-off-stripe: rgba(232, 232, 234, 0.1);
+  --today: #ff6b6b;
+  --dependency: #8b8f99;
+  --violation: #ff7b7b;
+  --parent: #d5d7dc;
+  --section: #8b8f99;
+  --baseline: rgba(232, 232, 234, 0.3);
+  --skipped: #4a4b52;
+  /* Saturated bars (mockup A) with dark titles, which keeps AA contrast on every color. */
+  --task-blue: #3ea0e6;
+  --task-purple: #a57be8;
+  --task-pink: #e86bb8;
+  --task-red: #ff7b7b;
+  --task-orange: #ffa657;
+  --task-yellow: #f5d565;
+  --task-green: #4cc38a;
+  --task-teal: #3cc7c7;
+  --task-gray: #9aa0ac;
+  --task-ink: #0b1220;
+  --task-ink-light: #0b1220;
   color-scheme: dark;
 }
 
