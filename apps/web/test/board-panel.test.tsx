@@ -140,6 +140,20 @@ describe("details panel", () => {
     expect(behavior).toBe("smooth");
   });
 
+  it("centers on a double-click on the row, but a double-click on a cell edits it instead", async () => {
+    const { user } = await panelBoard();
+    const scrollTo = vi.fn();
+    const scroller = screen.getByTestId("board-scroller");
+    scroller.scrollTo = scrollTo as unknown as typeof scroller.scrollTo;
+    const row = () => screen.getAllByRole("row").find((candidate) => within(candidate).queryByText("ui", { exact: true }))!;
+    await user.dblClick(row().querySelector('[aria-label^="Row "]')!);
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("textbox", { name: "Title" })).not.toBeInTheDocument();
+    await user.dblClick(screen.getByRole("button", { name: "Title “hooks”" }));
+    expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("hooks");
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+  });
+
   it("shows, posts and live-updates comments", async () => {
     const { api, user } = await panelBoard(ROWS, ADMIN, [comment("c2", { body: "**first** idea" }), comment("c1", { deleted: true, body: "" })]);
     const posted: unknown[] = [];

@@ -124,10 +124,10 @@ describe("editing the task list", () => {
 
   it("edits working days and predecessors from their columns", async () => {
     const { user } = await editableBoard();
-    await user.click(screen.getByRole("button", { name: "Working days of “hooks”" }));
+    await user.dblClick(screen.getByRole("button", { name: "Working days of “hooks”" }));
     await user.keyboard("{Control>}a{/Control}0{Enter}");
     expect(sentCommands().at(-1)).toEqual({ type: "convertMilestone", id: "hooks", milestone: true });
-    await user.click(screen.getByRole("button", { name: "Predecessor of “hooks”" }));
+    await user.dblClick(screen.getByRole("button", { name: "Predecessor of “hooks”" }));
     await user.keyboard("#2 +1{Enter}");
     expect(sentCommands().slice(-2)).toEqual([
       { type: "linkTasks", fromId: "ui", toId: "hooks" },
@@ -138,7 +138,7 @@ describe("editing the task list", () => {
 
   it("explains edits the engine refuses and doesn't send them", async () => {
     const { user } = await editableBoard();
-    await user.click(screen.getByRole("button", { name: "Predecessor of “hooks”" }));
+    await user.dblClick(screen.getByRole("button", { name: "Predecessor of “hooks”" }));
     await user.keyboard("#1{Enter}");
     expect(await screen.findByRole("alert")).toHaveTextContent("Row #1 is a section");
     expect(sentCommands()).toEqual([]);
@@ -232,5 +232,14 @@ describe("editing the task list", () => {
     expect(listRow("ui")).toHaveAttribute("aria-selected", "false");
     expect(list).not.toHaveFocus();
     expect(list).not.toHaveAttribute("tabindex", "0");
+  });
+
+  it("edits a cell on a double-click; a single click only selects the row", async () => {
+    const { user } = await editableBoard();
+    await user.click(screen.getByRole("button", { name: "Working days of “ui”" }));
+    expect(screen.queryByRole("textbox", { name: "Working days" })).not.toBeInTheDocument();
+    expect(listRow("ui")).toHaveAttribute("aria-selected", "true");
+    await user.dblClick(screen.getByRole("button", { name: "Title “ui”" }));
+    expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("ui");
   });
 });

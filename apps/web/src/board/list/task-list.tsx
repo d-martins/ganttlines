@@ -260,12 +260,13 @@ export function ListRows({
             aria-level={entry.depth + 1}
             aria-selected={selected}
             aria-expanded={entry.hasChildren ? !entry.collapsed : undefined}
-            onClick={() => {
-              // A click on the row that's already selected brings its bar into the middle of the chart.
-              if (selected) center(row.id);
+            onClick={(event) => {
+              // A click on the row that's already selected — or a double-click on the row — brings its bar
+              // into the middle of the chart. Not the second click of a double-click on a cell: that edits the cell.
+              const onCell = (event.target as HTMLElement).closest("[data-cell]") !== null;
+              if (selected && !(onCell && event.detail >= 2)) center(row.id);
               select(row.id);
             }}
-            onDoubleClick={() => canEdit && edit(row.id)}
             className={`group ${COLUMNS} absolute right-0 left-0 px-1 text-sm ${selected ? "bg-accent-soft" : "hover:bg-surface"} ${drag?.id === row.id ? "opacity-50" : ""}`}
             style={{ top: (firstRow + index) * rowHeight, height: rowHeight }}
           >
@@ -345,7 +346,7 @@ export function ListRows({
               ) : (
                 <>
                   {canEdit ? (
-                    // A button so it can be reached with Tab: Space/Enter edits; a click selects, a second click edits.
+                    // A button so it can be reached with Tab: Space/Enter or a double-click edits; a click selects the row.
                     <button
                       type="button"
                       data-cell={`${row.id}:title`}
@@ -357,10 +358,8 @@ export function ListRows({
                         event.stopPropagation();
                         edit(row.id);
                       }}
-                      onClick={(event) => {
-                        if (!selected) return;
+                      onDoubleClick={(event) => {
                         event.stopPropagation();
-                        center(row.id);
                         edit(row.id);
                       }}
                       className={`min-w-0 truncate rounded-sm text-left ${row.title ? "" : "text-muted italic"}`}
@@ -511,7 +510,7 @@ export function ListRows({
   );
 }
 
-/** A read-only value that turns into a text box when clicked (if editable). */
+/** A value that turns into a text box on a double-click or Space / Enter (if editable); a click selects the row. */
 function CellButton({ editable, label, cell, onEdit, children }: { editable: boolean; label: string; cell: string; onEdit: () => void; children: string }) {
   // Same box as the button, so editable and read-only values line up.
   if (!editable) return <span className="block h-6 truncate px-1 leading-6">{children}</span>;
@@ -520,7 +519,13 @@ function CellButton({ editable, label, cell, onEdit, children }: { editable: boo
       type="button"
       data-cell={cell}
       aria-label={label}
-      onClick={(event) => {
+      onKeyDown={(event) => {
+        if (event.key !== " " && event.key !== "Enter") return;
+        event.preventDefault();
+        event.stopPropagation();
+        onEdit();
+      }}
+      onDoubleClick={(event) => {
         event.stopPropagation();
         onEdit();
       }}
