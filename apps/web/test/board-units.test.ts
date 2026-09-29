@@ -128,3 +128,19 @@ describe("list edits", () => {
     expect(dropMove(withSection, "t", withSection.rows.a, "inside")).toEqual({ parentId: "s", afterId: "a" }); // sections never go inside tasks: lands after it
   });
 });
+
+describe("chart drags", () => {
+  it("turns pointer travel into moves and resizes, snapping to visible days", async () => {
+    const { dragCommand, stepDay } = await import("../src/board/chart/drag");
+    const timeline = new Timeline(FRI, FRI + 20, 10, weekend);
+    const span = { start: FRI, end: FRI + 3 }; // Fri → Mon
+    expect(dragCommand("move", "t", span, timeline, 4, 0)).toBeNull(); // less than half a column
+    expect(dragCommand("move", "t", span, timeline, 10, 0)).toMatchObject({ type: "moveTask", start: "2026-10-12" }); // Fri → Mon, weekend skipped
+    expect(dragCommand("end", "t", span, timeline, 0, 25)).toMatchObject({ type: "resizeTask", edge: "end", date: "2026-10-13" });
+    expect(dragCommand("end", "t", span, timeline, 0, 0)).toMatchObject({ date: "2026-10-09" }); // never before the start
+    expect(dragCommand("start", "t", span, timeline, 0, 5)).toBeNull(); // Friday: where it already starts
+    expect(dragCommand("start", "t", span, timeline, 0, 15)).toMatchObject({ type: "resizeTask", edge: "start", date: "2026-10-12" });
+    expect(stepDay(timeline, FRI, 1)).toBe(FRI + 3);
+    expect(stepDay(timeline, FRI + 3, -1)).toBe(FRI);
+  });
+});
