@@ -19,6 +19,8 @@ import { boardModel, type CompareMode } from "./model";
 import { useBoardView } from "./view-store";
 
 const HEADER_HEIGHT = 48;
+/** how far inside the chart's left edge a revealed bar starts */
+const BAR_REVEAL_MARGIN = 24;
 const OVERSCAN_ROWS = 10;
 const OVERSCAN_PX = 600;
 /** Where "today" (and the day kept in place when zooming) sits: a third into the chart. */
@@ -144,18 +146,17 @@ export function Board({
   const bodyHeight = Math.max((model.rows.length + (canEdit ? 1 : 0)) * rowHeight, viewport.height - HEADER_HEIGHT);
   const selectedIndex = model.rows.findIndex((entry) => entry.row.id === selectedId);
 
-  // Center the chart on a row's bar when asked (a click on the already selected row).
+  // Bring a row's bar into view when asked (a click on the already selected row, or a double-click):
+  // its start lands just inside the chart's left edge, so it reads from the beginning.
   useEffect(() => {
     const element = scroller.current;
     const span = centerRequest ? model.rows.find((entry) => entry.row.id === centerRequest.id)?.span : null;
     if (!element || !span) return;
-    const middle = (timeline.x(span.start) + timeline.xEnd(span.end)) / 2;
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const left = Math.max(middle - chartWidth / 2, 0);
+    const left = Math.max(timeline.x(span.start) - BAR_REVEAL_MARGIN, 0);
     if (typeof element.scrollTo === "function") element.scrollTo({ left, behavior: reduce ? "auto" : "smooth" });
     else element.scrollLeft = left;
-    // Only a new request moves the chart; later edits to the row don't.
-    // (model/timeline/chartWidth are read at request time.)
+    // Only a new request moves the chart; later edits to the row don't (model/timeline are read at request time).
   }, [centerRequest]);
 
   // Keep the selected row on screen (keyboard moves, new rows).

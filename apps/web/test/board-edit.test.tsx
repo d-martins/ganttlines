@@ -241,15 +241,13 @@ describe("editing the task list", () => {
     expect(list).not.toHaveAttribute("tabindex", "0");
   });
 
-  it("opens WD, CD and predecessor on a single click (selecting the row); the title needs a double-click", async () => {
+  it("opens every cell on a single click, selecting the row too", async () => {
     const { user } = await editableBoard();
     await user.click(screen.getByRole("button", { name: "Working days of “ui”" }));
     expect(screen.getByRole("textbox", { name: "Working days" })).toHaveFocus();
     expect(listRow("ui")).toHaveAttribute("aria-selected", "true");
     await user.keyboard("{Escape}");
-    await user.click(screen.getByRole("button", { name: "Title “ui”" }));
-    expect(screen.queryByRole("textbox", { name: "Title" })).not.toBeInTheDocument();
-    await user.dblClick(screen.getByRole("button", { name: "Title “ui”" }));
-    expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("ui");
+    await user.click(screen.getByRole("button", { name: "Title “hooks”" }));
+    expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("hooks");
   });
 });

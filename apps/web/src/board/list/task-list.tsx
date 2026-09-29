@@ -281,12 +281,9 @@ export function ListRows({
             aria-expanded={entry.hasChildren ? !entry.collapsed : undefined}
             onClick={(event) => {
               // A click on the row that's already selected — or a double-click on the row — brings its bar
-              // into the middle of the chart. Not a click that opens a cell (WD, CD, predecessor), nor the
-              // second click of a double-click on the title (that edits it).
-              const cell = (event.target as HTMLElement).closest("[data-cell]")?.getAttribute("data-cell");
-              const opensCell = cell !== null && cell !== undefined && !cell.endsWith(":title");
-              const editsTitle = cell?.endsWith(":title") === true && event.detail >= 2;
-              if (selected && !opensCell && !editsTitle) center(row.id);
+              // into view (its start just inside the chart's left edge). Not a click that opens a cell.
+              const opensCell = (event.target as HTMLElement).closest("[data-cell]") !== null;
+              if (selected && !opensCell) center(row.id);
               select(row.id);
             }}
             className={`group ${COLUMNS} absolute right-0 left-0 px-1 text-sm ${selected ? "bg-accent-soft" : "hover:bg-surface"} ${drag?.id === row.id ? "opacity-50" : ""}`}
@@ -368,7 +365,7 @@ export function ListRows({
               ) : (
                 <>
                   {canEdit ? (
-                    // A button so it can be reached with Tab: Space/Enter or a double-click edits; a click selects the row.
+                    // A button so it can be reached with Tab: a click or Space/Enter edits (the click also selects the row).
                     <button
                       type="button"
                       data-cell={`${row.id}:title`}
@@ -380,10 +377,7 @@ export function ListRows({
                         event.stopPropagation();
                         edit(row.id);
                       }}
-                      onDoubleClick={(event) => {
-                        event.stopPropagation();
-                        edit(row.id);
-                      }}
+                      onClick={() => edit(row.id)}
                       className={`min-w-0 truncate rounded-sm text-left ${row.title ? "" : "text-muted italic"}`}
                     >
                       {row.title || "Untitled"}

@@ -9,7 +9,7 @@ interface Selection {
   draftId: string | null;
   /** the details panel is open: selecting a row opens it (and retargets it); × / Escape close it */
   panelOpen: boolean;
-  /** a request to scroll the chart so this row's bar is centered (`seq` makes repeats count) */
+  /** a request to scroll the chart to this row's bar (`seq` makes repeats count) */
   centerRequest: { id: string; seq: number } | null;
   /** selects a row; list selections open the panel, chart ones only retarget it when already open */
   select: (id: string | null, openPanel?: boolean) => void;

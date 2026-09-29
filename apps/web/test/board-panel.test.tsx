@@ -126,7 +126,7 @@ describe("details panel", () => {
     expect(panel()).toHaveAccessibleName("Details of “hooks”");
   });
 
-  it("centers the chart on a row's bar when its already selected row is clicked again", async () => {
+  it("scrolls a row's bar into view (start just inside the left edge) when its already selected row is clicked again", async () => {
     const { user } = await panelBoard();
     const scrollTo = vi.fn();
     const scroller = screen.getByTestId("board-scroller");
@@ -139,8 +139,8 @@ describe("details panel", () => {
     await selectRow(user, "hooks");
     expect(scrollTo).toHaveBeenCalledTimes(1);
     const { left, behavior } = scrollTo.mock.calls[0]![0] as ScrollToOptions;
-    // hooks: Oct 12–13; the chart starts Mon Aug 31 at 32 px a day, so its middle is at 42 days × 32 px + 32
-    expect(left).toBe(42 * 32 + 32 - (1200 - 480) / 2);
+    // hooks starts Oct 12; the chart starts Mon Aug 31 at 32 px a day: its start lands 24 px inside the left edge
+    expect(left).toBe(42 * 32 - 24);
     expect(behavior).toBe("smooth");
   });
 
