@@ -83,3 +83,12 @@ describe("list and arrows", () => {
     expect(elbow(pred, { left: 44, y: 45 }, 30)).toBe("M70,22 V30 H36 V45 H44");
   });
 });
+
+describe("list width", () => {
+  it("never narrows the list below its columns", async () => {
+    const { useBoardView, LIST_WIDTH } = await import("../src/board/view-store");
+    useBoardView.getState().setListWidth(250);
+    expect(useBoardView.getState().listWidth).toBe(LIST_WIDTH.min);
+    expect(LIST_WIDTH.min).toBe(40 + 96 + 120 + 40 + 40 + 56 + 8);
+  });
+});

@@ -4,8 +4,11 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { Avatar } from "../../ui/avatar";
 import type { BoardRow } from "../model";
 
-/** Column template shared by the header and the rows: # · title · assignee · WD · CD · predecessor. */
-const COLUMNS = "grid grid-cols-[40px_minmax(120px,1fr)_120px_40px_40px_56px] items-center";
+/**
+ * Column template shared by the header and the rows: # · title · assignee · WD · CD · predecessor.
+ * Fixed columns + the title's minimum + padding = LIST_WIDTH.min, so no column is ever cut off.
+ */
+const COLUMNS = "grid grid-cols-[40px_minmax(96px,1fr)_120px_40px_40px_56px] items-center";
 
 export function ListHeader() {
   return (
