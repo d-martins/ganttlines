@@ -1,53 +1,86 @@
 import type { Comment } from "@ganttlines/db";
-import { CommentBody, EditCommentBody, type CommentDto } from "@ganttlines/protocol";
+import { BOARD_LIMITS, CommentBody, EditCommentBody, type CommentDto } from "@ganttlines/protocol";
 import type { FastifyInstance } from "fastify";
-import type { Actor } from "../actor";
+import { z } from "zod";
+import { actorKey, type Actor } from "../actor";
 import { requireProjectAccess } from "../auth/request-access";
-import { conflict, forbidden, notFound } from "../errors";
+import { badRequest, conflict, forbidden, notFound } from "../errors";
 import { parseBody, parseId } from "../validation";
+import { assertNotArchived } from "./board-helpers";
 import type { RouteContext } from "./context";
+
+const CommentsQuery = z.object({
+  taskId: z.uuid().optional(),
+  /** id of the oldest comment already shown */
+  before: z.uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(BOARD_LIMITS.commentPageMax).default(50),
+});
 
 /** Comments on tasks: anyone who can see the board reads them; commenters are signed-in users and collaborating link visitors. */
 export function commentRoutes(app: FastifyInstance, context: RouteContext): void {
   const { db, projects, hub } = context;
 
-  app.get<{ Params: { id: string }; Querystring: { taskId?: string } }>("/api/projects/:id/comments", async (request) => {
+  /** Pushes a created/changed comment to the room, telling each viewer whether it is theirs. */
+  const announce = (comment: Comment) =>
+    hub.broadcastEach(comment.projectId, (connection) => ({
+      type: "comment",
+      projectId: comment.projectId,
+      comment: toCommentDto(comment, connection.viewer?.id ?? null),
+    }));
+
+  app.get<{ Params: { id: string }; Querystring: Record<string, string> }>("/api/projects/:id/comments", async (request) => {
     const projectId = parseId(request.params.id, "Project");
-    await requireProjectAccess(request, context, projectId, "view");
-    const taskId = request.query.taskId === undefined ? undefined : parseId(request.query.taskId, "Task");
+    const { actor } = await requireProjectAccess(request, context, projectId, "view");
+    const query = CommentsQuery.safeParse(request.query);
+    if (!query.success) throw badRequest(z.prettifyError(query.error));
+    const { taskId, before, limit } = query.data;
+    const cursor = before ? await db.comment.findFirst({ where: { id: before, projectId } }) : null;
+    if (before && !cursor) throw notFound("Comment");
     const comments = await db.comment.findMany({
-      where: { projectId, ...(taskId ? { taskId } : {}) },
-      orderBy: { createdAt: "asc" },
-      take: 1000,
+      where: {
+        projectId,
+        ...(taskId ? { taskId } : {}),
+        ...(cursor
+          ? { OR: [{ createdAt: { lt: cursor.createdAt } }, { createdAt: cursor.createdAt, id: { lt: cursor.id } }] }
+          : {}),
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: limit + 1,
     });
-    return { comments: comments.map(toCommentDto) };
+    const page = comments.slice(0, limit);
+    return {
+      comments: page.map((comment) => toCommentDto(comment, actorKey(actor))),
+      nextBefore: comments.length > limit ? page[page.length - 1]!.id : null,
+    };
   });
 
   app.post<{ Params: { id: string } }>("/api/projects/:id/comments", async (request, reply) => {
     const projectId = parseId(request.params.id, "Project");
     const access = await requireProjectAccess(request, context, projectId, "view");
     if (!access.canComment) throw forbidden("You can only view this project");
+    await assertNotArchived(db, projectId);
     const body = parseBody(CommentBody, request.body);
     if (!(await projects.hasTask(projectId, body.taskId))) throw notFound("Task");
     const { actor } = access;
-    const comment = toCommentDto(
-      await db.comment.create({
-        data: { projectId, taskId: body.taskId, authorUserId: actor.userId, authorVisitorId: actor.visitorId ?? null, authorLabel: actor.label, body: body.body },
-      }),
-    );
-    hub.broadcast(projectId, { type: "comment", projectId, comment });
-    return reply.status(201).send({ comment });
+    const comment = await db.comment.create({
+      data: { projectId, taskId: body.taskId, authorUserId: actor.userId, authorVisitorId: actor.visitorId ?? null, authorLabel: actor.label, body: body.body },
+    });
+    announce(comment);
+    return reply.status(201).send({ comment: toCommentDto(comment, actorKey(actor)) });
   });
 
   app.patch<{ Params: { id: string } }>("/api/comments/:id", async (request) => {
     const comment = await findComment(request.params.id);
-    const { actor } = await requireProjectAccess(request, context, comment.projectId, "view");
-    if (!isAuthor(comment, actor)) throw forbidden("You can only edit your own comments");
-    if (comment.deletedAt) throw conflict("This comment was deleted");
+    const access = await requireProjectAccess(request, context, comment.projectId, "view");
+    if (!isAuthor(comment, access.actor)) throw forbidden("You can only edit your own comments");
+    if (!access.canComment) throw forbidden("You can only view this project");
     const { body } = parseBody(EditCommentBody, request.body);
-    const updated = toCommentDto(await db.comment.update({ where: { id: comment.id }, data: { body, editedAt: new Date() } }));
-    hub.broadcast(comment.projectId, { type: "comment", projectId: comment.projectId, comment: updated });
-    return { comment: updated };
+    // Only while not deleted, so an edit racing a delete cannot bring the text back.
+    const { count } = await db.comment.updateMany({ where: { id: comment.id, deletedAt: null }, data: { body, editedAt: new Date() } });
+    if (count === 0) throw conflict("This comment was deleted");
+    const updated = await db.comment.findUniqueOrThrow({ where: { id: comment.id } });
+    announce(updated);
+    return { comment: toCommentDto(updated, actorKey(access.actor)) };
   });
 
   app.delete<{ Params: { id: string } }>("/api/comments/:id", async (request, reply) => {
@@ -55,10 +88,8 @@ export function commentRoutes(app: FastifyInstance, context: RouteContext): void
     const { actor } = await requireProjectAccess(request, context, comment.projectId, "view");
     const isAdmin = request.user?.role === "admin" && actor.userId === request.user.id;
     if (!isAuthor(comment, actor) && !isAdmin) throw forbidden("You can only delete your own comments");
-    if (!comment.deletedAt) {
-      const deleted = toCommentDto(await db.comment.update({ where: { id: comment.id }, data: { body: "", deletedAt: new Date() } }));
-      hub.broadcast(comment.projectId, { type: "comment", projectId: comment.projectId, comment: deleted });
-    }
+    const { count } = await db.comment.updateMany({ where: { id: comment.id, deletedAt: null }, data: { body: "", deletedAt: new Date() } });
+    if (count > 0) announce(await db.comment.findUniqueOrThrow({ where: { id: comment.id } }));
     return reply.status(204).send();
   });
 
@@ -69,12 +100,20 @@ export function commentRoutes(app: FastifyInstance, context: RouteContext): void
   }
 }
 
-function isAuthor(comment: Comment, actor: Actor): boolean {
-  if (actor.userId) return comment.authorUserId === actor.userId;
-  return Boolean(actor.visitorId) && comment.authorVisitorId === actor.visitorId;
+function authorKeyOf(comment: Comment): string | null {
+  if (comment.authorUserId) return `user:${comment.authorUserId}`;
+  if (comment.authorVisitorId) return `visitor:${comment.authorVisitorId}`;
+  return null;
 }
 
-function toCommentDto(comment: Comment): CommentDto {
+function isAuthor(comment: Comment, actor: Actor): boolean {
+  const key = actorKey(actor);
+  return key !== null && key === authorKeyOf(comment);
+}
+
+/** `viewerKey` identifies the person the DTO is for ("user:<id>" / "visitor:<id>"). */
+function toCommentDto(comment: Comment, viewerKey: string | null): CommentDto {
+  const author = authorKeyOf(comment);
   return {
     id: comment.id,
     taskId: comment.taskId,
@@ -83,5 +122,6 @@ function toCommentDto(comment: Comment): CommentDto {
     createdAt: comment.createdAt.toISOString(),
     editedAt: comment.editedAt?.toISOString() ?? null,
     deleted: comment.deletedAt !== null,
+    mine: author !== null && author === viewerKey,
   };
 }

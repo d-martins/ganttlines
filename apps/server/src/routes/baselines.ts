@@ -6,6 +6,7 @@ import { requireUser } from "../auth/guard";
 import { requireProjectAccess } from "../auth/request-access";
 import { conflict, notFound } from "../errors";
 import { parseBody, parseId } from "../validation";
+import { assertNotArchived } from "./board-helpers";
 import type { RouteContext } from "./context";
 
 export const MAX_BASELINES_PER_PROJECT = 100;
@@ -15,11 +16,19 @@ export const MAX_BASELINES_PER_PROJECT = 100;
  * them (to switch to or overlay); only signed-in editors create or delete them (never via links).
  */
 export function baselineRoutes(app: FastifyInstance, context: RouteContext): void {
-  const { db, projects, hub } = context;
+  const { db, projects, hub, boardQueue } = context;
 
+  // Lists never load the (possibly large) snapshots.
   const list = async (projectId: string) =>
-    (await db.baseline.findMany({ where: { projectId }, orderBy: { createdAt: "desc" } })).map(toBaselineDto);
+    (await db.baseline.findMany({ where: { projectId }, orderBy: { createdAt: "desc" }, select: BASELINE_SUMMARY })).map(toBaselineDto);
   const announce = async (projectId: string) => hub.broadcast(projectId, { type: "baselines", projectId, baselines: await list(projectId) });
+  /** Change + re-read + broadcast one at a time per project, so the last list sent is the latest. */
+  const change = <T>(projectId: string, work: () => Promise<T>) =>
+    boardQueue.run(`baselines:${projectId}`, async () => {
+      const result = await work();
+      await announce(projectId);
+      return result;
+    });
 
   app.get<{ Params: { id: string } }>("/api/projects/:id/baselines", async (request) => {
     const projectId = parseId(request.params.id, "Project");
@@ -37,23 +46,25 @@ export function baselineRoutes(app: FastifyInstance, context: RouteContext): voi
     const user = requireUser(request, "editor");
     const projectId = parseId(request.params.id, "Project");
     const { name } = parseBody(CreateBaselineBody, request.body);
-    const tasks = await projects.scheduleSnapshot(projectId);
-    if ((await db.baseline.count({ where: { projectId } })) >= MAX_BASELINES_PER_PROJECT) {
-      throw conflict(`At most ${MAX_BASELINES_PER_PROJECT} baselines per project`);
-    }
-    const actor = actorOf(user);
-    const baseline = await db.baseline.create({
-      data: { projectId, name, createdByUserId: actor.userId, createdByLabel: actor.label, snapshot: tasks as unknown as object[] },
+    const baseline = await change(projectId, async () => {
+      const tasks = await projects.scheduleSnapshot(projectId);
+      await assertNotArchived(db, projectId);
+      if ((await db.baseline.count({ where: { projectId } })) >= MAX_BASELINES_PER_PROJECT) {
+        throw conflict(`At most ${MAX_BASELINES_PER_PROJECT} baselines per project`);
+      }
+      const actor = actorOf(user);
+      return db.baseline.create({
+        data: { projectId, name, createdByUserId: actor.userId, createdByLabel: actor.label, snapshot: tasks as unknown as object[] },
+        select: BASELINE_SUMMARY,
+      });
     });
-    await announce(projectId);
     return reply.status(201).send({ baseline: toBaselineDto(baseline) });
   });
 
   app.delete<{ Params: { id: string } }>("/api/baselines/:id", async (request, reply) => {
     requireUser(request, "editor");
     const baseline = await find(request.params.id);
-    await db.baseline.delete({ where: { id: baseline.id } });
-    await announce(baseline.projectId);
+    await change(baseline.projectId, () => db.baseline.deleteMany({ where: { id: baseline.id } }));
     return reply.status(204).send();
   });
 
@@ -64,6 +75,8 @@ export function baselineRoutes(app: FastifyInstance, context: RouteContext): voi
   }
 }
 
-function toBaselineDto(baseline: Baseline): BaselineDto {
+const BASELINE_SUMMARY = { id: true, name: true, createdAt: true, createdByLabel: true } as const;
+
+function toBaselineDto(baseline: Pick<Baseline, "id" | "name" | "createdAt" | "createdByLabel">): BaselineDto {
   return { id: baseline.id, name: baseline.name, createdAt: baseline.createdAt.toISOString(), createdBy: baseline.createdByLabel };
 }

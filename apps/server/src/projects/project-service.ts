@@ -1,10 +1,12 @@
 import { Prisma, toDbColumns, type Db, type Project } from "@ganttlines/db";
 import {
   applyCommand,
+  buildTree,
   computeSchedule,
   diffRows,
   fromDay,
   hasCycle,
+  isParentTask,
   type Command,
   type ProjectState,
   type Row,
@@ -154,10 +156,13 @@ export class ProjectService {
     return this.queue.run(projectId, async () => {
       const { state } = await this.get(projectId);
       const schedule = computeSchedule(state, (await this.instance.current()).calendar);
+      const tree = buildTree(state);
       const tasks: BaselineTaskDto[] = [];
       for (const row of Object.values(state.rows)) {
         const span = schedule.get(row.id)?.span;
-        if (row.kind === "task" && span) tasks.push({ rowId: row.id, title: row.title, start: fromDay(span.start), end: fromDay(span.end) });
+        if (row.kind !== "task" || !span) continue;
+        const kind = isParentTask(tree, row) ? "parent" : row.duration === 0 ? "milestone" : "task";
+        tasks.push({ rowId: row.id, kind, title: row.title, start: fromDay(span.start), end: fromDay(span.end) });
       }
       return tasks;
     });

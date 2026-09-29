@@ -35,8 +35,8 @@ describe("comments", () => {
     const created = await t.app.inject({ method: "POST", url: `/api/projects/${projectId}/comments`, headers: { cookie: vi }, payload: { taskId, body: "Can we start earlier?" } });
     expect(created.statusCode).toBe(201);
     const comment = created.json().comment;
-    expect(comment).toMatchObject({ taskId, author: { label: "Vi" }, body: "Can we start earlier?", deleted: false, editedAt: null });
-    expect((await watcher.next("comment")).comment.id).toBe(comment.id);
+    expect(comment).toMatchObject({ taskId, author: { label: "Vi" }, body: "Can we start earlier?", deleted: false, editedAt: null, mine: true });
+    expect((await watcher.next("comment")).comment).toMatchObject({ id: comment.id, mine: false });
 
     expect((await t.app.inject({ method: "PATCH", url: `/api/comments/${comment.id}`, headers: { cookie: ana }, payload: { body: "hijack" } })).statusCode).toBe(403);
     const edited = await t.app.inject({ method: "PATCH", url: `/api/comments/${comment.id}`, headers: { cookie: vi }, payload: { body: "Can we start on Monday?" } });
@@ -72,6 +72,53 @@ describe("comments", () => {
   });
 });
 
+describe("comment pages and rules", () => {
+  it("pages newest first and marks the requester's own comments", async () => {
+    const { ana, vi, projectId, taskId } = await board();
+    for (let i = 0; i < 5; i++) {
+      await t.app.inject({ method: "POST", url: `/api/projects/${projectId}/comments`, headers: { cookie: i % 2 ? ana : vi }, payload: { taskId, body: `c${i}` } });
+    }
+    const first = (await t.app.inject({ url: `/api/projects/${projectId}/comments?taskId=${taskId}&limit=3`, headers: { cookie: vi } })).json();
+    expect(first.comments.map((c: { body: string; mine: boolean }) => [c.body, c.mine])).toEqual([["c4", true], ["c3", false], ["c2", true]]);
+    const rest = (await t.app.inject({ url: `/api/projects/${projectId}/comments?taskId=${taskId}&limit=3&before=${first.nextBefore}`, headers: { cookie: vi } })).json();
+    expect(rest.comments.map((c: { body: string }) => c.body)).toEqual(["c1", "c0"]);
+    expect(rest.nextBefore).toBeNull();
+  });
+
+  it("stops link visitors editing once the link is view-only", async () => {
+    const { admin, projectId, taskId } = await board();
+    const { token } = (await t.app.inject({ method: "POST", url: `/api/projects/${projectId}/share-links`, headers: { cookie: admin }, payload: { access: "anonymous", collaboration: true } })).json();
+    const link = (await t.app.inject({ url: `/api/projects/${projectId}/share-links`, headers: { cookie: admin } })).json().links[0];
+    const visit = await t.app.inject({ method: "POST", url: `/api/share/${token}/visitor`, payload: { name: "Rudy" } });
+    const headers = { "x-share-token": token as string, cookie: `gp_visitor=${visit.cookies.find((c) => c.name === "gp_visitor")!.value}` };
+    const comment = (await t.app.inject({ method: "POST", url: `/api/projects/${projectId}/comments`, headers, payload: { taskId, body: "Hi" } })).json().comment;
+    await t.app.inject({ method: "PATCH", url: `/api/share-links/${link.id}`, headers: { cookie: admin }, payload: { collaboration: false } });
+    expect((await t.app.inject({ method: "PATCH", url: `/api/comments/${comment.id}`, headers, payload: { body: "Changed" } })).statusCode).toBe(403);
+  });
+});
+
+describe("unknown and archived projects", () => {
+  it("answer 404 for projects that do not exist", async () => {
+    const { ana } = await board();
+    const missing = randomUUID();
+    expect((await t.app.inject({ method: "POST", url: `/api/projects/${missing}/highlights`, headers: { cookie: ana }, payload: { date: "2026-10-09", color: "#ffcc00" } })).statusCode).toBe(404);
+    for (const path of ["comments", "highlights", "baselines", "activity"]) {
+      expect((await t.app.inject({ url: `/api/projects/${missing}/${path}`, headers: { cookie: ana } })).statusCode, path).toBe(404);
+    }
+  });
+
+  it("are read-only once archived", async () => {
+    const { ana, projectId, taskId } = await board();
+    await t.app.inject({ method: "PATCH", url: `/api/projects/${projectId}`, headers: { cookie: ana }, payload: { archived: true } });
+    const writes = await Promise.all([
+      t.app.inject({ method: "POST", url: `/api/projects/${projectId}/comments`, headers: { cookie: ana }, payload: { taskId, body: "x" } }),
+      t.app.inject({ method: "POST", url: `/api/projects/${projectId}/highlights`, headers: { cookie: ana }, payload: { date: "2026-10-09", color: "#ffcc00" } }),
+      t.app.inject({ method: "POST", url: `/api/projects/${projectId}/baselines`, headers: { cookie: ana }, payload: { name: "x" } }),
+    ]);
+    expect(writes.map((r) => r.statusCode)).toEqual([409, 409, 409]);
+  });
+});
+
 describe("highlights", () => {
   it("are managed by editors (incl. collaborating links), read by everyone, and pushed live", async () => {
     const { admin, ana, vi, projectId } = await board();
@@ -98,7 +145,7 @@ describe("baselines", () => {
     const baseline = created.json().baseline;
     expect(baseline).toMatchObject({ name: "Kick-off plan", createdBy: "Ana" });
     const snapshot = (await t.app.inject({ url: `/api/baselines/${baseline.id}`, headers: { cookie: vi } })).json();
-    expect(snapshot.tasks).toEqual([{ rowId: taskId, title: "Design", start: "2026-10-05", end: "2026-10-05" }]);
+    expect(snapshot.tasks).toEqual([{ rowId: taskId, kind: "task", title: "Design", start: "2026-10-05", end: "2026-10-05" }]);
     expect((await t.app.inject({ method: "POST", url: `/api/projects/${projectId}/baselines`, headers: { cookie: vi }, payload: { name: "x" } })).statusCode).toBe(403);
     const viaLink = await anonymousLink(admin, projectId, true);
     expect((await t.app.inject({ url: `/api/projects/${projectId}/baselines`, headers: viaLink })).json().baselines).toHaveLength(1);
@@ -126,6 +173,7 @@ describe("activity", () => {
 
     const forTask = (await t.app.inject({ url: `/api/projects/${projectId}/activity?rowId=${taskId}`, headers: { cookie: vi } })).json();
     expect(forTask.entries.map((e: { name: string }) => e.name)).toEqual(["setDuration", "updateTitle", "createRow"]);
+    expect(forTask.entries[1].changes).toEqual([{ rowId: taskId, field: "title", before: "Design", after: "Design v2" }]);
     expect((await t.app.inject({ url: `/api/projects/${projectId}/activity?limit=500`, headers: { cookie: vi } })).statusCode).toBe(400);
   });
 });

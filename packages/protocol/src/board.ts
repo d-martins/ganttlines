@@ -1,7 +1,7 @@
-import { MAX_DATE, MIN_DATE } from "@ganttlines/engine";
+import { MAX_DATE, MIN_DATE, type RowChange } from "@ganttlines/engine";
 import { z } from "zod";
 
-export const BOARD_LIMITS = { commentMax: 10_000, highlightLabelMax: 100, baselineNameMax: 100, activityPageMax: 100 } as const;
+export const BOARD_LIMITS = { commentMax: 10_000, highlightLabelMax: 100, baselineNameMax: 100, activityPageMax: 100, commentPageMax: 100 } as const;
 
 const date = z.iso.date().refine((value) => value >= MIN_DATE && value <= MAX_DATE, `Dates must be between ${MIN_DATE} and ${MAX_DATE}`);
 const body = z.string().trim().min(1).max(BOARD_LIMITS.commentMax);
@@ -29,6 +29,14 @@ export interface CommentDto {
   createdAt: string;
   editedAt: string | null;
   deleted: boolean;
+  /** whether the person receiving this wrote it (so the UI can offer edit/delete) */
+  mine: boolean;
+}
+
+/** Response of GET /api/projects/:id/comments — newest first; pass `nextBefore` as `before` for older ones. */
+export interface CommentsDto {
+  comments: CommentDto[];
+  nextBefore: string | null;
 }
 
 export interface HighlightDto {
@@ -47,6 +55,8 @@ export interface BaselineDto {
 
 export interface BaselineTaskDto {
   rowId: string;
+  /** how to draw it in the overlay: a bar, a parent bracket or a milestone diamond */
+  kind: "task" | "parent" | "milestone";
   title: string;
   start: string;
   end: string;
@@ -67,6 +77,8 @@ export interface ActivityEntryDto {
   createdAt: string;
   /** rows this change touched */
   rowIds: string[];
+  /** what changed (only the filtered row's changes when `rowId` is given) */
+  changes: RowChange[];
 }
 
 /** Response of GET /api/projects/:id/activity — newest first; pass `nextBefore` as `before` for more. */

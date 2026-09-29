@@ -42,6 +42,11 @@ export class Hub {
     for (const connection of this.connections) if (connection.projectId === projectId) this.send(connection, message);
   }
 
+  /** Like `broadcast`, but the message is built per connection (e.g. "is this comment mine?"). */
+  broadcastEach(projectId: string, message: (connection: Connection) => ServerMessage): void {
+    for (const connection of this.connections) if (connection.projectId === projectId) this.send(connection, message(connection));
+  }
+
   broadcastAll(message: ServerMessage): void {
     for (const connection of this.connections) this.send(connection, message);
   }

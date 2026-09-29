@@ -34,14 +34,18 @@ export function activityRoutes(app: FastifyInstance, context: RouteContext): voi
     });
     const page = rows.slice(0, limit);
     return {
-      entries: page.map((entry) => ({
-        version: entry.version,
-        commandId: entry.commandId,
-        name: entry.name,
-        actor: { userId: entry.actorUserId, label: entry.actorLabel, linkId: entry.actorLinkId },
-        createdAt: entry.createdAt.toISOString(),
-        rowIds: [...new Set((entry.changes as unknown as RowChange[]).map((change) => change.rowId))],
-      })),
+      entries: page.map((entry) => {
+        const changes = entry.changes as unknown as RowChange[];
+        return {
+          version: entry.version,
+          commandId: entry.commandId,
+          name: entry.name,
+          actor: { userId: entry.actorUserId, label: entry.actorLabel, linkId: entry.actorLinkId },
+          createdAt: entry.createdAt.toISOString(),
+          rowIds: [...new Set(changes.map((change) => change.rowId))],
+          changes: rowId === undefined ? changes : changes.filter((change) => change.rowId === rowId),
+        };
+      }),
       nextBefore: rows.length > limit ? page[page.length - 1]!.version : null,
     };
   });

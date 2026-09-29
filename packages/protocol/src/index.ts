@@ -51,6 +51,7 @@ export {
   type BaselineSnapshotDto,
   type BaselineTaskDto,
   type CommentDto,
+  type CommentsDto,
   type HighlightDto,
 } from "./board";
 export type { ProjectStateDto } from "./state";

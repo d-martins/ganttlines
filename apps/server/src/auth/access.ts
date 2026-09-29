@@ -41,6 +41,8 @@ const MAX_CACHED_LINKS = 10_000;
 
 export class AccessService {
   private readonly linksByHash = new Map<string, Promise<ShareLink | null>>();
+  /** projects known to exist (projects are never deleted, so positives can be cached) */
+  private readonly knownProjects = new Set<string>();
 
   constructor(
     private readonly db: Db,
@@ -121,6 +123,7 @@ export class AccessService {
       if (link.revokedAt) return new HttpError(410, "link_revoked", "This share link was turned off");
     }
     if (user && !user.mustChangePassword && user.role !== "guest") {
+      if (!(await this.projectExists(projectId))) return notFound("Project");
       const byRole = user.role === "editor" || user.role === "admin";
       // A collaborative link lets any signed-in user who opens it edit, like it does for guests.
       const byLink = link?.collaboration === true;
@@ -139,6 +142,13 @@ export class AccessService {
       return user ? new HttpError(403, "forbidden", "You don't have access to this project") : unauthorized();
     }
     return this.viaLink(link, credentials) ?? new HttpError(403, "forbidden", "You don't have access to this project");
+  }
+
+  private async projectExists(projectId: string): Promise<boolean> {
+    if (this.knownProjects.has(projectId)) return true;
+    const found = await this.db.project.findUnique({ where: { id: projectId }, select: { id: true } });
+    if (found) this.knownProjects.add(projectId);
+    return found !== null;
   }
 
   /** Throws unless the credentials may view (or, with `level: "edit"`, edit) the project. */

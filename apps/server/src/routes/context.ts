@@ -6,6 +6,7 @@ import { SESSION_COOKIE, type SessionStore } from "../auth/sessions";
 import type { InstanceService } from "../calendar/instance-service";
 import type { Config } from "../config";
 import type { ProjectService } from "../projects/project-service";
+import type { KeyedQueue } from "../queue";
 import type { Hub } from "../realtime/hub";
 
 /** Shared dependencies handed to every route module. */
@@ -20,6 +21,8 @@ export interface RouteContext {
   access: AccessService;
   /** throttles guessing of share-link tokens per client IP */
   shareLimiter: LoginLimiter;
+  /** serialises highlight/baseline changes per project, so their live list broadcasts stay in order */
+  boardQueue: KeyedQueue;
 }
 
 export function setSessionCookie(reply: FastifyReply, config: Config, token: string, expires: Date): void {

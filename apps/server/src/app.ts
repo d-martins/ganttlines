@@ -9,6 +9,7 @@ import { InstanceService } from "./calendar/instance-service";
 import type { Config } from "./config";
 import { forbidden, HttpError } from "./errors";
 import { ProjectService } from "./projects/project-service";
+import { KeyedQueue } from "./queue";
 import { Hub } from "./realtime/hub";
 import { activityRoutes } from "./routes/activity";
 import { authRoutes } from "./routes/auth";
@@ -47,7 +48,7 @@ export async function buildApp({ db, config, now, logger = false }: AppOptions):
   const hub = new Hub();
   // Every committed change is pushed to the people looking at it.
   projects.onApplied(({ projectId, version, commandId, actor, changes }) =>
-    hub.broadcast(projectId, { type: "patch", projectId, version, commandId, actor, changes }),
+    hub.broadcast(projectId, { type: "patch", projectId, version, commandId, actor: { userId: actor.userId, label: actor.label }, changes }),
   );
   projects.onMetaChange((project) => hub.broadcast(project.id, { type: "project", project }));
   instance.onChange((snapshot) => hub.broadcastAll({ type: "instance", version: snapshot.version }));
@@ -60,6 +61,7 @@ export async function buildApp({ db, config, now, logger = false }: AppOptions):
     projects,
     hub,
     access: new AccessService(db, config.sessionSecret),
+    boardQueue: new KeyedQueue(),
     shareLimiter: new LoginLimiter(now ? () => now().getTime() : undefined),
   };
 
