@@ -67,13 +67,13 @@ export function ListHeader({ query, onQuery }: { query: string; onQuery: (query:
         <span className="pr-2 text-right">#</span>
         <span>Task</span>
         <span>Assignee</span>
-        <span title="Working days" className="text-right">
+        <span title="Working days" className="px-1 text-right">
           WD
         </span>
-        <span title="Calendar days" className="text-right">
+        <span title="Calendar days" className="px-1 text-right">
           CD
         </span>
-        <span title="Predecessor (row # and offset)" className="text-right">
+        <span title="Predecessor (row # and offset)" className="px-1 text-right">
           Pred.
         </span>
         <span />
@@ -506,7 +506,8 @@ export function ListRows({
 
 /** A read-only value that turns into a text box when clicked (if editable). */
 function CellButton({ editable, label, cell, onEdit, children }: { editable: boolean; label: string; cell: string; onEdit: () => void; children: string }) {
-  if (!editable) return <span className="block truncate">{children}</span>;
+  // Same box as the button, so editable and read-only values line up.
+  if (!editable) return <span className="block h-6 truncate px-1 leading-6">{children}</span>;
   return (
     <button
       type="button"

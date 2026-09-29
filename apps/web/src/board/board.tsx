@@ -70,7 +70,7 @@ export function Board({
     return result.ok ? result.state : state;
   }, [state, calendar, dragCommand]);
   const model = useMemo(() => boardModel(displayed, calendar, baseline, query, collapsed), [displayed, calendar, baseline, query, collapsed]);
-  const selectedId = useSelection((selection) => selection.selectedId);
+  const { selectedId, select } = useSelection();
   const onListKey = useListKeys(model.rows);
   const todayDay = today();
   const highlightDays = useMemo(() => highlights.map((highlight) => ({ day: toDay(highlight.date), highlight })), [highlights]);
@@ -92,15 +92,21 @@ export function Board({
   const scroller = useRef<HTMLDivElement>(null);
   const chartBody = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState<Viewport>({ top: 0, left: 0, width: 1200, height: 800 });
-  /** the day kept in place when the timeline changes (zoom, weekends) */
-  const anchorDay = useRef<DayNum>(todayDay);
+  /**
+   * The point kept in place when the timeline changes (zoom, weekends, the range growing during a
+   * drag): a day plus how far into it, as a fraction of a column. Keeping the fraction matters:
+   * rounding to the day's start on every change made the chart creep backwards while dragging.
+   */
+  const anchor = useRef<{ day: DayNum; fraction: number }>({ day: todayDay, fraction: 0.5 });
   const frame = useRef(0);
 
   const chartWidth = Math.max(viewport.width - listWidth, 0);
   const onScroll = () => {
     const element = scroller.current;
     if (!element) return;
-    anchorDay.current = timeline.dayAt(element.scrollLeft + chartWidth * ANCHOR);
+    const x = element.scrollLeft + chartWidth * ANCHOR;
+    const day = timeline.dayAt(x);
+    anchor.current = { day, fraction: Math.min(Math.max((x - timeline.x(day)) / timeline.dayWidth, 0), 1) };
     cancelAnimationFrame(frame.current);
     frame.current = requestAnimationFrame(() => setViewport(measure(element)));
   };
@@ -120,9 +126,10 @@ export function Board({
     if (!element) return;
     if (lastTodayRequest.current !== todayRequest) {
       lastTodayRequest.current = todayRequest;
-      anchorDay.current = todayDay;
+      anchor.current = { day: todayDay, fraction: 0.5 };
     }
-    element.scrollLeft = Math.max(timeline.x(anchorDay.current) - chartWidth * ANCHOR, 0);
+    const { day, fraction } = anchor.current;
+    element.scrollLeft = Math.max(timeline.x(day) + fraction * timeline.dayWidth - chartWidth * ANCHOR, 0);
     setViewport(measure(element));
     // chartWidth is left out on purpose: resizing the window should not jump the chart.
   }, [timeline, todayRequest, todayDay]);
@@ -191,13 +198,22 @@ export function Board({
               aria-label="Tasks"
               aria-rowcount={model.rows.length}
               aria-multiselectable={false}
-              tabIndex={0}
+              // Not a Tab stop itself (its cells are); focused on row clicks so the list keys keep working.
+              tabIndex={-1}
               onKeyDown={onListKey}
               onMouseDown={(event) => {
-                // Clicking a row keeps keyboard focus on the list (not on a button inside the row).
-                if (!(event.target as HTMLElement).closest("button, input")) event.currentTarget.focus({ preventScroll: true });
+                const target = event.target as HTMLElement;
+                if (target.closest("button, input")) return;
+                if (!target.closest('[role="row"]')) {
+                  // Empty space below the rows: nothing selected, and the list lets go of focus.
+                  event.preventDefault();
+                  select(null);
+                  if (event.currentTarget.contains(document.activeElement)) (document.activeElement as HTMLElement).blur();
+                  return;
+                }
+                event.currentTarget.focus({ preventScroll: true });
               }}
-              className="sticky left-0 z-10 shrink-0 overflow-hidden border-r border-border bg-bg outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] focus-visible:ring-inset"
+              className="sticky left-0 z-10 shrink-0 overflow-hidden border-r border-border bg-bg outline-none focus:outline-none focus-visible:outline-none"
               style={{ width: listWidth, height: bodyHeight, ...grid }}
             >
               <ListRows rows={shown} allRows={model.rows} firstRow={firstRow} rowHeight={rowHeight} numbers={model.numbers} searching={query.trim() !== ""} />
@@ -227,7 +243,7 @@ export function Board({
               ) : null}
               <div aria-hidden className="absolute top-0 w-0.5 bg-[var(--today)]" style={{ left: timeline.x(todayDay) + timeline.dayWidth / 2 - 1, height: bodyHeight }} />
               <Dependencies rows={model.rows} firstRow={firstRow} lastRow={lastRow} timeline={timeline} style={barStyle} />
-              <ChartRows rows={shown} allRows={model.rows} firstRow={firstRow} timeline={timeline} style={barStyle} />
+              <ChartRows rows={shown} allRows={model.rows} firstRow={firstRow} timeline={timeline} style={barStyle} visibleLeft={viewport.left} />
             </div>
             </DayMenu>
           </div>

@@ -1,6 +1,6 @@
 import type { ResourceDto } from "@ganttlines/protocol";
 import * as Popover from "@radix-ui/react-popover";
-import { Plus, UserX } from "lucide-react";
+import { Check, Plus, UserX } from "lucide-react";
 import { useId, useState, type ReactNode } from "react";
 import { errorMessage } from "../api/client";
 import { useCreateResource } from "../api/queries";
@@ -71,7 +71,15 @@ export function AssigneePicker({
   };
 
   return (
-    <Popover.Root open={open} onOpenChange={(next) => (next ? setOpen(true) : close())}>
+    <Popover.Root
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) return close();
+        // Open on the current assignee, so it's clear who has the task (and Enter keeps it).
+        setActive(Math.max(options.findIndex((option) => (option.resource?.id ?? null) === value && !option.create), 0));
+        setOpen(true);
+      }}
+    >
       <Popover.Trigger asChild>{trigger}</Popover.Trigger>
       <Popover.Portal>
         <Popover.Content {...focusReturn} align="start" sideOffset={4} className="z-50 w-64 rounded-md border border-border bg-bg p-1 text-sm text-text shadow-lg">
@@ -98,28 +106,30 @@ export function AssigneePicker({
             className="mb-1 w-full rounded border border-border-strong bg-bg px-2 py-1"
           />
           <div role="listbox" id={listId} aria-label="People" className="max-h-64 overflow-auto">
-            {options.map((option, index) => (
-              <div
-                key={option.key}
-                id={`${listId}-${option.key}`}
-                role="option"
-                aria-selected={index === active}
-                onPointerEnter={() => setActive(index)}
-                onClick={() => choose(option)}
-                className={`flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 ${index === active ? "bg-surface-2" : ""} ${
-                  option.resource?.id === value || (option.key === "none" && value === null) ? "font-semibold" : ""
-                }`}
-              >
-                {option.create ? (
-                  <Plus size={16} className="text-muted" />
-                ) : option.resource ? (
-                  <Avatar name={option.resource.name} color={option.resource.avatarColor} size={20} />
-                ) : (
-                  <UserX size={16} className="text-muted" />
-                )}
-                <span className="truncate">{option.label}</span>
-              </div>
-            ))}
+            {options.map((option, index) => {
+              const current = !option.create && (option.resource?.id ?? null) === value;
+              return (
+                <div
+                  key={option.key}
+                  id={`${listId}-${option.key}`}
+                  role="option"
+                  aria-selected={current}
+                  onPointerEnter={() => setActive(index)}
+                  onClick={() => choose(option)}
+                  className={`flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 ${index === active ? "bg-surface-2" : ""} ${current ? "font-semibold" : ""}`}
+                >
+                  {option.create ? (
+                    <Plus size={16} className="text-muted" />
+                  ) : option.resource ? (
+                    <Avatar name={option.resource.name} color={option.resource.avatarColor} size={20} />
+                  ) : (
+                    <UserX size={16} className="text-muted" />
+                  )}
+                  <span className="truncate">{option.label}</span>
+                  {current ? <Check aria-hidden size={14} className="ml-auto shrink-0 text-accent" /> : null}
+                </div>
+              );
+            })}
             {options.length === 0 ? <p className="px-2 py-1.5 text-muted">Nobody matches.</p> : null}
           </div>
         </Popover.Content>

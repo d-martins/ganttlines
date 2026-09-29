@@ -15,6 +15,20 @@ import type { Timeline } from "./timeline";
 const BAR_HELP_ID = "gp-bar-help";
 /** pixels the pointer must travel before a press on a bar becomes a drag (a smaller movement is a click) */
 const DRAG_THRESHOLD = 3;
+/** dragging within this many pixels of the chart's visible edge (or past it) scrolls the chart */
+const AUTO_SCROLL_EDGE = 40;
+/** fastest auto-scroll, in pixels per tick (reached at the edge and beyond) */
+const AUTO_SCROLL_STEP = 24;
+const AUTO_SCROLL_TICK_MS = 16;
+/** height of the sticky timeline header above the rows */
+const HEADER_HEIGHT = 48;
+
+/** How hard to scroll for a pointer at `position` given the visible range [start, end]: -1…1. */
+export function edgePush(position: number, start: number, end: number): number {
+  if (position > end - AUTO_SCROLL_EDGE) return Math.min((position - (end - AUTO_SCROLL_EDGE)) / AUTO_SCROLL_EDGE, 1);
+  if (position < start + AUTO_SCROLL_EDGE) return -Math.min((start + AUTO_SCROLL_EDGE - position) / AUTO_SCROLL_EDGE, 1);
+  return 0;
+}
 
 /**
  * The chart's rows as interactive strips: bars move, resize and link by dragging (previewed live
@@ -27,6 +41,7 @@ export function ChartRows({
   firstRow,
   timeline,
   style,
+  visibleLeft,
 }: {
   /** the rendered window (already showing any drag preview) */
   rows: readonly BoardRow[];
@@ -35,6 +50,8 @@ export function ChartRows({
   firstRow: number;
   timeline: Timeline;
   style: BarStyle;
+  /** chart x of the first visible pixel (the list covers what's left of it) */
+  visibleLeft: number;
 }) {
   const board = useBoard();
   const { state, resources, resourceMap, canEdit, canCreateResources } = board;
@@ -60,11 +77,29 @@ export function ChartRows({
     const rowId = entry.row.id;
     const startX = event.clientX;
     const startY = event.clientY;
-    const x0 = startX - body.getBoundingClientRect().left;
+    // Where the bar was grabbed, relative to its start: stays right even if the chart's range shifts mid-drag.
+    const grabOffset = startX - body.getBoundingClientRect().left - timeline.x(span.start);
+    const scroller = body.closest('[data-testid="board-scroller"]') as HTMLElement | null;
+    const list = scroller?.querySelector('[role="treegrid"]') as HTMLElement | null;
     let moved = false;
     let current: ChartDrag | null = null;
+    let last: PointerEvent | null = null;
+
+    // Near or past the chart's visible edge, keep scrolling that way (and sideways drags keep up).
+    const autoScroll = setInterval(() => {
+      if (!moved || !last || !scroller) return;
+      const bounds = scroller.getBoundingClientRect();
+      const dx = edgePush(last.clientX, list ? list.getBoundingClientRect().right : bounds.left, bounds.right) * AUTO_SCROLL_STEP;
+      const dy = kind === "link" ? edgePush(last.clientY, bounds.top + HEADER_HEIGHT, bounds.bottom) * AUTO_SCROLL_STEP : 0;
+      if (!dx && !dy) return;
+      const before = [scroller.scrollLeft, scroller.scrollTop];
+      scroller.scrollLeft += dx;
+      scroller.scrollTop += dy;
+      if (scroller.scrollLeft !== before[0] || scroller.scrollTop !== before[1]) move(last);
+    }, AUTO_SCROLL_TICK_MS);
 
     const move = (moveEvent: PointerEvent) => {
+      last = moveEvent;
       if (!moved && Math.abs(moveEvent.clientX - startX) < DRAG_THRESHOLD && Math.abs(moveEvent.clientY - startY) < DRAG_THRESHOLD) return;
       moved = true;
       const rect = body.getBoundingClientRect();
@@ -83,11 +118,12 @@ export function ChartRows({
           targetId,
         };
       } else {
-        current = { rowId, kind, command: dragCommand(kind, rowId, span, now, x - x0, x), line: null, targetId: null };
+        current = { rowId, kind, command: dragCommand(kind, rowId, span, now, x - grabOffset - now.x(span.start), x), line: null, targetId: null };
       }
       useChartDrag.setState({ drag: current });
     };
     const finish = (commit: boolean) => {
+      clearInterval(autoScroll);
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       window.removeEventListener("keydown", key, true);
@@ -228,7 +264,8 @@ export function ChartRows({
                 />
                 <div
                   className={`absolute flex gap-1 group-focus-within/row:opacity-100 group-hover/row:opacity-100 ${menuFor === row.id ? "opacity-100" : "opacity-0"}`}
-                  style={{ left: box.left - 50, top: center - 10 }}
+                  // Left of the bar, but never under the task list (then it overlaps the bar's start).
+                  style={{ left: Math.max(box.left - 50, visibleLeft + 4), top: center - 10 }}
                   onClick={(event) => event.stopPropagation()}
                 >
                   <AssigneePicker

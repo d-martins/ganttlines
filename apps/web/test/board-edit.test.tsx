@@ -212,4 +212,25 @@ describe("editing the task list", () => {
     expect(within(listRow("ui")).getByRole("button", { name: "Working days of “ui”" })).toHaveTextContent("3");
     expect(screen.queryByRole("textbox", { name: "Title" })).not.toBeInTheDocument(); // Enter on the cell didn't also edit the title
   });
+
+  it("opens the assignee picker on the current assignee", async () => {
+    const { user } = await editableBoard(ROWS.map((row) => (row.id === "ui" ? { ...row, resourceId: ANA.id } : row)));
+    await user.click(screen.getByRole("button", { name: "Assignee of “ui”: Ana Silva" }));
+    const search = await screen.findByRole("combobox", { name: "Find a person" });
+    expect(document.getElementById(search.getAttribute("aria-activedescendant")!)).toHaveTextContent("Ana Silva");
+    expect(screen.getByRole("option", { selected: true })).toHaveTextContent("Ana Silva");
+    await user.keyboard("{Enter}");
+    expect(sentCommands()).toEqual([]); // Enter on the current person changes nothing
+  });
+
+  it("clicking empty space under the rows clears the selection without focusing the list", async () => {
+    const { user } = await editableBoard();
+    await user.click(within(listRow("ui")).getByText("2"));
+    expect(listRow("ui")).toHaveAttribute("aria-selected", "true");
+    const list = screen.getByRole("treegrid", { name: "Tasks" });
+    await user.pointer({ keys: "[MouseLeft]", target: list });
+    expect(listRow("ui")).toHaveAttribute("aria-selected", "false");
+    expect(list).not.toHaveFocus();
+    expect(list).not.toHaveAttribute("tabindex", "0");
+  });
 });

@@ -144,3 +144,14 @@ describe("chart drags", () => {
     expect(stepDay(timeline, FRI + 3, -1)).toBe(FRI);
   });
 });
+
+describe("drag auto-scroll", () => {
+  it("pushes harder the closer the pointer is to (or past) an edge", async () => {
+    const { edgePush } = await import("../src/board/chart/chart-rows");
+    expect(edgePush(500, 100, 900)).toBe(0);
+    expect(edgePush(880, 100, 900)).toBe(0.5);
+    expect(edgePush(1000, 100, 900)).toBe(1); // past the edge: full speed forward
+    expect(edgePush(120, 100, 900)).toBe(-0.5);
+    expect(edgePush(0, 100, 900)).toBe(-1);
+  });
+});
