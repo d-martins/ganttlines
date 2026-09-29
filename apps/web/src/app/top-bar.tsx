@@ -1,11 +1,18 @@
 import type { UserDto } from "@ganttlines/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams, useRouterState } from "@tanstack/react-router";
+import { useStore } from "zustand";
+import { createStore } from "zustand/vanilla";
 import { errorMessage } from "../api/client";
+import { useActiveBoard } from "../board/active-board";
+import { BoardTools } from "../board/board-tools";
 import { projectList, useLogout } from "../api/queries";
 import { useTheme, type ThemePreference } from "../theme";
 import { Avatar } from "../ui/avatar";
 import { Menu, MenuItem, MenuLabel, MenuRadio, MenuSeparator } from "../ui/menu";
+
+/** Stand-in store while no board is open (hooks can't be skipped). */
+const EMPTY = createStore<{ project?: { name: string } } | null>(() => null);
 
 const THEMES: { value: ThemePreference; label: string }[] = [
   { value: "system", label: "System" },
@@ -13,7 +20,7 @@ const THEMES: { value: ThemePreference; label: string }[] = [
   { value: "dark", label: "Dark" },
 ];
 
-/** Top bar: current page title and the account menu (theme, sign out). Board tools join it in plan 3b. */
+/** Top bar: current page title, the board's tools (on a board) and the account menu (theme, sign out). */
 export function TopBar({ user }: { user: UserDto }) {
   const navigate = useNavigate();
   const logout = useLogout();
@@ -21,8 +28,10 @@ export function TopBar({ user }: { user: UserDto }) {
   const params = useParams({ strict: false }) as { projectId?: string };
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const projects = useQuery(projectList(true));
+  const board = useActiveBoard((state) => state.sync);
+  const boardName = useStore(board?.store ?? EMPTY, (state) => state?.project?.name);
   const title = params.projectId
-    ? (projects.data?.find((project) => project.id === params.projectId)?.name ?? "")
+    ? (boardName ?? projects.data?.find((project) => project.id === params.projectId)?.name ?? "")
     : pathname.startsWith("/team")
       ? "Team & calendar"
       : pathname.startsWith("/settings")
@@ -32,6 +41,7 @@ export function TopBar({ user }: { user: UserDto }) {
   return (
     <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border bg-surface px-4">
       <h1 className="truncate text-sm font-semibold">{title}</h1>
+      {board && board.projectId === params.projectId ? <BoardTools sync={board} /> : null}
       <div className="ml-auto">
         <Menu
           trigger={

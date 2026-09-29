@@ -1,10 +1,14 @@
 import type {
+  BaselineDto,
+  BaselineSnapshotDto,
   CalendarDto,
   CreateProjectBody,
   CreateResourceBody,
   CreateUserBody,
+  HighlightDto,
   HolidayBody,
   ProjectDto,
+  ProjectStateDto,
   ResourceDto,
   TimeOffBody,
   UpdateProjectBody,
@@ -22,6 +26,11 @@ export const keys = {
   users: ["users"] as const,
   calendar: ["calendar"] as const,
   resources: ["resources"] as const,
+  /** everything cached for one project starts with this, so it can be dropped in one go */
+  project: (id: string) => ["project", id] as const,
+  highlights: (id: string) => ["project", id, "highlights"] as const,
+  baselines: (id: string) => ["project", id, "baselines"] as const,
+  baseline: (id: string, baselineId: string) => ["project", id, "baseline", baselineId] as const,
 };
 
 export const setupStatus = queryOptions({
@@ -59,6 +68,29 @@ export const resourceList = queryOptions({
   queryKey: keys.resources,
   queryFn: async () => (await api<{ resources: ResourceDto[] }>("GET", "/api/resources")).resources,
 });
+
+/** The board's rows are kept by the sync client (not the query cache); this is its first load. */
+export const loadProjectState = (projectId: string) => api<ProjectStateDto>("GET", `/api/projects/${projectId}/state`);
+
+export const highlightList = (projectId: string) =>
+  queryOptions({
+    queryKey: keys.highlights(projectId),
+    queryFn: async () => (await api<{ highlights: HighlightDto[] }>("GET", `/api/projects/${projectId}/highlights`)).highlights,
+  });
+
+export const baselineList = (projectId: string) =>
+  queryOptions({
+    queryKey: keys.baselines(projectId),
+    queryFn: async () => (await api<{ baselines: BaselineDto[] }>("GET", `/api/projects/${projectId}/baselines`)).baselines,
+  });
+
+/** A saved baseline's dates. They never change, so they are fetched once. */
+export const baselineSnapshot = (projectId: string, baselineId: string) =>
+  queryOptions({
+    queryKey: keys.baseline(projectId, baselineId),
+    queryFn: () => api<BaselineSnapshotDto>("GET", `/api/baselines/${baselineId}`),
+    staleTime: Infinity,
+  });
 
 /** A mutation that refreshes the given queries when it succeeds. */
 function useApiMutation<TInput, TResult>(run: (input: TInput) => Promise<TResult>, invalidate: (client: QueryClient) => unknown) {

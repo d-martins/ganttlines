@@ -2,7 +2,9 @@ import { createRootRoute, createRoute, createRouter, Outlet, type RouterHistory 
 import { AppLayout } from "./app/app-layout";
 import { ErrorScreen } from "./app/error-screen";
 import { ChangePasswordPage, LoginPage, SetupPage } from "./auth/auth-pages";
-import { BoardPage, HomeRedirect } from "./projects/project-pages";
+import { BoardPage } from "./board/board-page";
+import type { CompareMode } from "./board/model";
+import { HomeRedirect } from "./projects/project-pages";
 import { SettingsPage } from "./settings/settings-page";
 import { TeamPage } from "./team/team-page";
 
@@ -18,7 +20,21 @@ const loginRoute = createRoute({
 const changePasswordRoute = createRoute({ getParentRoute: () => rootRoute, path: "/change-password", component: ChangePasswordPage });
 const appRoute = createRoute({ getParentRoute: () => rootRoute, id: "app", component: AppLayout });
 const homeRoute = createRoute({ getParentRoute: () => appRoute, path: "/", component: HomeRedirect });
-const boardRoute = createRoute({ getParentRoute: () => appRoute, path: "/p/$projectId", component: BoardPage });
+/** Board URL state: the baseline being compared (`?baseline=<id>&compare=switch`, overlay by default). */
+export interface BoardSearch {
+  baseline?: string;
+  compare?: CompareMode;
+}
+const boardRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/p/$projectId",
+  component: BoardPage,
+  validateSearch: (search: Record<string, unknown>): BoardSearch => {
+    const baseline = typeof search["baseline"] === "string" && /^[0-9a-f-]{36}$/i.test(search["baseline"]) ? search["baseline"] : undefined;
+    if (!baseline) return {};
+    return search["compare"] === "switch" ? { baseline, compare: "switch" } : { baseline };
+  },
+});
 const teamRoute = createRoute({ getParentRoute: () => appRoute, path: "/team", component: TeamPage });
 const settingsRoute = createRoute({ getParentRoute: () => appRoute, path: "/settings", component: SettingsPage });
 

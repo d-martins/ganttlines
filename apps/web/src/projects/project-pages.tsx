@@ -1,8 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
-import { Navigate, useParams } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { Navigate } from "@tanstack/react-router";
 import { currentUser, projectList } from "../api/queries";
-import { isString, readPref, writePref } from "../storage";
+import { isString, readPref } from "../storage";
 
 /** "/": open the last project used in this browser, else the first one. */
 export function HomeRedirect() {
@@ -27,25 +26,4 @@ export function HomeRedirect() {
 }
 
 /** The last opened project is remembered per person, so a shared browser never mixes people up. */
-const lastProjectKey = (userId: string) => `lastProject:${userId}`;
-
-/** The board (task list + chart) arrives in plan 3b; for now this confirms the project and remembers it. */
-export function BoardPage() {
-  const { projectId } = useParams({ from: "/app/p/$projectId" });
-  const me = useQuery(currentUser);
-  const projects = useQuery(projectList(true));
-  const project = projects.data?.find((candidate) => candidate.id === projectId);
-  const userId = me.data?.id;
-  useEffect(() => {
-    if (userId && project) writePref(lastProjectKey(userId), projectId);
-  }, [userId, project, projectId]);
-  if (projects.isPending) return <p className="p-6 text-muted">Loading…</p>;
-  if (!project) return <p className="p-6 text-muted">This project doesn't exist or you don't have access to it.</p>;
-  return (
-    <div className="p-8">
-      <p className="text-muted">
-        The board for <strong className="text-text">{project.name}</strong> arrives in the next step.
-      </p>
-    </div>
-  );
-}
+export const lastProjectKey = (userId: string) => `lastProject:${userId}`;
