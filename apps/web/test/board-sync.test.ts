@@ -51,6 +51,7 @@ const joined = (version: number): ServerMessage => ({ type: "joined", projectId:
 async function started(version = 3, load = vi.fn(async () => stateDto(version)), isFatal?: (error: unknown) => boolean) {
   const sockets: FakeSocket[] = [];
   const events: unknown[] = [];
+  let ids = 0;
   const sync = new BoardSync({
     projectId: PROJECT,
     loadState: load,
@@ -61,6 +62,7 @@ async function started(version = 3, load = vi.fn(async () => stateDto(version)),
     },
     onEvent: (event) => events.push(event),
     backoff: { baseMs: 100, maxMs: 1000 },
+    newId: () => `id${++ids}`,
     ...(isFatal ? { isFatal } : {}),
   });
   await sync.start();
@@ -211,5 +213,66 @@ describe("BoardSync", () => {
     sockets[0]!.drop();
     vi.advanceTimersByTime(60_000);
     expect(sockets).toHaveLength(1);
+  });
+
+  describe("own edits", () => {
+    const rename = { type: "updateTitle", id: "a", title: "mine" } as const;
+    const command = (commandId: string) => ({ type: "command", commandId, command: rename });
+
+    it("sends edits while live and keeps them pending until their patch is applied", async () => {
+      const { sync, sockets } = await started(3);
+      const socket = sockets[0]!;
+      socket.deliver(joined(3));
+      expect(sync.submit(rename)).toBe("id1");
+      expect(socket.sent.at(-1)).toEqual(command("id1"));
+      expect(sync.state.pending).toHaveLength(1);
+      socket.deliver({ type: "ack", commandId: "id1", version: 4 }); // ack overtook the patch
+      expect(sync.state.pending).toHaveLength(1);
+      socket.deliver(retitle(4, "mine"));
+      expect(sync.state.pending).toHaveLength(0);
+    });
+
+    it("drops rejected edits and reports them", async () => {
+      const { sync, sockets, events } = await started(3);
+      sockets[0]!.deliver(joined(3));
+      sync.submit(rename);
+      sockets[0]!.deliver({ type: "reject", commandId: "id1", error: "locked", message: "This task's dates are locked" });
+      expect(sync.state.pending).toHaveLength(0);
+      expect(events.at(-1)).toEqual({ type: "rejected", command: rename, message: "This task's dates are locked" });
+    });
+
+    it("holds edits made while disconnected and sends unanswered ones again after rejoining, same ids", async () => {
+      const { sync, sockets } = await started(3);
+      sockets[0]!.deliver(joined(3));
+      sync.submit(rename); // id1: sent, never answered
+      sync.submit({ ...rename, title: "acked" }); // id2: answered, patch not seen yet
+      sockets[0]!.deliver({ type: "ack", commandId: "id2", version: 5 });
+      sockets[0]!.drop();
+      sync.submit({ ...rename, title: "offline" }); // id3: made while disconnected
+      expect(sockets[0]!.sent).toHaveLength(3); // join, id1, id2
+      vi.advanceTimersByTime(100);
+      sockets[1]!.open();
+      sockets[1]!.deliver(joined(3));
+      expect(sockets[1]!.sent).toEqual([
+        { type: "join", projectId: PROJECT, version: 3 },
+        command("id1"),
+        { type: "command", commandId: "id3", command: { ...rename, title: "offline" } },
+      ]);
+      expect(sync.state.pending.map((entry) => entry.commandId)).toEqual(["id1", "id2", "id3"]);
+    });
+
+    it("asks for undo/redo only while live and reports the outcome", async () => {
+      const { sync, sockets, events } = await started(3);
+      expect(sync.requestHistory("undo")).toBe(false);
+      sockets[0]!.deliver(joined(3));
+      expect(sync.requestHistory("undo")).toBe(true);
+      expect(sockets[0]!.sent.at(-1)).toEqual({ type: "undo", commandId: "id1" });
+      sockets[0]!.deliver({ type: "ack", commandId: "id1", version: 4, skipped: 2 });
+      expect(events.at(-1)).toEqual({ type: "history", direction: "undo", skipped: 2 });
+      sync.requestHistory("redo");
+      sockets[0]!.deliver({ type: "reject", commandId: "id2", error: "invalid", message: "Nothing to redo" });
+      expect(events.at(-1)).toEqual({ type: "historyFailed", direction: "redo", message: "Nothing to redo" });
+      expect(sync.state.pending).toHaveLength(0);
+    });
   });
 });

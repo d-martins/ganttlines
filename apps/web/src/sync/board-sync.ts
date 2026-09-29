@@ -1,4 +1,4 @@
-import { applyChanges, type ProjectState, type Row } from "@ganttlines/engine";
+import { applyChanges, type Command, type ProjectState, type Row } from "@ganttlines/engine";
 import type { ProjectDto, ProjectStateDto, ServerMessage, Viewer } from "@ganttlines/protocol";
 import { createStore, type StoreApi } from "zustand/vanilla";
 
@@ -32,12 +32,28 @@ export interface BoardState {
   confirmed: ProjectState;
   version: number;
   viewers: Viewer[];
+  /** own commands not yet part of `confirmed`, oldest first (shown optimistically) */
+  pending: PendingCommand[];
 }
+
+export interface PendingCommand {
+  commandId: string;
+  command: Command;
+  /** the version the server gave it; it leaves `pending` once `confirmed` reaches that version */
+  ackVersion: number | null;
+}
+
+export type HistoryDirection = "undo" | "redo";
 
 /** Unversioned news the board refetches or merges into its REST caches. */
 export type BoardEvent =
   | { type: "joined"; instanceVersion: number }
-  | Extract<ServerMessage, { type: "instance" | "comment" | "highlights" | "baselines" }>;
+  | Extract<ServerMessage, { type: "instance" | "comment" | "highlights" | "baselines" }>
+  /** the server refused one of our commands (it has already been dropped from `pending`) */
+  | { type: "rejected"; command: Command; message: string }
+  /** an undo/redo went through; `skipped` field changes conflicted with later edits and were left alone */
+  | { type: "history"; direction: HistoryDirection; skipped: number }
+  | { type: "historyFailed"; direction: HistoryDirection; message: string };
 
 export interface BoardSyncOptions {
   projectId: string;
@@ -52,6 +68,8 @@ export interface BoardSyncOptions {
   isFatal?: (error: unknown) => boolean;
   /** reconnect delays; the n-th retry waits `min(base * 2^n, max)` */
   backoff?: { baseMs: number; maxMs: number };
+  /** command ids (tests pass a counter) */
+  newId?: () => string;
 }
 
 const CLOSE_SIGNED_OUT = 4001;
@@ -78,6 +96,8 @@ export class BoardSync {
   private opened = false;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private stopped = false;
+  /** undo/redo requests awaiting their ack; forgotten on disconnect (never resent: they aren't edits the person is waiting on) */
+  private history = new Map<string, HistoryDirection>();
 
   constructor(private readonly options: BoardSyncOptions) {
     this.store = createStore<BoardState>(() => ({
@@ -89,6 +109,7 @@ export class BoardSync {
       confirmed: { rows: {} },
       version: 0,
       viewers: [],
+      pending: [],
     }));
   }
 
@@ -120,6 +141,31 @@ export class BoardSync {
       socket.onmessage = null;
       socket.close();
     }
+  }
+
+  /** Whether commands sent now reach the server right away (otherwise they wait for the reconnect). */
+  get live(): boolean {
+    return this.joined;
+  }
+
+  /**
+   * Queues an edit: it shows at once (the board replays `pending` onto `confirmed`) and is sent now,
+   * or after reconnecting with the same id (safe: the server ignores ids it has already applied).
+   */
+  submit(command: Command): string {
+    const commandId = this.options.newId?.() ?? crypto.randomUUID();
+    this.store.setState({ pending: [...this.state.pending, { commandId, command, ackVersion: null }] });
+    if (this.joined) this.send({ type: "command", commandId, command });
+    return commandId;
+  }
+
+  /** Asks the server to undo/redo this person's last change here; false when not connected. */
+  requestHistory(direction: HistoryDirection): boolean {
+    if (!this.joined) return false;
+    const commandId = this.options.newId?.() ?? crypto.randomUUID();
+    this.history.set(commandId, direction);
+    this.send({ type: direction, commandId });
+    return true;
   }
 
   private adopt(dto: ProjectStateDto): void {
@@ -165,6 +211,7 @@ export class BoardSync {
     this.socket = null;
     this.joined = false;
     this.held.clear();
+    this.history.clear();
     if (this.stopped) return;
     if (code === CLOSE_SIGNED_OUT || code === CLOSE_POLICY_VIOLATION) {
       this.store.setState({ status: "ended", endReason: code === CLOSE_SIGNED_OUT ? "signed_out" : "flooding", viewers: [] });
@@ -201,6 +248,10 @@ export class BoardSync {
         this.joined = true;
         this.store.setState({ status: "live", joinError: null, viewers: message.viewers });
         this.drain();
+        // Edits made while disconnected (or unanswered when it dropped) go out again, same ids.
+        for (const { commandId, command, ackVersion } of this.state.pending) {
+          if (ackVersion === null) this.send({ type: "command", commandId, command });
+        }
         this.options.onEvent?.({ type: "joined", instanceVersion: message.instanceVersion });
         return;
       case "reload":
@@ -210,6 +261,10 @@ export class BoardSync {
       case "project":
         if (message.project.id === this.options.projectId) this.store.setState({ project: message.project });
         return;
+      case "ack":
+        return this.acked(message);
+      case "reject":
+        return this.rejected(message);
       case "error":
         // The only error a read-only board can cause is a failed join (e.g. access removed meanwhile).
         return this.store.setState({ joinError: message.message });
@@ -221,6 +276,38 @@ export class BoardSync {
       default:
         return;
     }
+  }
+
+  private acked(message: Extract<ServerMessage, { type: "ack" }>): void {
+    const direction = this.history.get(message.commandId);
+    if (direction) {
+      this.history.delete(message.commandId);
+      this.options.onEvent?.({ type: "history", direction, skipped: message.skipped ?? 0 });
+      return;
+    }
+    const pending = this.state.pending.map((entry) => (entry.commandId === message.commandId ? { ...entry, ackVersion: message.version } : entry));
+    this.store.setState({ pending });
+    this.settle();
+  }
+
+  private rejected(message: Extract<ServerMessage, { type: "reject" }>): void {
+    const direction = this.history.get(message.commandId);
+    if (direction) {
+      this.history.delete(message.commandId);
+      this.options.onEvent?.({ type: "historyFailed", direction, message: message.message });
+      return;
+    }
+    const entry = this.state.pending.find((candidate) => candidate.commandId === message.commandId);
+    if (!entry) return;
+    this.store.setState({ pending: this.state.pending.filter((candidate) => candidate !== entry) });
+    this.options.onEvent?.({ type: "rejected", command: entry.command, message: message.message });
+  }
+
+  /** Drops pending commands whose patch is now part of `confirmed`. */
+  private settle(): void {
+    const { pending, version } = this.state;
+    const remaining = pending.filter((entry) => entry.ackVersion === null || entry.ackVersion > version);
+    if (remaining.length !== pending.length) this.store.setState({ pending: remaining });
   }
 
   private patch(message: Patch): void {
@@ -239,7 +326,10 @@ export class BoardSync {
       version = next.version;
     }
     for (const stale of this.held.keys()) if (stale <= version) this.held.delete(stale);
-    if (version !== start) this.store.setState({ confirmed, version });
+    if (version !== start) {
+      this.store.setState({ confirmed, version });
+      this.settle();
+    }
     if (this.held.size > 0 && this.joined && !this.reloading) {
       this.held.clear();
       this.join();
