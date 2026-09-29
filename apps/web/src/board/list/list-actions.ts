@@ -14,9 +14,9 @@ function children(state: ProjectState, parentId: RowId | null): readonly Row[] {
 }
 
 /** Creates an untitled task and starts typing its title. */
-function createAndEdit(board: Board, parentId: RowId | null, afterId: RowId | null, kind: Row["kind"] = "task"): RowId | null {
+function createAndEdit(board: Board, parentId: RowId | null, afterId: RowId | null, kind: Row["kind"] = "task", start?: string): RowId | null {
   const id = newId();
-  if (!runCommand(board, { type: "createRow", id, kind, parentId, afterId, title: "" })) return null;
+  if (!runCommand(board, { type: "createRow", id, kind, parentId, afterId, title: "", ...(start ? { start } : {}) })) return null;
   useSelection.getState().edit(id, true);
   return id;
 }
@@ -37,9 +37,9 @@ export function addSubtask(board: Board, state: ProjectState, row: Row): RowId |
   return createAndEdit(board, row.id, children(state, row.id).at(-1)?.id ?? null);
 }
 
-/** Footer "+ Add task" / "+ Add section": a new last top-level row. */
-export function addAtEnd(board: Board, state: ProjectState, kind: Row["kind"]): RowId | null {
-  return createAndEdit(board, null, children(state, null).at(-1)?.id ?? null, kind);
+/** Footer "+ Add task" / "+ Add section" (or a click on the chart's blank row, with a start date): a new last top-level row. */
+export function addAtEnd(board: Board, state: ProjectState, kind: Row["kind"], start?: string): RowId | null {
+  return createAndEdit(board, null, children(state, null).at(-1)?.id ?? null, kind, start);
 }
 
 /** Deletes a row and everything inside it, with an Undo in the confirmation toast. */

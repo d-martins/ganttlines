@@ -55,7 +55,7 @@ async function joinedBoard(rows?: ProjectStateDto["rows"], path?: string) {
 }
 
 const listRow = (title: string) => screen.getAllByRole("row").find((row) => within(row).queryByText(title, { exact: true }))!;
-const barWidth = (name: string) => parseFloat(screen.getByRole("img", { name }).style.width);
+const barWidth = (name: string) => parseFloat(screen.getByLabelText(name).style.width);
 
 describe("board", () => {
   beforeEach(() => {
@@ -76,11 +76,11 @@ describe("board", () => {
 
   it("draws bars, milestones, brackets, sections and dependency arrows", async () => {
     await joinedBoard();
-    expect(screen.getByRole("img", { name: `ui, ${d("2026-09-30")} – ${d("2026-10-08")}, Ana Silva` })).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: `hooks, ${d("2026-10-09")} – ${d("2026-10-12")}` })).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: `ms, ${d("2026-10-14")}` })).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: `parent, ${d("2026-10-12")} – ${d("2026-10-14")}` })).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: `design, ${d("2026-09-30")} – ${d("2026-10-12")}` })).toBeInTheDocument();
+    expect(screen.getByLabelText(`ui, ${d("2026-09-30")} – ${d("2026-10-08")}, Ana Silva`)).toBeInTheDocument();
+    expect(screen.getByLabelText(`hooks, ${d("2026-10-09")} – ${d("2026-10-12")}`)).toBeInTheDocument();
+    expect(screen.getByLabelText(`ms, ${d("2026-10-14")}`)).toBeInTheDocument();
+    expect(screen.getByLabelText(`parent, ${d("2026-10-12")} – ${d("2026-10-14")}`)).toBeInTheDocument();
+    expect(screen.getByLabelText(`design, ${d("2026-09-30")} – ${d("2026-10-12")}`)).toBeInTheDocument();
     const arrows = screen.getAllByTestId("dependency");
     expect(arrows).toHaveLength(2);
     expect(arrows.filter((arrow) => arrow.dataset["violation"])).toHaveLength(1);
@@ -116,14 +116,14 @@ describe("board", () => {
   it("switches to roomy bars with the title inside and the full title in a tooltip", async () => {
     const { user } = await joinedBoard();
     await user.click(screen.getByRole("button", { name: "Roomy bars" }));
-    const bar = screen.getByRole("img", { name: `ui, ${d("2026-09-30")} – ${d("2026-10-08")}, Ana Silva` });
+    const bar = screen.getByLabelText(`ui, ${d("2026-09-30")} – ${d("2026-10-08")}, Ana Silva`);
     expect(within(bar).getByText("ui")).toBeInTheDocument();
     expect(listRow("ui").style.height).toBe("40px");
     await user.hover(bar);
     expect(await screen.findByRole("tooltip")).toHaveTextContent("ui");
     expect(localStorage.getItem("gp.barStyle")).toBe('"roomy"');
     // "review" is one day wide: too short for its title, which moves to the right of the bar
-    const review = screen.getAllByRole("img", { name: /^review,/ })[0]!;
+    const review = screen.getAllByLabelText(/^review,/)[0]!;
     expect(within(review).queryByText("review")).not.toBeInTheDocument();
     expect(within(review.parentElement!).getByText("review")).toBeInTheDocument();
   });
@@ -142,14 +142,14 @@ describe("board", () => {
   it("overlays a baseline's dates as ghosts", async () => {
     await joinedBoard(ROWS, `/p/${PROJECT_ID}?baseline=${BASELINE_ID}`);
     expect(await screen.findByTestId("baseline-ghost")).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: `hooks, ${d("2026-10-09")} – ${d("2026-10-12")}` })).toBeInTheDocument();
+    expect(screen.getByLabelText(`hooks, ${d("2026-10-09")} – ${d("2026-10-12")}`)).toBeInTheDocument();
   });
 
   it("switches to a baseline: its dates, read-only, with a way back", async () => {
     const { user, router } = await joinedBoard(ROWS, `/p/${PROJECT_ID}?baseline=${BASELINE_ID}&compare=switch`);
     expect(await screen.findByText(/Viewing baseline/)).toHaveTextContent("Viewing baseline Kick-off (read-only)");
-    expect(screen.getByRole("img", { name: `hooks, ${d("2026-10-01")} – ${d("2026-10-02")}` })).toBeInTheDocument();
-    expect(screen.queryByRole("img", { name: /^ui,/ })).not.toBeInTheDocument();
+    expect(screen.getByLabelText(`hooks, ${d("2026-10-01")} – ${d("2026-10-02")}`)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/^ui,/)).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Back to the live plan" }));
     expect(router.state.location.search).toEqual({});
   });

@@ -1,4 +1,5 @@
 import type { ResourceDto } from "@ganttlines/protocol";
+import type { HTMLAttributes } from "react";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { Lock } from "lucide-react";
 import type { Span } from "@ganttlines/engine";
@@ -9,7 +10,7 @@ import type { BarStyle } from "../view-store";
 import type { Timeline } from "./timeline";
 
 export const ROW_HEIGHT: Record<BarStyle, number> = { compact: 30, roomy: 40 };
-const BAR_HEIGHT: Record<BarStyle, number> = { compact: 14, roomy: 28 };
+export const BAR_HEIGHT: Record<BarStyle, number> = { compact: 14, roomy: 28 };
 const DIAMOND: Record<BarStyle, number> = { compact: 12, roomy: 16 };
 
 /** Horizontal extent of a drawn row: bars span their days; a milestone is a diamond on its day. */
@@ -58,37 +59,8 @@ export function barDetails(span: Span, assignee: string | undefined): string {
   return assignee ? `${dates}, ${assignee}` : dates;
 }
 
-/** Bars, brackets, diamonds and baseline ghosts for the rendered rows. */
-export function Bars({
-  rows,
-  firstRow,
-  timeline,
-  style,
-  resources,
-}: {
-  rows: readonly BoardRow[];
-  firstRow: number;
-  timeline: Timeline;
-  style: BarStyle;
-  resources: ReadonlyMap<string, ResourceDto>;
-}) {
-  const rowHeight = ROW_HEIGHT[style];
-  return (
-    <>
-      {rows.map((entry, index) => {
-        const top = (firstRow + index) * rowHeight;
-        return (
-          <div key={entry.row.id} className="absolute left-0" style={{ top, height: rowHeight }}>
-            {entry.ghost ? <GhostBar ghost={entry.ghost} timeline={timeline} style={style} /> : null}
-            {entry.span ? <RowBar entry={entry} span={entry.span} timeline={timeline} style={style} resources={resources} /> : null}
-          </div>
-        );
-      })}
-    </>
-  );
-}
-
-function GhostBar({ ghost, timeline, style }: { ghost: Ghost; timeline: Timeline; style: BarStyle }) {
+/** A baseline's dates under the live bar (overlay mode). */
+export function GhostBar({ ghost, timeline, style }: { ghost: Ghost; timeline: Timeline; style: BarStyle }) {
   const { left, right } = extent(ghost.kind, ghost.span, timeline, style);
   const rowHeight = ROW_HEIGHT[style];
   if (ghost.kind === "milestone") {
@@ -104,18 +76,28 @@ function GhostBar({ ghost, timeline, style }: { ghost: Ghost; timeline: Timeline
   return <div data-testid="baseline-ghost" className="absolute h-1 rounded-sm bg-[var(--baseline)]" style={{ left, width: right - left, top: rowHeight - 5 }} />;
 }
 
-function RowBar({
+/** Props for the drawn shape when it can be edited (focus, pointer and key handlers). */
+export type ShapeProps = HTMLAttributes<HTMLDivElement>;
+
+/** One row's bar, bracket, diamond or section span, with its title beside or inside it. */
+export function RowBar({
   entry,
   span,
   timeline,
   style,
   resources,
+  shape,
+  titleGap = 6,
 }: {
   entry: BoardRow;
   span: Span;
   timeline: Timeline;
   style: BarStyle;
   resources: ReadonlyMap<string, ResourceDto>;
+  /** makes the shape interactive; read-only shapes are images */
+  shape?: ShapeProps | undefined;
+  /** space between the shape and a title drawn beside it (room for the link bullet) */
+  titleGap?: number;
 }) {
   const { row, kind } = entry;
   const rowHeight = ROW_HEIGHT[style];
@@ -126,8 +108,10 @@ function RowBar({
   const details = barDetails(span, assignee?.name);
   const label = `${row.title || "Untitled"}, ${details}`;
   const locked = task?.locked ? <Lock aria-label="Locked" size={10} className="shrink-0" /> : null;
+  const { className: shapeClass = "", ...shapeRest } = shape ?? {};
+  const shapeAttrs: ShapeProps = shape ? { role: "button", "aria-label": label, ...shapeRest } : { role: "img", "aria-label": label };
   const outsideTitle = (
-    <span className="absolute flex items-center gap-1 whitespace-nowrap text-xs" style={{ left: right + 6, top: 0, height: rowHeight }}>
+    <span className="pointer-events-none absolute flex items-center gap-1 whitespace-nowrap text-xs" style={{ left: right + titleGap, top: 0, height: rowHeight }}>
       {kind === "task" ? locked : null}
       <span className={kind === "parent" ? "font-semibold" : kind === "section" ? "text-muted" : ""}>{row.title}</span>
     </span>
@@ -136,7 +120,7 @@ function RowBar({
   if (kind === "section") {
     return (
       <>
-        <div role="img" aria-label={label} className="absolute h-[3px] rounded bg-[var(--section)]" style={{ left, width, top: rowHeight / 2 - 1 }} />
+        <div {...shapeAttrs} className={`absolute h-[3px] rounded bg-[var(--section)] ${shapeClass}`} style={{ left, width, top: rowHeight / 2 - 1 }} />
         {outsideTitle}
       </>
     );
@@ -144,7 +128,7 @@ function RowBar({
   if (kind === "parent") {
     return (
       <>
-        <div role="img" aria-label={label} className="absolute" style={{ left, width, top: rowHeight / 2 - 3, height: 10 }}>
+        <div {...shapeAttrs} className={`absolute ${shapeClass}`} style={{ left, width, top: rowHeight / 2 - 3, height: 10 }}>
           <div className="h-1.5 rounded-sm bg-[var(--parent)]" />
           <div className="absolute top-0 left-0 h-2.5 w-1 bg-[var(--parent)] [clip-path:polygon(0_0,100%_0,0_100%)]" />
           <div className="absolute top-0 right-0 h-2.5 w-1 bg-[var(--parent)] [clip-path:polygon(0_0,100%_0,100%_100%)]" />
@@ -158,7 +142,7 @@ function RowBar({
     const size = DIAMOND[style];
     return (
       <>
-        <div role="img" aria-label={label} className="absolute rotate-45 rounded-[2px]" style={{ left, top: rowHeight / 2 - size / 2, width: size, height: size, background: fill }} />
+        <div {...shapeAttrs} className={`absolute rotate-45 rounded-[2px] ${shapeClass}`} style={{ left, top: rowHeight / 2 - size / 2, width: size, height: size, background: fill }} />
         {outsideTitle}
       </>
     );
@@ -168,9 +152,8 @@ function RowBar({
     return (
       <>
         <div
-          role="img"
-          aria-label={label}
-          className={`absolute rounded-[3px] ${entry.violation ? "outline-2 outline-offset-1 outline-[var(--violation)]" : ""}`}
+          {...shapeAttrs}
+          className={`absolute rounded-[3px] ${entry.violation ? "outline-2 outline-offset-1 outline-[var(--violation)]" : ""} ${shapeClass}`}
           style={{ left, width, top: (rowHeight - barHeight) / 2, height: barHeight, background: fill }}
         />
         {outsideTitle}
@@ -185,9 +168,8 @@ function RowBar({
       <Tooltip.Root>
         <Tooltip.Trigger asChild>
           <div
-            role="img"
-            aria-label={label}
-            className={`absolute flex items-center gap-1.5 overflow-hidden rounded-[4px] px-1.5 text-xs font-semibold ${entry.violation ? "outline-2 outline-offset-1 outline-[var(--violation)]" : ""}`}
+            {...shapeAttrs}
+            className={`absolute flex items-center gap-1.5 overflow-hidden rounded-[4px] px-1.5 text-xs font-semibold ${entry.violation ? "outline-2 outline-offset-1 outline-[var(--violation)]" : ""} ${shapeClass}`}
             style={{ left, width, top: (rowHeight - barHeight) / 2, height: barHeight, background: fill, color: ink }}
           >
             {showAvatar ? <Avatar name={assignee!.name} color={assignee!.avatarColor} size={18} /> : null}

@@ -1,7 +1,10 @@
-import { toDay, weekday, type Calendar, type DayNum, type ProjectState } from "@ganttlines/engine";
+import { applyCommand, toDay, weekday, type Calendar, type DayNum, type ProjectState } from "@ganttlines/engine";
 import type { BaselineTaskDto, CalendarDto, HighlightDto, ResourceDto } from "@ganttlines/protocol";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { Bars, ROW_HEIGHT } from "./chart/bars";
+import { ROW_HEIGHT } from "./chart/bars";
+import { ChartRows } from "./chart/chart-rows";
+import { DayMenu } from "./chart/day-menu";
+import { useChartDrag } from "./chart/drag";
 import { ChartHeader } from "./chart/chart-header";
 import { Dependencies } from "./chart/dependencies";
 import { Shading } from "./chart/shading";
@@ -59,10 +62,16 @@ export function Board({
   const [query, setQuery] = useState("");
   const { canEdit, sync } = useBoard();
   const collapsed = useCollapsed(sync.projectId);
-  const model = useMemo(() => boardModel(state, calendar, baseline, query, collapsed), [state, calendar, baseline, query, collapsed]);
+  // While a bar is dragged, show the board as the drop would leave it (successors pushed and all).
+  const dragCommand = useChartDrag((store) => store.drag?.command ?? null);
+  const displayed = useMemo(() => {
+    if (!dragCommand) return state;
+    const result = applyCommand(state, calendar, dragCommand);
+    return result.ok ? result.state : state;
+  }, [state, calendar, dragCommand]);
+  const model = useMemo(() => boardModel(displayed, calendar, baseline, query, collapsed), [displayed, calendar, baseline, query, collapsed]);
   const selectedId = useSelection((selection) => selection.selectedId);
   const onListKey = useListKeys(model.rows);
-  const resourceMap = useMemo(() => new Map(resources.map((resource) => [resource.id, resource])), [resources]);
   const todayDay = today();
   const highlightDays = useMemo(() => highlights.map((highlight) => ({ day: toDay(highlight.date), highlight })), [highlights]);
 
@@ -81,6 +90,7 @@ export function Board({
   }, [first, last, zoom, showWeekends, calendarDto.workingWeekdays]);
 
   const scroller = useRef<HTMLDivElement>(null);
+  const chartBody = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState<Viewport>({ top: 0, left: 0, width: 1200, height: 800 });
   /** the day kept in place when the timeline changes (zoom, weekends) */
   const anchorDay = useRef<DayNum>(todayDay);
@@ -193,7 +203,14 @@ export function Board({
               <ListRows rows={shown} allRows={model.rows} firstRow={firstRow} rowHeight={rowHeight} numbers={model.numbers} searching={query.trim() !== ""} />
               {divider}
             </div>
-            <div className="relative shrink-0 overflow-hidden" style={{ width: timeline.width, height: bodyHeight, ...grid }}>
+            <DayMenu
+              projectId={sync.projectId}
+              enabled={canEdit}
+              dayAt={(clientX) => timeline.dayAt(clientX - (chartBody.current?.getBoundingClientRect().left ?? 0))}
+              highlights={highlightDays}
+              resources={resources}
+            >
+            <div ref={chartBody} data-chart-body className="relative shrink-0 overflow-hidden" style={{ width: timeline.width, height: bodyHeight, ...grid }}>
               <Shading
                 timeline={timeline}
                 calendar={calendar}
@@ -210,8 +227,9 @@ export function Board({
               ) : null}
               <div aria-hidden className="absolute top-0 w-0.5 bg-[var(--today)]" style={{ left: timeline.x(todayDay) + timeline.dayWidth / 2 - 1, height: bodyHeight }} />
               <Dependencies rows={model.rows} firstRow={firstRow} lastRow={lastRow} timeline={timeline} style={barStyle} />
-              <Bars rows={shown} firstRow={firstRow} timeline={timeline} style={barStyle} resources={resourceMap} />
+              <ChartRows rows={shown} allRows={model.rows} firstRow={firstRow} timeline={timeline} style={barStyle} />
             </div>
+            </DayMenu>
           </div>
         </div>
         {model.rows.length === 0 ? <p className="absolute top-16 left-4 text-sm text-muted">No tasks yet.</p> : null}
