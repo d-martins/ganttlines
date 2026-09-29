@@ -35,8 +35,11 @@ export function boardModel(
   state: ProjectState,
   calendar: Calendar,
   baseline: { mode: CompareMode; tasks: readonly BaselineTaskDto[] } | null,
+  /** search text: show matching rows (and their ancestors) only */
+  query = "",
 ): BoardModel {
-  const { visible, numbers } = outline(state);
+  const needle = query.trim().toLocaleLowerCase();
+  const { visible, numbers } = outline(state, needle ? (row) => row.title.toLocaleLowerCase().includes(needle) : undefined);
   let schedule: ReturnType<typeof computeSchedule> | null = null;
   try {
     schedule = computeSchedule(state, calendar);

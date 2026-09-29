@@ -2,6 +2,7 @@ import { toDay, weekday } from "@ganttlines/engine";
 import { describe, expect, it } from "vitest";
 import { elbow } from "../src/board/chart/dependencies";
 import { chartRange, Timeline } from "../src/board/chart/timeline";
+import { dropMove, parsePredecessor } from "../src/board/list/list-actions";
 import { predecessorText } from "../src/board/list/task-list";
 import type { BoardRow } from "../src/board/model";
 import { outline } from "../src/board/rows";
@@ -89,6 +90,36 @@ describe("list width", () => {
     const { useBoardView, LIST_WIDTH } = await import("../src/board/view-store");
     useBoardView.getState().setListWidth(250);
     expect(useBoardView.getState().listWidth).toBe(LIST_WIDTH.min);
-    expect(LIST_WIDTH.min).toBe(40 + 96 + 120 + 40 + 40 + 56 + 8);
+    expect(LIST_WIDTH.min).toBe(40 + 96 + 120 + 40 + 40 + 56 + 28 + 8);
+  });
+});
+
+describe("list edits", () => {
+  it("reads predecessors typed as row numbers with offsets", () => {
+    expect(parsePredecessor(" #3 ")).toEqual({ number: 3, offset: 0 });
+    expect(parsePredecessor("3+2")).toEqual({ number: 3, offset: 2 });
+    expect(parsePredecessor("#3 -1")).toEqual({ number: 3, offset: -1 });
+    expect(parsePredecessor("#3 −1")).toEqual({ number: 3, offset: -1 });
+    expect(parsePredecessor("")).toBe("none");
+    expect(parsePredecessor("three")).toBeNull();
+  });
+
+  it("turns drops into moves: before, inside and after a row", () => {
+    const state = {
+      rows: {
+        s: section("s", { position: "a0" }),
+        a: task("a", { parentId: "s", position: "a0" }),
+        b: task("b", { parentId: "s", position: "a1" }),
+        c: task("c", { position: "b0" }),
+      },
+    };
+    expect(dropMove(state, "c", state.rows.b, "before")).toEqual({ parentId: "s", afterId: "a" });
+    expect(dropMove(state, "c", state.rows.a, "before")).toEqual({ parentId: "s", afterId: null });
+    expect(dropMove(state, "c", state.rows.a, "inside")).toEqual({ parentId: "a", afterId: null });
+    expect(dropMove(state, "a", state.rows.c, "after")).toEqual({ parentId: null, afterId: "c" });
+    expect(dropMove(state, "s", state.rows.a, "inside")).toBeNull(); // into itself
+    expect(dropMove(state, "b", state.rows.a, "after")).toBeNull(); // already there
+    const withSection = { rows: { ...state.rows, t: section("t", { position: "c0" }) } };
+    expect(dropMove(withSection, "t", withSection.rows.a, "inside")).toEqual({ parentId: "s", afterId: "a" }); // sections never go inside tasks: lands after it
   });
 });

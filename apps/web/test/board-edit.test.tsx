@@ -1,0 +1,139 @@
+import type { Command } from "@ganttlines/engine";
+import type { ProjectStateDto } from "@ganttlines/protocol";
+import { waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ANA, CALENDAR, FakeWebSocket, PROJECT_ID, projectState, section, task } from "./board-fixtures";
+import { ADMIN, project, renderApp, screen, signedIn, VIEWER } from "./utils";
+
+const ROWS = [
+  section("design", { position: "a0" }),
+  task("ui", { parentId: "design", position: "a0", userStart: "2026-09-30", duration: 5 }),
+  task("hooks", { parentId: "design", position: "a1", userStart: "2026-10-12", duration: 2 }),
+];
+
+async function editableBoard(rows: ProjectStateDto["rows"] = ROWS, user = ADMIN) {
+  FakeWebSocket.instances = [];
+  vi.stubGlobal("WebSocket", FakeWebSocket);
+  const api = signedIn(user, [project(PROJECT_ID, "Launch")]);
+  api.on(`GET /api/projects/${PROJECT_ID}/state`, () => ({ body: projectState(rows) }));
+  api.on("GET /api/calendar", () => ({ body: CALENDAR }));
+  api.on("GET /api/resources", () => ({ body: { resources: [ANA] } }));
+  api.on(`GET /api/projects/${PROJECT_ID}/highlights`, () => ({ body: { highlights: [] } }));
+  api.on(`GET /api/projects/${PROJECT_ID}/baselines`, () => ({ body: { baselines: [] } }));
+  const app = renderApp(`/p/${PROJECT_ID}`);
+  await screen.findByRole("treegrid", { name: "Tasks" });
+  await waitFor(() => expect(FakeWebSocket.last.sent).toHaveLength(1));
+  FakeWebSocket.last.deliver({ type: "joined", projectId: PROJECT_ID, version: 5, instanceVersion: 1, viewers: [] });
+  return { api, ...app };
+}
+
+/** Commands the board sent, without their ids. */
+const sentCommands = (): Command[] =>
+  FakeWebSocket.last.sent.flatMap((message) => ((message as { type: string }).type === "command" ? [(message as { command: Command }).command] : []));
+const listRow = (title: string) => screen.getAllByRole("row").find((row) => within(row).queryByText(title, { exact: true }))!;
+
+describe("editing the task list", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 8, 29, 12));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("renames on Enter and starts the next row", async () => {
+    const { user } = await editableBoard();
+    await user.dblClick(within(listRow("ui")).getByText("ui"));
+    const input = screen.getByRole("textbox", { name: "Title" });
+    await user.clear(input);
+    await user.type(input, "Intelligent UI{Enter}");
+    expect(sentCommands()[0]).toEqual({ type: "updateTitle", id: "ui", title: "Intelligent UI" });
+    expect(sentCommands()[1]).toMatchObject({ type: "createRow", kind: "task", parentId: "design", afterId: "ui", title: "" });
+    const next = screen.getByRole("textbox", { name: "Title" });
+    await user.type(next, "Press kit{Enter}");
+    const created = (sentCommands()[1] as Extract<Command, { type: "createRow" }>).id;
+    expect(sentCommands()[2]).toEqual({ type: "updateTitle", id: created, title: "Press kit" });
+  });
+
+  it("assigns people from the picker", async () => {
+    const { user } = await editableBoard();
+    await user.click(screen.getByRole("button", { name: "Assignee of “ui”: nobody" }));
+    const search = await screen.findByRole("combobox", { name: "Find a person" });
+    await user.type(search, "ana{Enter}");
+    expect(sentCommands()).toEqual([{ type: "setAssignee", id: "ui", resourceId: ANA.id }]);
+  });
+
+  it("indents with Tab while typing, and Escape drops an untitled new row", async () => {
+    const { user } = await editableBoard();
+    await user.dblClick(within(listRow("hooks")).getByText("hooks"));
+    await user.keyboard("{Tab}");
+    expect(sentCommands()).toEqual([{ type: "indent", id: "hooks" }]);
+    expect(screen.getByRole("row", { name: /hooks/ })).toHaveAttribute("aria-level", "3");
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    const created = (sentCommands().at(-1) as Extract<Command, { type: "createRow" }>).id;
+    expect(sentCommands().at(-1)).toMatchObject({ type: "createRow", parentId: null, afterId: "design", kind: "task" });
+    await user.keyboard("{Escape}");
+    expect(sentCommands().at(-1)).toEqual({ type: "deleteRows", ids: [created] });
+    expect(screen.queryByRole("textbox", { name: "Title" })).not.toBeInTheDocument();
+  });
+
+  it("selects with the arrow keys, deletes with Delete and offers Undo", async () => {
+    const { user } = await editableBoard();
+    await user.click(within(listRow("ui")).getByText("2"));
+    await user.keyboard("{ArrowDown}");
+    expect(listRow("hooks")).toHaveAttribute("aria-selected", "true");
+    await user.keyboard("{Delete}");
+    expect(sentCommands()).toEqual([{ type: "deleteRows", ids: ["hooks"] }]);
+    expect(screen.queryByText("hooks", { exact: true })).not.toBeInTheDocument(); // shown at once, before the server answers
+    await user.click(await screen.findByRole("button", { name: "Undo" }));
+    expect(FakeWebSocket.last.sent.at(-1)).toMatchObject({ type: "undo" });
+  });
+
+  it("edits working days and predecessors from their columns", async () => {
+    const { user } = await editableBoard();
+    await user.click(screen.getByRole("button", { name: "Working days of “hooks”" }));
+    await user.keyboard("{Control>}a{/Control}0{Enter}");
+    expect(sentCommands().at(-1)).toEqual({ type: "convertMilestone", id: "hooks", milestone: true });
+    await user.click(screen.getByRole("button", { name: "Predecessor of “hooks”" }));
+    await user.keyboard("#2 +1{Enter}");
+    expect(sentCommands().slice(-2)).toEqual([
+      { type: "linkTasks", fromId: "ui", toId: "hooks" },
+      { type: "setOffset", id: "hooks", offset: 1 },
+    ]);
+    expect(within(listRow("hooks")).getByText("#2 +1")).toBeInTheDocument();
+  });
+
+  it("explains edits the engine refuses and doesn't send them", async () => {
+    const { user } = await editableBoard();
+    await user.click(screen.getByRole("button", { name: "Predecessor of “hooks”" }));
+    await user.keyboard("#1{Enter}");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Row #1 is a section");
+    expect(sentCommands()).toEqual([]);
+  });
+
+  it("shows the server's reason when it refuses an edit, and rolls it back", async () => {
+    const { user } = await editableBoard();
+    await user.click(screen.getByRole("button", { name: "Color of “ui”: blue" }));
+    await user.click(screen.getByRole("button", { name: "green" }));
+    expect(screen.getByRole("button", { name: "Color of “ui”: green" })).toBeInTheDocument();
+    const { commandId } = FakeWebSocket.last.sent.at(-1) as { commandId: string };
+    FakeWebSocket.last.deliver({ type: "reject", commandId, error: "conflict", message: "This project is archived" });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Change not saved: This project is archived");
+    expect(screen.getByRole("button", { name: "Color of “ui”: blue" })).toBeInTheDocument();
+  });
+
+  it("filters rows by search, keeping their parents", async () => {
+    const { user } = await editableBoard();
+    await user.type(screen.getByRole("searchbox", { name: "Search tasks" }), "hoo");
+    expect(screen.getAllByRole("row").map((row) => row.getAttribute("aria-level"))).toEqual(["1", "2"]);
+    expect(screen.queryByText("ui", { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add task" })).not.toBeInTheDocument();
+  });
+
+  it("is read-only for viewers", async () => {
+    const { user } = await editableBoard(ROWS, VIEWER);
+    await user.dblClick(within(listRow("ui")).getByText("ui"));
+    expect(screen.queryByRole("textbox", { name: "Title" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add task" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Undo/ })).toBeDisabled();
+  });
+});

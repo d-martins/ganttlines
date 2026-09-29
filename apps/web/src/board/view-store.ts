@@ -22,8 +22,8 @@ const isZoom = (value: unknown): value is Zoom => value === "day" || value === "
 const isBarStyle = (value: unknown): value is BarStyle => value === "compact" || value === "roomy";
 const isWidth = (value: unknown): value is number => typeof value === "number" && value >= LIST_WIDTH.min && value <= LIST_WIDTH.max;
 
-/** `min` fits every list column (see COLUMNS in list/task-list.tsx: 392 px of columns + 8 px padding). */
-export const LIST_WIDTH = { min: 400, max: 900, initial: 460 } as const;
+/** `min` fits every list column (see COLUMNS in list/task-list.tsx: 420 px of columns + 8 px padding). */
+export const LIST_WIDTH = { min: 428, max: 900, initial: 480 } as const;
 
 /** How this browser likes to look at boards (web spec §2): remembered per browser, not per project. */
 export const useBoardView = create<BoardView>((set) => ({
