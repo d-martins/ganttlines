@@ -15,6 +15,8 @@ import {
   useUpdateResource,
 } from "../api/queries";
 import { Avatar } from "../ui/avatar";
+import { ColorInput } from "../ui/color-input";
+import { QueryState } from "../ui/query-state";
 import { Button } from "../ui/button";
 import { ConfirmButton } from "../ui/confirm";
 import { ErrorText, Field } from "../ui/field";
@@ -28,12 +30,26 @@ export function TeamPage() {
   const resources = useQuery(resourceList);
   const cal = useQuery(calendar);
   const editable = canEdit(me.data);
-  const people = resources.data ?? [];
+  if (me.data?.role === "guest") {
+    return <p className="p-8 text-muted">The team calendar is only available to team members.</p>;
+  }
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-5 p-6">
-      <TeamMembers people={people} editable={editable} />
-      <Holidays holidays={cal.data?.holidays ?? []} people={people} editable={editable} />
-      <TimeOff entries={cal.data?.timeOff ?? []} people={people} editable={editable} />
+      <QueryState query={resources}>
+        {(people) => (
+          <>
+            <TeamMembers people={people} editable={editable} />
+            <QueryState query={cal}>
+              {(data) => (
+                <>
+                  <Holidays holidays={data.holidays} people={people} editable={editable} />
+                  <TimeOff entries={data.timeOff} people={people} editable={editable} />
+                </>
+              )}
+            </QueryState>
+          </>
+        )}
+      </QueryState>
     </div>
   );
 }
@@ -61,12 +77,10 @@ function TeamMembers({ people, editable }: { people: ResourceDto[]; editable: bo
             {person.inactive ? <span className="rounded bg-surface-2 px-1.5 py-0.5 text-xs text-muted">Inactive</span> : null}
             {editable ? (
               <>
-                <input
-                  type="color"
-                  aria-label={`Color of ${person.name}`}
+                <ColorInput
+                  label={`Color of ${person.name}`}
                   value={person.avatarColor}
-                  onChange={(event) => update.mutate({ id: person.id, avatarColor: event.target.value })}
-                  className="h-7 w-9 cursor-pointer rounded border border-border bg-bg"
+                  onCommit={(avatarColor) => update.mutate({ id: person.id, avatarColor })}
                 />
                 <Button variant="ghost" onClick={() => update.mutate({ id: person.id, inactive: !person.inactive })}>
                   {person.inactive ? "Reactivate" : "Mark inactive"}

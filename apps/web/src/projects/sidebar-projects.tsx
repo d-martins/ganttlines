@@ -36,11 +36,13 @@ export function SidebarProjects({ user }: { user: UserDto }) {
         <NameInput
           label="New project name"
           initial=""
+          pending={create.isPending}
           onCancel={() => setCreating(false)}
           onSave={(name) => create.mutate({ name }, { onSuccess: () => setCreating(false) })}
         />
       ) : null}
       <ErrorText>{create.error ? errorMessage(create.error) : null}</ErrorText>
+      {active.isError ? <ErrorText>{errorMessage(active.error)}</ErrorText> : null}
       {active.data?.map((project) => <ProjectItem key={project.id} project={project} manage={canManage(user)} />)}
       {active.data?.length === 0 && !creating ? <p className="px-2 text-sm text-muted">No projects yet.</p> : null}
       {archived.length > 0 ? (
@@ -65,12 +67,16 @@ function ProjectItem({ project, manage }: { project: ProjectDto; manage: boolean
   const [renaming, setRenaming] = useState(false);
   if (renaming) {
     return (
-      <NameInput
-        label="Project name"
-        initial={project.name}
-        onCancel={() => setRenaming(false)}
-        onSave={(name) => update.mutate({ id: project.id, name }, { onSuccess: () => setRenaming(false) })}
-      />
+      <>
+        <NameInput
+          label="Project name"
+          initial={project.name}
+          pending={update.isPending}
+          onCancel={() => setRenaming(false)}
+          onSave={(name) => update.mutate({ id: project.id, name }, { onSuccess: () => setRenaming(false) })}
+        />
+        <ErrorText>{update.error ? errorMessage(update.error) : null}</ErrorText>
+      </>
     );
   }
   return (
@@ -107,19 +113,41 @@ function ProjectItem({ project, manage }: { project: ProjectDto; manage: boolean
   );
 }
 
-/** Inline name editor: Enter saves, Escape cancels. */
-function NameInput({ label, initial, onSave, onCancel }: { label: string; initial: string; onSave: (name: string) => void; onCancel: () => void }) {
+/**
+ * Inline name editor: Enter or clicking away saves (if changed and not empty), Escape cancels.
+ * Ignores further saves while one is in flight.
+ */
+function NameInput({
+  label,
+  initial,
+  pending,
+  onSave,
+  onCancel,
+}: {
+  label: string;
+  initial: string;
+  pending: boolean;
+  onSave: (name: string) => void;
+  onCancel: () => void;
+}) {
   const [value, setValue] = useState(initial);
+  const commit = () => {
+    if (pending) return;
+    const name = value.trim();
+    if (!name || name === initial) onCancel();
+    else onSave(name);
+  };
   return (
     <input
       aria-label={label}
       autoFocus
       value={value}
+      disabled={pending}
       onChange={(event) => setValue(event.target.value)}
-      onBlur={onCancel}
+      onBlur={commit}
       onKeyDown={(event) => {
         if (event.key === "Escape") onCancel();
-        if (event.key === "Enter" && value.trim()) onSave(value.trim());
+        if (event.key === "Enter") commit();
       }}
       className="mx-1 rounded-md border border-accent bg-bg px-2 py-1 text-sm"
     />

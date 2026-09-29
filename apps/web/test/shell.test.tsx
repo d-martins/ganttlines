@@ -4,7 +4,7 @@ import { ADMIN, project, renderApp, screen, signedIn, VIEWER } from "./utils";
 describe("sidebar and top bar", () => {
   it("lists projects, opens the last one used, and shows its name in the top bar", async () => {
     signedIn(ADMIN, [project("p1", "Launch"), project("p2", "Website")]);
-    localStorage.setItem("gp.lastProject", '"p2"');
+    localStorage.setItem("gp.lastProject:u-admin", '"p2"');
     const { router } = renderApp("/");
     expect(await screen.findByRole("heading", { level: 1, name: "Website" })).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/p/p2");

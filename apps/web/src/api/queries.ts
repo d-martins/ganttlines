@@ -67,19 +67,22 @@ function useApiMutation<TInput, TResult>(run: (input: TInput) => Promise<TResult
 }
 
 /**
- * After signing in/out or setting up, the cached "who am I" answers are dropped (not just marked
- * stale): otherwise the next screen would briefly act on the old answer and bounce back.
+ * After changing the password, the cached "who am I" answers are dropped (not just marked stale):
+ * otherwise the next screen would briefly act on the old answer and bounce back.
  */
 const refreshAuth = (client: QueryClient) => {
   client.removeQueries({ queryKey: keys.me });
   client.removeQueries({ queryKey: keys.setup });
 };
+
+/** Signing in (or setting up) may switch to a different person: drop everything cached for the previous one. */
+const startSession = (client: QueryClient) => client.clear();
 const refreshProjects = (client: QueryClient) => client.invalidateQueries({ queryKey: ["projects"] });
 const refreshCalendar = (client: QueryClient) => Promise.all([client.invalidateQueries({ queryKey: keys.calendar }), client.invalidateQueries({ queryKey: keys.resources })]);
 
 export const useSetup = () =>
-  useApiMutation((body: { email: string; name: string; password: string }) => api<{ user: UserDto }>("POST", "/api/setup", body), refreshAuth);
-export const useLogin = () => useApiMutation((body: { email: string; password: string }) => api<{ user: UserDto }>("POST", "/api/auth/login", body), refreshAuth);
+  useApiMutation((body: { email: string; name: string; password: string }) => api<{ user: UserDto }>("POST", "/api/setup", body), startSession);
+export const useLogin = () => useApiMutation((body: { email: string; password: string }) => api<{ user: UserDto }>("POST", "/api/auth/login", body), startSession);
 export const useLogout = () => {
   const client = useQueryClient();
   return useMutation({ mutationFn: () => api<void>("POST", "/api/auth/logout"), onSuccess: () => client.clear() });
@@ -91,7 +94,12 @@ export const useCreateProject = () => useApiMutation((body: CreateProjectBody) =
 export const useUpdateProject = () =>
   useApiMutation(({ id, ...body }: UpdateProjectBody & { id: string }) => api<{ project: ProjectDto }>("PATCH", `/api/projects/${id}`, body), refreshProjects);
 
-const refreshUsers = (client: QueryClient) => Promise.all([client.invalidateQueries({ queryKey: keys.users }), client.invalidateQueries({ queryKey: keys.resources })]);
+const refreshUsers = (client: QueryClient) =>
+  Promise.all([
+    client.invalidateQueries({ queryKey: keys.users }),
+    client.invalidateQueries({ queryKey: keys.resources }),
+    client.invalidateQueries({ queryKey: keys.me }),
+  ]);
 export const useCreateUser = () =>
   useApiMutation((body: CreateUserBody) => api<{ user: UserDto; temporaryPassword: string }>("POST", "/api/users", body), refreshUsers);
 export const useUpdateUser = () =>

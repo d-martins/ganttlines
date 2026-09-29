@@ -93,8 +93,10 @@ function UsersSection({ me }: { me: UserDto }) {
                 <select
                   aria-label={`Role of ${user.name}`}
                   value={user.role}
+                  disabled={user.id === me.id}
+                  title={user.id === me.id ? "Another admin has to change your role" : undefined}
                   onChange={(event) => update.mutate({ id: user.id, role: event.target.value as Role })}
-                  className="w-full rounded border border-border bg-bg px-1 py-0.5"
+                  className="w-full rounded border border-border-strong bg-bg px-1 py-0.5 disabled:opacity-60"
                 >
                   {ROLES.map((role) => (
                     <option key={role} value={role}>
@@ -104,14 +106,18 @@ function UsersSection({ me }: { me: UserDto }) {
                 </select>
               </td>
               <td className="whitespace-nowrap py-2 text-right">
-                <Button
-                  variant="ghost"
-                  onClick={() =>
-                    reset.mutate(user.id, { onSuccess: ({ temporaryPassword }) => setNotice(`New temporary password for ${user.name}: ${temporaryPassword}`) })
-                  }
-                >
-                  Reset password
-                </Button>
+                {/* Your own password is changed above; resetting it here would sign you out everywhere. */}
+                {user.id !== me.id ? (
+                  <ConfirmButton
+                    label="Reset password"
+                    title={`Reset ${user.name}'s password?`}
+                    message="They are signed out everywhere and must sign in with a new temporary password, which you'll see here."
+                    confirmLabel="Reset"
+                    onConfirm={() =>
+                      reset.mutate(user.id, { onSuccess: ({ temporaryPassword }) => setNotice(`New temporary password for ${user.name}: ${temporaryPassword}`) })
+                    }
+                  />
+                ) : null}
                 {user.id !== me.id ? (
                   <ConfirmButton
                     label="Delete"

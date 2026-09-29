@@ -1,6 +1,7 @@
 import type { UserDto } from "@ganttlines/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams, useRouterState } from "@tanstack/react-router";
+import { errorMessage } from "../api/client";
 import { projectList, useLogout } from "../api/queries";
 import { useTheme, type ThemePreference } from "../theme";
 import { Avatar } from "../ui/avatar";
@@ -46,9 +47,14 @@ export function TopBar({ user }: { user: UserDto }) {
           <MenuLabel>Theme</MenuLabel>
           <MenuRadio value={preference} options={THEMES} onChange={setPreference} />
           <MenuSeparator />
-          <MenuItem onSelect={() => logout.mutate(undefined, { onSettled: () => navigate({ to: "/login" }) })}>Sign out</MenuItem>
+          <MenuItem onSelect={() => logout.mutate(undefined, { onSuccess: () => navigate({ to: "/login" }) })}>Sign out</MenuItem>
         </Menu>
       </div>
+      {logout.isError ? (
+        <p role="alert" className="text-xs text-danger">
+          Couldn't sign out: {errorMessage(logout.error)}
+        </p>
+      ) : null}
     </header>
   );
 }

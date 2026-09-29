@@ -1,10 +1,11 @@
 import type { ProjectDto, UserDto } from "@ganttlines/protocol";
 import * as Tooltip from "@radix-ui/react-tooltip";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
+import { createQueryClient } from "../src/api/query-client";
 import { createAppRouter } from "../src/router";
 
 export type Handler = (body: unknown, url: URL) => { status?: number; body?: unknown } | undefined;
@@ -32,6 +33,7 @@ export function fakeApi(handlers: Record<string, Handler> = {}): FakeApi {
 }
 
 export const ADMIN: UserDto = { id: "u-admin", email: "admin@example.com", name: "Ada Admin", role: "admin", mustChangePassword: false };
+export const GUEST: UserDto = { id: "u-guest", email: "client@example.com", name: "Client", role: "guest", mustChangePassword: false };
 export const VIEWER: UserDto = { id: "u-viewer", email: "vi@example.com", name: "Vi Viewer", role: "viewer", mustChangePassword: false };
 
 export function project(id: string, name: string, archived = false): ProjectDto {
@@ -50,7 +52,7 @@ export function signedIn(user: UserDto, projects: ProjectDto[] = []): FakeApi {
 /** Renders the whole app at `path` with a fresh query cache. */
 export function renderApp(path: string) {
   const router = createAppRouter(createMemoryHistory({ initialEntries: [path] }));
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const client = createQueryClient({ retry: false });
   render(
     <QueryClientProvider client={client}>
       <Tooltip.Provider>

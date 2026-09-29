@@ -20,7 +20,7 @@ export function Sidebar({ user }: { user: UserDto }) {
         <IconButton label="Projects" onClick={toggle}>
           <FolderKanban size={18} />
         </IconButton>
-        <RailLink to="/team" label="Team & calendar" icon={<Users size={18} />} />
+        {user.role !== "guest" ? <RailLink to="/team" label="Team & calendar" icon={<Users size={18} />} /> : null}
         <RailLink to="/settings" label="Settings" icon={<Settings size={18} />} />
         <div className="mt-auto">{toggleButton}</div>
       </nav>
@@ -36,9 +36,12 @@ export function Sidebar({ user }: { user: UserDto }) {
           <h2 id="sidebar-workspace" className="px-2 pb-1 text-xs font-semibold uppercase tracking-wide text-muted">
             Workspace
           </h2>
-          <SideLink to="/team" icon={<Users size={16} />}>
-            Team &amp; calendar
-          </SideLink>
+          {/* Guests only reach boards through share links; the team calendar is for members. */}
+          {user.role !== "guest" ? (
+            <SideLink to="/team" icon={<Users size={16} />}>
+              Team &amp; calendar
+            </SideLink>
+          ) : null}
           <SideLink to="/settings" icon={<Settings size={16} />}>
             Settings
           </SideLink>
