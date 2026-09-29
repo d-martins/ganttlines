@@ -133,6 +133,9 @@ describe("details panel", () => {
     scroller.scrollTo = scrollTo as unknown as typeof scroller.scrollTo;
     await selectRow(user, "hooks");
     expect(scrollTo).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Working days of “hooks”" })); // opens the cell, doesn't center
+    await user.keyboard("{Escape}");
+    expect(scrollTo).not.toHaveBeenCalled();
     await selectRow(user, "hooks");
     expect(scrollTo).toHaveBeenCalledTimes(1);
     const { left, behavior } = scrollTo.mock.calls[0]![0] as ScrollToOptions;

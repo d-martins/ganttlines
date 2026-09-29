@@ -281,9 +281,12 @@ export function ListRows({
             aria-expanded={entry.hasChildren ? !entry.collapsed : undefined}
             onClick={(event) => {
               // A click on the row that's already selected — or a double-click on the row — brings its bar
-              // into the middle of the chart. Not the second click of a double-click on a cell: that edits the cell.
-              const onCell = (event.target as HTMLElement).closest("[data-cell]") !== null;
-              if (selected && !(onCell && event.detail >= 2)) center(row.id);
+              // into the middle of the chart. Not a click that opens a cell (WD, CD, predecessor), nor the
+              // second click of a double-click on the title (that edits it).
+              const cell = (event.target as HTMLElement).closest("[data-cell]")?.getAttribute("data-cell");
+              const opensCell = cell !== null && cell !== undefined && !cell.endsWith(":title");
+              const editsTitle = cell?.endsWith(":title") === true && event.detail >= 2;
+              if (selected && !opensCell && !editsTitle) center(row.id);
               select(row.id);
             }}
             className={`group ${COLUMNS} absolute right-0 left-0 px-1 text-sm ${selected ? "bg-accent-soft" : "hover:bg-surface"} ${drag?.id === row.id ? "opacity-50" : ""}`}
@@ -503,7 +506,7 @@ export function ListRows({
             </span>
             <span role="gridcell" aria-label={predecessor ? `After ${predecessor}` : "No predecessor"} className="text-right text-xs tabular-nums">
               {task && canEdit ? (
-                // A searchable list of tasks (like the assignee picker), opened by a double-click or Space / Enter.
+                // A searchable list of tasks (like the assignee picker), opened by a click or Space / Enter.
                 <PredecessorPicker
                   task={task}
                   state={state}
@@ -548,7 +551,7 @@ export function ListRows({
   );
 }
 
-/** A value that turns into a text box on a double-click or Space / Enter (if editable); a click selects the row. */
+/** A value that opens its editor on a click or Space / Enter (if editable); the click also selects the row. */
 function CellButton({
   editable,
   label,
@@ -587,10 +590,7 @@ function CellButton({
         event.stopPropagation();
         onEdit();
       }}
-      onDoubleClick={(event) => {
-        event.stopPropagation();
-        onEdit();
-      }}
+      onClick={onEdit}
       className="block h-6 w-full truncate rounded px-1 text-right hover:bg-surface-2"
     >
       {children || <span className="text-muted opacity-0 group-hover:opacity-100">–</span>}

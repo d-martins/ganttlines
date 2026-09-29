@@ -124,11 +124,11 @@ describe("editing the task list", () => {
 
   it("edits working days and predecessors from their columns", async () => {
     const { user } = await editableBoard();
-    await user.dblClick(screen.getByRole("button", { name: "Working days of “hooks”" }));
+    await user.click(screen.getByRole("button", { name: "Working days of “hooks”" }));
     await user.keyboard("{Control>}a{/Control}0{Enter}");
     expect(sentCommands().at(-1)).toEqual({ type: "convertMilestone", id: "hooks", milestone: true });
     // The predecessor opens a searchable list of tasks (row number or title), like the assignee picker.
-    await user.dblClick(screen.getByRole("button", { name: "Predecessor of “hooks”" }));
+    await user.click(screen.getByRole("button", { name: "Predecessor of “hooks”" }));
     const search = screen.getByRole("combobox", { name: "Find a predecessor" });
     expect(screen.getByRole("option", { selected: true })).toHaveTextContent("No predecessor");
     expect(screen.queryByRole("option", { name: /design/ })).not.toBeInTheDocument(); // sections can't be predecessors
@@ -145,7 +145,7 @@ describe("editing the task list", () => {
 
   it("explains edits the engine refuses and doesn't send them", async () => {
     const { user } = await editableBoard([...ROWS, task("idea", { parentId: "design", position: "a2" })]);
-    await user.dblClick(screen.getByRole("button", { name: "Predecessor of “hooks”" }));
+    await user.click(screen.getByRole("button", { name: "Predecessor of “hooks”" }));
     await user.type(screen.getByRole("combobox", { name: "Find a predecessor" }), "idea{Enter}");
     expect(await screen.findByRole("alert")).toHaveTextContent("Both tasks need dates before they can be linked");
     expect(sentCommands()).toEqual([]);
@@ -241,11 +241,14 @@ describe("editing the task list", () => {
     expect(list).not.toHaveAttribute("tabindex", "0");
   });
 
-  it("edits a cell on a double-click; a single click only selects the row", async () => {
+  it("opens WD, CD and predecessor on a single click (selecting the row); the title needs a double-click", async () => {
     const { user } = await editableBoard();
     await user.click(screen.getByRole("button", { name: "Working days of “ui”" }));
-    expect(screen.queryByRole("textbox", { name: "Working days" })).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Working days" })).toHaveFocus();
     expect(listRow("ui")).toHaveAttribute("aria-selected", "true");
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Title “ui”" }));
+    expect(screen.queryByRole("textbox", { name: "Title" })).not.toBeInTheDocument();
     await user.dblClick(screen.getByRole("button", { name: "Title “ui”" }));
     expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("ui");
   });
