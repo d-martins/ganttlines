@@ -29,7 +29,9 @@ export function TopBar({ user }: { user: UserDto }) {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const projects = useQuery(projectList(true));
   const board = useActiveBoard((state) => state.sync);
-  const boardName = useStore(board?.store ?? EMPTY, (state) => state?.project?.name);
+  // While switching projects the previous board is still registered: only trust the one shown.
+  const shownBoard = board && board.projectId === params.projectId ? board : null;
+  const boardName = useStore(shownBoard?.store ?? EMPTY, (state) => state?.project?.name);
   const title = params.projectId
     ? (boardName ?? projects.data?.find((project) => project.id === params.projectId)?.name ?? "")
     : pathname.startsWith("/team")
@@ -41,7 +43,7 @@ export function TopBar({ user }: { user: UserDto }) {
   return (
     <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border bg-surface px-4">
       <h1 className="truncate text-sm font-semibold">{title}</h1>
-      {board && board.projectId === params.projectId ? <BoardTools sync={board} /> : null}
+      {shownBoard ? <BoardTools sync={shownBoard} /> : null}
       <div className="ml-auto">
         <Menu
           trigger={

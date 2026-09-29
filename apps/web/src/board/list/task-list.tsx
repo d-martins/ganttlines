@@ -9,19 +9,20 @@ const COLUMNS = "grid grid-cols-[40px_minmax(120px,1fr)_120px_40px_40px_56px] it
 
 export function ListHeader() {
   return (
-    <div role="row" className={`${COLUMNS} h-full border-b border-border px-1 text-xs font-semibold text-muted`}>
-      <span role="columnheader" className="text-right pr-2">
+    // Visual column headings; each row's cells carry their own meaning for assistive tech (3c adds grid navigation).
+    <div aria-hidden className={`${COLUMNS} h-full border-b border-border px-1 text-xs font-semibold text-muted`}>
+      <span className="text-right pr-2">
         #
       </span>
-      <span role="columnheader">Task</span>
-      <span role="columnheader">Assignee</span>
-      <span role="columnheader" title="Working days" className="text-right">
+      <span >Task</span>
+      <span >Assignee</span>
+      <span title="Working days" className="text-right">
         WD
       </span>
-      <span role="columnheader" title="Calendar days" className="text-right">
+      <span title="Calendar days" className="text-right">
         CD
       </span>
-      <span role="columnheader" title="Predecessor (row # and offset)" className="pl-2">
+      <span title="Predecessor (row # and offset)" className="pl-2">
         Pred.
       </span>
     </div>
@@ -69,6 +70,7 @@ export function ListRows({
         const { row } = entry;
         const assignee = row.kind === "task" && row.resourceId ? resources.get(row.resourceId) : undefined;
         const { working, days } = durations(entry, calendar);
+        const predecessor = predecessorText(entry, numbers);
         const weight = row.kind === "section" ? "font-bold" : entry.isParent ? "font-semibold" : "";
         return (
           <div
@@ -79,7 +81,9 @@ export function ListRows({
             className={`${COLUMNS} absolute right-0 left-0 px-1 text-sm`}
             style={{ top: (firstRow + index) * rowHeight, height: rowHeight }}
           >
-            <span className="pr-2 text-right text-xs text-muted tabular-nums">{entry.number}</span>
+            <span role="gridcell" aria-label={`Row ${entry.number}`} className="pr-2 text-right text-xs text-muted tabular-nums">
+              {entry.number}
+            </span>
             <span role="gridcell" className={`flex min-w-0 items-center gap-1 ${weight}`} style={{ paddingLeft: entry.depth * 16 }}>
               {entry.hasChildren ? (
                 row.collapsed ? (
@@ -92,7 +96,7 @@ export function ListRows({
               )}
               <span className={`truncate ${row.title ? "" : "text-muted italic"}`}>{row.title || "Untitled"}</span>
             </span>
-            <span className="flex min-w-0 items-center gap-1.5 text-xs">
+            <span role="gridcell" aria-label={assignee ? `Assignee ${assignee.name}` : "Unassigned"} className="flex min-w-0 items-center gap-1.5 text-xs">
               {assignee ? (
                 <>
                   <Avatar name={assignee.name} color={assignee.avatarColor} size={18} />
@@ -100,9 +104,15 @@ export function ListRows({
                 </>
               ) : null}
             </span>
-            <span className="text-right text-xs tabular-nums">{working}</span>
-            <span className="text-right text-xs tabular-nums">{days}</span>
-            <span className="truncate pl-2 text-xs tabular-nums">{predecessorText(entry, numbers)}</span>
+            <span role="gridcell" aria-label={`${working} working days`} className="text-right text-xs tabular-nums">
+              {working}
+            </span>
+            <span role="gridcell" aria-label={`${days} calendar days`} className="text-right text-xs tabular-nums">
+              {days}
+            </span>
+            <span role="gridcell" aria-label={predecessor ? `After ${predecessor}` : "No predecessor"} className="truncate pl-2 text-xs tabular-nums">
+              {predecessor}
+            </span>
           </div>
         );
       })}
