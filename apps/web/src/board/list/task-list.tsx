@@ -11,7 +11,7 @@ import { setCollapsed } from "../collapse";
 import { taskColors } from "../format";
 import type { BoardRow } from "../model";
 import { useSelection } from "../selection";
-import { addAtEnd, addRowBelow, addSubtask, deleteRow, dropMove, setPredecessor, setWorkingDays, type DropZone } from "./list-actions";
+import { addAtEnd, addRowBelow, addSubtask, deleteRow, dropMove, setCalendarDays, setPredecessor, setWorkingDays, type DropZone } from "./list-actions";
 
 /**
  * Column template shared by the header and the rows: # · title · assignee · WD · CD · predecessor · color.
@@ -111,6 +111,7 @@ function InlineInput({
   onCancel,
   onKey,
   inputMode,
+  cell,
 }: {
   initial: string;
   label: string;
@@ -123,14 +124,25 @@ function InlineInput({
    */
   onKey?: (event: KeyboardEvent<HTMLInputElement>, value: string) => boolean;
   inputMode?: "numeric" | "text";
+  /** `data-cell` of the control to focus again when editing ends from the keyboard (Enter / Escape) */
+  cell: string;
 }) {
   const [value, setValue] = useState(initial);
   const done = useRef(false);
-  const finish = (commit: boolean) => {
+  const finish = (commit: boolean, byKey = false) => {
     if (done.current) return;
     done.current = true;
+    // Keyboard users carry on from the same cell (or the list, if the row is gone); clicks elsewhere keep their focus.
+    const list = byKey ? (document.activeElement?.closest('[role="treegrid"]') as HTMLElement | null) : null;
     if (commit) onCommit(value);
     else onCancel();
+    if (byKey) {
+      // After React has re-rendered the cell (a timeout, not an animation frame: those pause while the page isn't painted).
+      setTimeout(() => {
+        const target = document.querySelector<HTMLElement>(`[data-cell="${CSS.escape(cell)}"]`) ?? list;
+        target?.focus();
+      });
+    }
   };
   return (
     <input
@@ -148,15 +160,15 @@ function InlineInput({
           done.current = true;
           return;
         }
-        if (event.key === "Enter") finish(true);
-        else if (event.key === "Escape") finish(false);
+        if (event.key === "Enter") finish(true, true);
+        else if (event.key === "Escape") finish(false, true);
       }}
       className={`min-w-0 rounded-sm border border-accent bg-bg px-1 text-sm outline-none ${className}`}
     />
   );
 }
 
-type Column = "wd" | "pred";
+type Column = "wd" | "cd" | "pred";
 interface DragState {
   id: RowId;
   target: { index: number; zone: DropZone } | null;
@@ -258,6 +270,7 @@ export function ListRows({
                 <button
                   type="button"
                   aria-label={`Move “${row.title || "Untitled"}”`}
+                  tabIndex={-1}
                   onPointerDown={(event) => startDrag(event, row.id)}
                   className="absolute top-1/2 left-0 -translate-y-1/2 cursor-grab touch-none text-muted opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
                 >
@@ -287,6 +300,7 @@ export function ListRows({
                 <InlineInput
                   initial={row.title}
                   label="Title"
+                  cell={`${row.id}:title`}
                   className="flex-1"
                   onCommit={(value) => {
                     commitTitle(row, value);
@@ -326,17 +340,31 @@ export function ListRows({
                 />
               ) : (
                 <>
-                  <span
-                    className={`truncate ${row.title ? "" : "text-muted italic"}`}
-                    onClick={(event) => {
-                      if (selected && canEdit) {
+                  {canEdit ? (
+                    // A button so it can be reached with Tab: Space/Enter edits; a click selects, a second click edits.
+                    <button
+                      type="button"
+                      data-cell={`${row.id}:title`}
+                      aria-label={`Title “${row.title || "Untitled"}”`}
+                      onFocus={(event) => event.currentTarget.matches(":focus-visible") && select(row.id)}
+                      onKeyDown={(event) => {
+                        if (event.key !== " " && event.key !== "Enter") return;
+                        event.preventDefault();
                         event.stopPropagation();
                         edit(row.id);
-                      }
-                    }}
-                  >
-                    {row.title || "Untitled"}
-                  </span>
+                      }}
+                      onClick={(event) => {
+                        if (!selected) return;
+                        event.stopPropagation();
+                        edit(row.id);
+                      }}
+                      className={`min-w-0 truncate rounded-sm text-left ${row.title ? "" : "text-muted italic"}`}
+                    >
+                      {row.title || "Untitled"}
+                    </button>
+                  ) : (
+                    <span className={`truncate ${row.title ? "" : "text-muted italic"}`}>{row.title || "Untitled"}</span>
+                  )}
                   {canEdit ? (
                     <button
                       type="button"
@@ -391,6 +419,7 @@ export function ListRows({
                 <InlineInput
                   initial={String(task.duration)}
                   label="Working days"
+                  cell={`${row.id}:wd`}
                   inputMode="numeric"
                   className="w-full text-right text-xs"
                   onCommit={(value) => {
@@ -403,6 +432,7 @@ export function ListRows({
                 <CellButton
                   editable={canEdit && !!task && !entry.isParent}
                   label={`Working days of “${row.title || "Untitled"}”`}
+                  cell={`${row.id}:wd`}
                   onEdit={() => setCell({ id: row.id, column: "wd" })}
                 >
                   {working}
@@ -410,13 +440,36 @@ export function ListRows({
               )}
             </span>
             <span role="gridcell" aria-label={`${days} calendar days`} className="text-right text-xs tabular-nums">
-              {days}
+              {editingCell === "cd" && task && entry.span ? (
+                <InlineInput
+                  initial={days}
+                  label="Calendar days"
+                  cell={`${row.id}:cd`}
+                  inputMode="numeric"
+                  className="w-full text-right text-xs"
+                  onCommit={(value) => {
+                    setCell(null);
+                    if (value.trim() !== days) setCalendarDays(board, task, entry.span!, Number(value.trim()));
+                  }}
+                  onCancel={() => setCell(null)}
+                />
+              ) : (
+                <CellButton
+                  editable={canEdit && !!task && !entry.isParent && task.duration > 0 && entry.span !== null}
+                  label={`Calendar days of “${row.title || "Untitled"}”`}
+                  cell={`${row.id}:cd`}
+                  onEdit={() => setCell({ id: row.id, column: "cd" })}
+                >
+                  {days}
+                </CellButton>
+              )}
             </span>
             <span role="gridcell" aria-label={predecessor ? `After ${predecessor}` : "No predecessor"} className="text-right text-xs tabular-nums">
               {editingCell === "pred" && task ? (
                 <InlineInput
                   initial={predecessor.replace("−", "-")}
                   label="Predecessor"
+                  cell={`${row.id}:pred`}
                   className="w-full text-right text-xs"
                   onCommit={(value) => {
                     setCell(null);
@@ -425,7 +478,7 @@ export function ListRows({
                   onCancel={() => setCell(null)}
                 />
               ) : (
-                <CellButton editable={canEdit && !!task} label={`Predecessor of “${row.title || "Untitled"}”`} onEdit={() => setCell({ id: row.id, column: "pred" })}>
+                <CellButton editable={canEdit && !!task} label={`Predecessor of “${row.title || "Untitled"}”`} cell={`${row.id}:pred`} onEdit={() => setCell({ id: row.id, column: "pred" })}>
                   {predecessor}
                 </CellButton>
               )}
@@ -452,11 +505,12 @@ export function ListRows({
 }
 
 /** A read-only value that turns into a text box when clicked (if editable). */
-function CellButton({ editable, label, onEdit, children }: { editable: boolean; label: string; onEdit: () => void; children: string }) {
+function CellButton({ editable, label, cell, onEdit, children }: { editable: boolean; label: string; cell: string; onEdit: () => void; children: string }) {
   if (!editable) return <span className="block truncate">{children}</span>;
   return (
     <button
       type="button"
+      data-cell={cell}
       aria-label={label}
       onClick={(event) => {
         event.stopPropagation();
@@ -524,7 +578,10 @@ export function useListKeys(allRows: readonly BoardRow[]) {
   const run = useRun();
   const { selectedId, select, edit } = useSelection();
   return (event: KeyboardEvent<HTMLElement>) => {
-    if ((event.target as HTMLElement).tagName === "INPUT") return;
+    const target = event.target as HTMLElement;
+    if (target.tagName === "INPUT") return;
+    // Enter / Space on a focused cell belong to that cell (it opens its own editor).
+    if ((event.key === "Enter" || event.key === " ") && target.closest("button")) return;
     const index = allRows.findIndex((entry) => entry.row.id === selectedId);
     const current = allRows[index];
     const move = (to: number) => {

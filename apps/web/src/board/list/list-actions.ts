@@ -1,4 +1,4 @@
-import { buildTree, childrenOf, type ProjectState, type Row, type RowId, type TaskRow } from "@ganttlines/engine";
+import { buildTree, childrenOf, fromDay, type ProjectState, type Row, type RowId, type Span, type TaskRow } from "@ganttlines/engine";
 import { toast } from "../../ui/toast";
 import { runCommand, type BoardContextValue } from "../board-context";
 import { setCollapsed } from "../collapse";
@@ -98,6 +98,15 @@ export function setWorkingDays(board: Board, task: TaskRow, value: number): void
   }
   if (task.duration === 0 && !runCommand(board, { type: "convertMilestone", id: task.id, milestone: false })) return;
   if (value !== 1 || task.duration !== 0) runCommand(board, { type: "setDuration", id: task.id, duration: value });
+}
+
+/**
+ * Sets calendar days from the CD column: the task keeps its start and ends that many days later
+ * (on the last working day by then); its working days follow from the calendar.
+ */
+export function setCalendarDays(board: Board, task: TaskRow, span: Span, value: number): void {
+  if (!Number.isInteger(value) || value < 1) return toast("Calendar days must be a whole number from 1", { tone: "error" });
+  runCommand(board, { type: "resizeTask", id: task.id, edge: "end", date: fromDay(span.start + value - 1) });
 }
 
 export type DropZone = "before" | "inside" | "after";

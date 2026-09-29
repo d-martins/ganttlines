@@ -170,4 +170,46 @@ describe("editing the task list", () => {
     expect(screen.queryByRole("button", { name: "Add task" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Undo/ })).toBeDisabled();
   });
+
+  it("reaches every editable cell with Tab and opens it with Space", async () => {
+    const { user } = await editableBoard();
+    screen.getByRole("button", { name: "Title “ui”" }).focus();
+    const stops: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      await user.tab();
+      stops.push(document.activeElement?.getAttribute("aria-label") ?? "");
+    }
+    expect(stops).toEqual([
+      "Add a subtask to “ui”",
+      "Assignee of “ui”: nobody",
+      "Working days of “ui”",
+      "Calendar days of “ui”",
+      "Predecessor of “ui”",
+      "Color of “ui”: blue",
+    ]);
+    screen.getByRole("button", { name: "Title “ui”" }).focus();
+    await user.keyboard(" ");
+    expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("ui");
+    await user.keyboard("{Escape}");
+    // Back on the same cell, ready to go on with the keyboard.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Title “ui”" })).toHaveFocus());
+    screen.getByRole("button", { name: "Working days of “ui”" }).focus();
+    await user.keyboard(" ");
+    expect(screen.getByRole("textbox", { name: "Working days" })).toHaveFocus();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Working days of “ui”" })).toHaveFocus());
+    expect(sentCommands()).toEqual([]);
+  });
+
+  it("sets calendar days by moving the end date", async () => {
+    const { user } = await editableBoard();
+    await user.click(within(listRow("ui")).getByText("2")); // a selected row: Enter on the list would edit its title
+    screen.getByRole("button", { name: "Calendar days of “ui”" }).focus();
+    await user.keyboard("{Enter}");
+    await user.keyboard("{Control>}a{/Control}3{Enter}");
+    // ui starts Wed 2026-09-30: 3 calendar days end on Fri 2026-10-02
+    expect(sentCommands()).toEqual([{ type: "resizeTask", id: "ui", edge: "end", date: "2026-10-02" }]);
+    expect(within(listRow("ui")).getByRole("button", { name: "Working days of “ui”" })).toHaveTextContent("3");
+    expect(screen.queryByRole("textbox", { name: "Title" })).not.toBeInTheDocument(); // Enter on the cell didn't also edit the title
+  });
 });
