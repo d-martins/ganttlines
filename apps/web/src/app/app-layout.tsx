@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Navigate, Outlet, useRouterState } from "@tanstack/react-router";
 import { errorMessage } from "../api/client";
 import { currentUser, setupStatus } from "../api/queries";
+import { Button } from "../ui/button";
 import { Sidebar } from "./sidebar";
 import { TopBar } from "./top-bar";
 
@@ -14,7 +15,19 @@ export function AppLayout() {
   const onAuthPage = /^\/(login|setup|change-password)\b/.test(here);
   const returnTo = here === "/" || onAuthPage ? undefined : here;
   if (setup.isPending || me.isPending) return <p className="p-6 text-muted">Loading…</p>;
-  if (setup.error || me.error) return <p className="p-6 text-danger">{errorMessage(setup.error ?? me.error)}</p>;
+  if (setup.error || me.error) {
+    // Usually the server is unreachable (restarting, offline): offer a retry instead of a dead end.
+    return (
+      <div className="p-6">
+        <p role="alert" className="text-danger">
+          {errorMessage(setup.error ?? me.error)}
+        </p>
+        <Button className="mt-3" onClick={() => void Promise.all([setup.refetch(), me.refetch()])}>
+          Try again
+        </Button>
+      </div>
+    );
+  }
   if (setup.data.needsSetup) return <Navigate to="/setup" />;
   // Already heading to an auth page: navigating again would drop the return address.
   if (!me.data) return onAuthPage ? null : <Navigate to="/login" search={returnTo ? { redirect: returnTo } : {}} />;

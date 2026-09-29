@@ -31,7 +31,11 @@ export async function api<T>(method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE"
   }
   if (response.status === 204) return undefined as T;
   const data = (await response.json().catch(() => null)) as { error?: string; message?: string } | null;
-  if (!response.ok) throw new ApiError(response.status, data?.error ?? "http_error", data?.message ?? response.statusText);
+  if (!response.ok) {
+    // No JSON body: a proxy or gateway answered because the server itself is down or restarting.
+    if (!data && response.status >= 500) throw new ApiError(response.status, "unavailable", "The server isn't responding. Try again in a moment.");
+    throw new ApiError(response.status, data?.error ?? "http_error", data?.message ?? response.statusText);
+  }
   return data as T;
 }
 
