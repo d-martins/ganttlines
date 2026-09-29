@@ -1,6 +1,6 @@
 import { TASK_COLORS, type Calendar, type RowId, type TaskColor, type TaskRow } from "@ganttlines/engine";
 import * as Popover from "@radix-ui/react-popover";
-import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, GripVertical, IndentDecrease, IndentIncrease, Plus, Search } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, GripVertical, IndentDecrease, IndentIncrease, PanelRightOpen, Plus, Search } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { Avatar } from "../../ui/avatar";
 import { useFocusReturnOnKeyboardClose } from "../../ui/popover-focus";
@@ -194,7 +194,7 @@ export function ListRows({
   const board = useBoard();
   const { state, calendar, resources, resourceMap, canEdit, canCreateResources } = board;
   const run = useRun();
-  const { selectedId, editingId, draftId, select, edit } = useSelection();
+  const { selectedId, editingId, draftId, select, edit, openPanel } = useSelection();
   const [cell, setCell] = useState<{ id: RowId; column: Column } | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
 
@@ -365,20 +365,34 @@ export function ListRows({
                   ) : (
                     <span className={`truncate ${row.title ? "" : "text-muted italic"}`}>{row.title || "Untitled"}</span>
                   )}
-                  {canEdit ? (
+                  <span className="ml-auto flex shrink-0">
+                    {canEdit ? (
+                      <button
+                        type="button"
+                        aria-label={`Add a subtask to “${row.title || "Untitled"}”`}
+                        title="Add subtask"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          addSubtask(board, state, row);
+                        }}
+                        className="rounded p-0.5 text-muted opacity-0 group-hover:opacity-100 hover:bg-surface-2 hover:text-text focus-visible:opacity-100"
+                      >
+                        <Plus size={14} />
+                      </button>
+                    ) : null}
                     <button
                       type="button"
-                      aria-label={`Add a subtask to “${row.title || "Untitled"}”`}
-                      title="Add subtask"
+                      aria-label={`Details of “${row.title || "Untitled"}”`}
+                      title="Details (Alt+Enter)"
                       onClick={(event) => {
                         event.stopPropagation();
-                        addSubtask(board, state, row);
+                        openPanel(row.id);
                       }}
-                      className="ml-auto shrink-0 rounded p-0.5 text-muted opacity-0 group-hover:opacity-100 hover:bg-surface-2 hover:text-text focus-visible:opacity-100"
+                      className="rounded p-0.5 text-muted opacity-0 group-hover:opacity-100 hover:bg-surface-2 hover:text-text focus-visible:opacity-100"
                     >
-                      <Plus size={14} />
+                      <PanelRightOpen size={14} />
                     </button>
-                  ) : null}
+                  </span>
                 </>
               )}
             </span>
@@ -571,13 +585,13 @@ function DropIndicator({ target, depth, rowHeight, valid }: { target: NonNullabl
 }
 
 /**
- * Keys on the task list (when not typing): ↑/↓ select, Enter/F2 edit the title, Delete removes,
+ * Keys on the task list (when not typing): ↑/↓ select, Enter/F2 edit the title, Alt+Enter opens details, Delete removes,
  * Alt+Shift+→ / ← indent / outdent, Escape clears the selection. Tab is never taken: it moves focus.
  */
 export function useListKeys(allRows: readonly BoardRow[]) {
   const board = useBoard();
   const run = useRun();
-  const { selectedId, select, edit } = useSelection();
+  const { selectedId, select, edit, openPanel } = useSelection();
   return (event: KeyboardEvent<HTMLElement>) => {
     const target = event.target as HTMLElement;
     if (target.tagName === "INPUT") return;
@@ -606,8 +620,11 @@ export function useListKeys(allRows: readonly BoardRow[]) {
         break;
       case "Enter":
       case "F2":
-        if (!current || !board.canEdit) return;
-        edit(current.row.id);
+        if (!current) return;
+        // Alt+Enter: details (for everyone); Enter / F2: edit the title.
+        if (event.key === "Enter" && event.altKey) openPanel(current.row.id);
+        else if (board.canEdit) edit(current.row.id);
+        else return;
         break;
       case "Delete":
       case "Backspace":

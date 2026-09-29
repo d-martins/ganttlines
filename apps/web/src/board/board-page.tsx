@@ -5,7 +5,7 @@ import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router"
 import { useEffect, useMemo, useState } from "react";
 import { useStore } from "zustand";
 import { ApiError, errorMessage } from "../api/client";
-import { baselineSnapshot, calendar, currentUser, highlightList, keys, loadProjectState, resourceList } from "../api/queries";
+import { baselineSnapshot, calendar, currentUser, highlightList, keys, loadProjectState, resourceList, upsertComment } from "../api/queries";
 import { lastProjectKey } from "../projects/project-pages";
 import { writePref } from "../storage";
 import { BoardSync, type BoardEvent, type SocketLike } from "../sync/board-sync";
@@ -46,7 +46,7 @@ function applyEvent(client: QueryClient, projectId: string, event: BoardEvent): 
     case "baselines":
       return replaceList(client, keys.baselines(projectId), event.baselines);
     case "comment":
-      return; // comments arrive with the details panel (plan 3d)
+      return upsertComment(client, projectId, event.comment);
     case "rejected":
       return toast(`Change not saved: ${event.message}`, { tone: "error" });
     case "history":
@@ -133,6 +133,10 @@ function LiveBoard({ sync }: { sync: BoardSync }) {
     useActiveBoard.setState({ canEdit });
   }, [canEdit]);
   useEffect(resetSelection, [projectId]);
+  // Every change to the board adds history: refresh the history lists on screen (details panel).
+  useEffect(() => {
+    void client.invalidateQueries({ queryKey: keys.allActivity(projectId) });
+  }, [client, projectId, state.version]);
   // Undo / redo from the keyboard, unless typing somewhere.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {

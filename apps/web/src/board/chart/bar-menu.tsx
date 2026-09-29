@@ -4,6 +4,7 @@ import { Wrench } from "lucide-react";
 import { useBoard, useRun } from "../board-context";
 import { taskColors } from "../format";
 import { deleteRow } from "../list/list-actions";
+import { useSelection } from "../selection";
 
 const ITEM = "flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 outline-none data-[highlighted]:bg-surface-2";
 
@@ -15,6 +16,7 @@ export function BarMenu({ task, isParent, open, onOpenChange }: { task: TaskRow;
   const board = useBoard();
   const run = useRun();
   const title = task.title || "Untitled";
+  const openPanel = useSelection((selection) => selection.openPanel);
   return (
     <DropdownMenu.Root open={open} onOpenChange={onOpenChange}>
       <DropdownMenu.Trigger asChild>
@@ -29,6 +31,10 @@ export function BarMenu({ task, isParent, open, onOpenChange }: { task: TaskRow;
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content align="start" sideOffset={4} className="z-50 min-w-48 rounded-md border border-border bg-bg p-1 text-sm text-text shadow-lg">
+          <DropdownMenu.Item className={ITEM} onSelect={() => openPanel(task.id)}>
+            Details…
+          </DropdownMenu.Item>
+          <DropdownMenu.Separator className="my-1 h-px bg-border" />
           <DropdownMenu.Label className="px-2 py-1 text-xs text-muted">Color</DropdownMenu.Label>
           <DropdownMenu.RadioGroup value={task.color} onValueChange={(color) => color !== task.color && run({ type: "setColor", id: task.id, color: color as TaskRow["color"] })}>
             <div className="grid grid-cols-9 gap-1 px-2 pb-1">

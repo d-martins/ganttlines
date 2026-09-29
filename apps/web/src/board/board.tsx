@@ -13,6 +13,7 @@ import { today } from "./format";
 import { useBoard } from "./board-context";
 import { useCollapsed } from "./collapse";
 import { ListHeader, ListRows, useListKeys } from "./list/task-list";
+import { DetailsPanel } from "./panel/details-panel";
 import { useSelection } from "./selection";
 import { boardModel, type CompareMode } from "./model";
 import { useBoardView } from "./view-store";
@@ -177,7 +178,7 @@ export function Board({
   );
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="relative flex h-full flex-col">
       {model.cycle ? (
         <p role="alert" className="border-b border-border bg-surface px-4 py-2 text-sm text-danger">
           These tasks' dependencies form a loop, so their dates can't be worked out.
@@ -250,6 +251,7 @@ export function Board({
         </div>
         {model.rows.length === 0 ? <p className="absolute top-16 left-4 text-sm text-muted">No tasks yet.</p> : null}
       </div>
+      <DetailsPanel numbers={model.numbers} />
     </div>
   );
 }
