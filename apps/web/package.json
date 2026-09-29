@@ -13,6 +13,7 @@
   "dependencies": {
     "@ganttlines/engine": "workspace:^",
     "@ganttlines/protocol": "workspace:^",
+    "@radix-ui/react-context-menu": "^2",
     "@radix-ui/react-dialog": "^1",
     "@radix-ui/react-dropdown-menu": "^2",
     "@radix-ui/react-popover": "^1",

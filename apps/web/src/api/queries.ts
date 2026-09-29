@@ -5,6 +5,7 @@ import type {
   CreateProjectBody,
   CreateResourceBody,
   CreateUserBody,
+  HighlightBody,
   HighlightDto,
   HolidayBody,
   ProjectDto,
@@ -151,3 +152,13 @@ export const useDeleteHoliday = () => useApiMutation((id: string) => api<void>("
 export const useSaveTimeOff = () =>
   useApiMutation(({ id, ...body }: TimeOffBody & { id?: string }) => (id ? api("PUT", `/api/time-off/${id}`, body) : api("POST", "/api/time-off", body)), refreshCalendar);
 export const useDeleteTimeOff = () => useApiMutation((id: string) => api<void>("DELETE", `/api/time-off/${id}`), refreshCalendar);
+
+/** Highlights of one project (the server broadcasts the new list; the refetch covers a missed one). */
+const refreshHighlights = (projectId: string) => (client: QueryClient) => client.invalidateQueries({ queryKey: keys.highlights(projectId) });
+export const useSaveHighlight = (projectId: string) =>
+  useApiMutation(
+    ({ id, ...body }: HighlightBody & { id?: string }) =>
+      id ? api<{ highlight: HighlightDto }>("PUT", `/api/highlights/${id}`, body) : api<{ highlight: HighlightDto }>("POST", `/api/projects/${projectId}/highlights`, body),
+    refreshHighlights(projectId),
+  );
+export const useDeleteHighlight = (projectId: string) => useApiMutation((id: string) => api<void>("DELETE", `/api/highlights/${id}`), refreshHighlights(projectId));
