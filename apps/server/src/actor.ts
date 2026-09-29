@@ -6,6 +6,8 @@ export interface Actor {
   label: string;
   /** anonymous share-link visitors have no user, but a stable id (from their signed cookie) */
   visitorId?: string | null;
+  /** the share link the action came through, if any */
+  linkId?: string | null;
 }
 
 export function actorOf(user: User): Actor {

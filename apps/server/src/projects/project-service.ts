@@ -1,6 +1,16 @@
 import { Prisma, toDbColumns, type Db, type Project } from "@ganttlines/db";
-import { applyCommand, diffRows, hasCycle, type Command, type ProjectState, type Row, type RowChange } from "@ganttlines/engine";
-import type { ChangesDto, CommandResultDto, ProjectDto, ProjectStateDto } from "@ganttlines/protocol";
+import {
+  applyCommand,
+  computeSchedule,
+  diffRows,
+  fromDay,
+  hasCycle,
+  type Command,
+  type ProjectState,
+  type Row,
+  type RowChange,
+} from "@ganttlines/engine";
+import type { BaselineTaskDto, ChangesDto, CommandResultDto, ProjectDto, ProjectStateDto } from "@ganttlines/protocol";
 import { createHash } from "node:crypto";
 import { actorKey, type Actor } from "../actor";
 import type { InstanceService } from "../calendar/instance-service";
@@ -134,6 +144,25 @@ export class ProjectService {
     });
   }
 
+  /** Whether `rowId` is a task of the project (for attaching comments). */
+  hasTask(projectId: string, rowId: string): Promise<boolean> {
+    return this.queue.run(projectId, async () => (await this.get(projectId)).state.rows[rowId]?.kind === "task");
+  }
+
+  /** The current computed dates of every scheduled task (for baselines). */
+  scheduleSnapshot(projectId: string): Promise<BaselineTaskDto[]> {
+    return this.queue.run(projectId, async () => {
+      const { state } = await this.get(projectId);
+      const schedule = computeSchedule(state, (await this.instance.current()).calendar);
+      const tasks: BaselineTaskDto[] = [];
+      for (const row of Object.values(state.rows)) {
+        const span = schedule.get(row.id)?.span;
+        if (row.kind === "task" && span) tasks.push({ rowId: row.id, title: row.title, start: fromDay(span.start), end: fromDay(span.end) });
+      }
+      return tasks;
+    });
+  }
+
   /** Forgets the cached copy of a project (e.g. when nobody has it open any more). */
   evict(projectId: string): Promise<void> {
     return this.queue.run(projectId, async () => {
@@ -218,6 +247,7 @@ export class ProjectService {
             commandId,
             actorUserId: actor.userId,
             actorLabel: actor.label,
+            actorLinkId: actor.linkId ?? null,
             name,
             payload: payload as Prisma.InputJsonValue,
             changes: changes as unknown as Prisma.InputJsonValue,

@@ -21,6 +21,8 @@ export interface Credentials {
 export interface ProjectAccess {
   projectId: string;
   canEdit: boolean;
+  /** signed-in users can always comment; link visitors only on collaborative links */
+  canComment: boolean;
   actor: Actor;
   /** stable per person, for presence: "user:<id>" or "visitor:<id>" */
   key: string;
@@ -122,7 +124,15 @@ export class AccessService {
       const byRole = user.role === "editor" || user.role === "admin";
       // A collaborative link lets any signed-in user who opens it edit, like it does for guests.
       const byLink = link?.collaboration === true;
-      return { projectId, canEdit: byRole || byLink, actor: actorOf(user), key: `user:${user.id}`, linkId: byRole ? null : (link?.id ?? null) };
+      const linkId = byRole ? null : (link?.id ?? null);
+      return {
+        projectId,
+        canEdit: byRole || byLink,
+        canComment: true,
+        actor: { ...actorOf(user), linkId },
+        key: `user:${user.id}`,
+        linkId,
+      };
     }
     if (!link) {
       if (user?.mustChangePassword) return new HttpError(403, "password_change_required", "Please change your password first");
@@ -158,14 +168,18 @@ export class AccessService {
   }
 
   private viaLink(link: ShareLink, { user, visitor }: Credentials): ProjectAccess | null {
-    const base = { projectId: link.projectId, canEdit: link.collaboration, linkId: link.id };
+    const base = { projectId: link.projectId, canEdit: link.collaboration, canComment: link.collaboration, linkId: link.id };
     if (link.access === "authenticated") {
       if (!user) throw new HttpError(401, "sign_in_required", "Sign in to open this link");
       if (user.mustChangePassword) throw new HttpError(403, "password_change_required", "Please change your password first");
-      return { ...base, actor: actorOf(user), key: `user:${user.id}` };
+      return { ...base, actor: { ...actorOf(user), linkId: link.id }, key: `user:${user.id}` };
     }
     if (!visitor) throw new HttpError(401, "visitor_required", "Choose a display name to open this link");
-    return { ...base, actor: { userId: null, label: `${visitor.name} (anonymous)`, visitorId: visitor.id }, key: `visitor:${visitor.id}` };
+    return {
+      ...base,
+      actor: { userId: null, label: `${visitor.name} (anonymous)`, visitorId: visitor.id, linkId: link.id },
+      key: `visitor:${visitor.id}`,
+    };
   }
 
   private visitorSignature(payload: string): string {

@@ -10,10 +10,14 @@ import type { Config } from "./config";
 import { forbidden, HttpError } from "./errors";
 import { ProjectService } from "./projects/project-service";
 import { Hub } from "./realtime/hub";
+import { activityRoutes } from "./routes/activity";
 import { authRoutes } from "./routes/auth";
+import { baselineRoutes } from "./routes/baselines";
 import { calendarRoutes } from "./routes/calendar";
 import { commandRoutes } from "./routes/commands";
+import { commentRoutes } from "./routes/comments";
 import { setSessionCookie, type RouteContext } from "./routes/context";
+import { highlightRoutes } from "./routes/highlights";
 import { projectRoutes } from "./routes/projects";
 import { realtimeRoutes } from "./routes/realtime";
 import { setupRoutes } from "./routes/setup";
@@ -114,5 +118,9 @@ export async function buildApp({ db, config, now, logger = false }: AppOptions):
   calendarRoutes(app, context);
   realtimeRoutes(app, context);
   sharingRoutes(app, context);
+  commentRoutes(app, context);
+  highlightRoutes(app, context);
+  baselineRoutes(app, context);
+  activityRoutes(app, context);
   return app;
 }

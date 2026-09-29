@@ -1,0 +1,63 @@
+import type { Highlight } from "@ganttlines/db";
+import { HighlightBody, type HighlightDto } from "@ganttlines/protocol";
+import type { FastifyInstance } from "fastify";
+import { requireProjectAccess } from "../auth/request-access";
+import { conflict, notFound } from "../errors";
+import { parseBody, parseId } from "../validation";
+import type { RouteContext } from "./context";
+
+export const MAX_HIGHLIGHTS_PER_PROJECT = 1_000;
+
+/** Highlighted days: everyone who can see the board sees them; everyone who can edit it changes them. */
+export function highlightRoutes(app: FastifyInstance, context: RouteContext): void {
+  const { db, hub } = context;
+
+  const list = async (projectId: string) =>
+    (await db.highlight.findMany({ where: { projectId }, orderBy: [{ date: "asc" }, { id: "asc" }] })).map(toHighlightDto);
+  const announce = async (projectId: string) => hub.broadcast(projectId, { type: "highlights", projectId, highlights: await list(projectId) });
+
+  app.get<{ Params: { id: string } }>("/api/projects/:id/highlights", async (request) => {
+    const projectId = parseId(request.params.id, "Project");
+    await requireProjectAccess(request, context, projectId, "view");
+    return { highlights: await list(projectId) };
+  });
+
+  app.post<{ Params: { id: string } }>("/api/projects/:id/highlights", async (request, reply) => {
+    const projectId = parseId(request.params.id, "Project");
+    await requireProjectAccess(request, context, projectId, "edit");
+    const body = parseBody(HighlightBody, request.body);
+    if ((await db.highlight.count({ where: { projectId } })) >= MAX_HIGHLIGHTS_PER_PROJECT) {
+      throw conflict(`At most ${MAX_HIGHLIGHTS_PER_PROJECT} highlights per project`);
+    }
+    const highlight = toHighlightDto(await db.highlight.create({ data: { projectId, ...body } }));
+    await announce(projectId);
+    return reply.status(201).send({ highlight });
+  });
+
+  app.put<{ Params: { id: string } }>("/api/highlights/:id", async (request) => {
+    const existing = await find(request.params.id);
+    await requireProjectAccess(request, context, existing.projectId, "edit");
+    const body = parseBody(HighlightBody, request.body);
+    const highlight = toHighlightDto(await db.highlight.update({ where: { id: existing.id }, data: body }));
+    await announce(existing.projectId);
+    return { highlight };
+  });
+
+  app.delete<{ Params: { id: string } }>("/api/highlights/:id", async (request, reply) => {
+    const existing = await find(request.params.id);
+    await requireProjectAccess(request, context, existing.projectId, "edit");
+    await db.highlight.delete({ where: { id: existing.id } });
+    await announce(existing.projectId);
+    return reply.status(204).send();
+  });
+
+  async function find(rawId: string): Promise<Highlight> {
+    const highlight = await db.highlight.findUnique({ where: { id: parseId(rawId, "Highlight") } });
+    if (!highlight) throw notFound("Highlight");
+    return highlight;
+  }
+}
+
+function toHighlightDto({ id, date, label, color }: Highlight): HighlightDto {
+  return { id, date, label, color };
+}
