@@ -1,7 +1,10 @@
 import type {
+  ActivityDto,
   BaselineDto,
   BaselineSnapshotDto,
   CalendarDto,
+  CommentDto,
+  CommentsDto,
   CreateProjectBody,
   CreateResourceBody,
   CreateUserBody,
@@ -17,7 +20,7 @@ import type {
   UpdateUserBody,
   UserDto,
 } from "@ganttlines/protocol";
-import { queryOptions, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions, useMutation, useQueryClient, type InfiniteData, type QueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "./client";
 
 export const keys = {
@@ -32,6 +35,10 @@ export const keys = {
   highlights: (id: string) => ["project", id, "highlights"] as const,
   baselines: (id: string) => ["project", id, "baselines"] as const,
   baseline: (id: string, baselineId: string) => ["project", id, "baseline", baselineId] as const,
+  comments: (id: string, taskId: string) => ["project", id, "comments", taskId] as const,
+  activity: (id: string, rowId: string) => ["project", id, "activity", rowId] as const,
+  /** every activity list of a project (refreshed whenever the project changes) */
+  allActivity: (id: string) => ["project", id, "activity"] as const,
 };
 
 export const setupStatus = queryOptions({
@@ -162,3 +169,62 @@ export const useSaveHighlight = (projectId: string) =>
     refreshHighlights(projectId),
   );
 export const useDeleteHighlight = (projectId: string) => useApiMutation((id: string) => api<void>("DELETE", `/api/highlights/${id}`), refreshHighlights(projectId));
+
+const PAGE = 20;
+
+/** A task's comments, newest first, a page at a time. */
+export const taskComments = (projectId: string, taskId: string) =>
+  infiniteQueryOptions({
+    queryKey: keys.comments(projectId, taskId),
+    queryFn: ({ pageParam }) =>
+      api<CommentsDto>("GET", `/api/projects/${projectId}/comments?taskId=${taskId}&limit=${PAGE}${pageParam ? `&before=${pageParam}` : ""}`),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.nextBefore,
+  });
+
+/** A row's history, newest first, a page at a time. */
+export const rowActivity = (projectId: string, rowId: string) =>
+  infiniteQueryOptions({
+    queryKey: keys.activity(projectId, rowId),
+    queryFn: ({ pageParam }) =>
+      api<ActivityDto>("GET", `/api/projects/${projectId}/activity?rowId=${rowId}&limit=${PAGE}${pageParam ? `&before=${pageParam}` : ""}`),
+    initialPageParam: null as number | null,
+    getNextPageParam: (last) => last.nextBefore,
+  });
+
+/**
+ * Puts a comment into its task's cached list: replaced where it already is, otherwise added on top
+ * (lists are newest first). Used for our own posts and for comments arriving over the WebSocket.
+ */
+export function upsertComment(client: QueryClient, projectId: string, comment: CommentDto): void {
+  client.setQueryData<InfiniteData<CommentsDto, string | null>>(keys.comments(projectId, comment.taskId), (data) => {
+    if (!data) return data;
+    const exists = data.pages.some((page) => page.comments.some((entry) => entry.id === comment.id));
+    const pages = exists
+      ? data.pages.map((page) => ({ ...page, comments: page.comments.map((entry) => (entry.id === comment.id ? comment : entry)) }))
+      : data.pages.map((page, index) => (index === 0 ? { ...page, comments: [comment, ...page.comments] } : page));
+    return { ...data, pages };
+  });
+}
+
+export const usePostComment = (projectId: string) => {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { taskId: string; body: string }) => api<{ comment: CommentDto }>("POST", `/api/projects/${projectId}/comments`, body),
+    onSuccess: ({ comment }) => upsertComment(client, projectId, comment),
+  });
+};
+export const useEditComment = (projectId: string) => {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: string }) => api<{ comment: CommentDto }>("PATCH", `/api/comments/${id}`, { body }),
+    onSuccess: ({ comment }) => upsertComment(client, projectId, comment),
+  });
+};
+export const useDeleteComment = (projectId: string) => {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (comment: CommentDto) => api<void>("DELETE", `/api/comments/${comment.id}`),
+    onSuccess: (_result, comment) => upsertComment(client, projectId, { ...comment, body: "", deleted: true }),
+  });
+};

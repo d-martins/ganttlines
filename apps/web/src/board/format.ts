@@ -31,3 +31,20 @@ export function colorFor(id: string): string {
   for (const char of id) hash = (hash * 31 + char.charCodeAt(0)) | 0;
   return palette[Math.abs(hash) % palette.length]!;
 }
+
+const relative = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+const full = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
+
+/** "just now", "5 minutes ago", "yesterday", "3 days ago" … then a date. */
+export function timeAgo(iso: string, now = Date.now()): string {
+  const seconds = Math.round((new Date(iso).getTime() - now) / 1000);
+  const abs = Math.abs(seconds);
+  if (abs < 45) return "just now";
+  if (abs < 3600) return relative.format(Math.round(seconds / 60), "minute");
+  if (abs < 86_400) return relative.format(Math.round(seconds / 3600), "hour");
+  if (abs < 7 * 86_400) return relative.format(Math.round(seconds / 86_400), "day");
+  return full.format(new Date(iso));
+}
+
+/** The full date and time, for tooltips. */
+export const fullTime = (iso: string) => full.format(new Date(iso));
