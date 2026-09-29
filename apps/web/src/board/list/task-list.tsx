@@ -22,7 +22,7 @@ export function ListHeader() {
       <span title="Calendar days" className="text-right">
         CD
       </span>
-      <span title="Predecessor (row # and offset)" className="pl-2">
+      <span title="Predecessor (row # and offset)" className="text-right">
         Pred.
       </span>
     </div>
@@ -110,7 +110,7 @@ export function ListRows({
             <span role="gridcell" aria-label={`${days} calendar days`} className="text-right text-xs tabular-nums">
               {days}
             </span>
-            <span role="gridcell" aria-label={predecessor ? `After ${predecessor}` : "No predecessor"} className="truncate pl-2 text-xs tabular-nums">
+            <span role="gridcell" aria-label={predecessor ? `After ${predecessor}` : "No predecessor"} className="truncate text-right text-xs tabular-nums">
               {predecessor}
             </span>
           </div>

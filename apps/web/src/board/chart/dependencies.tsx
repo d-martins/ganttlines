@@ -1,19 +1,25 @@
 import type { BoardRow } from "../model";
 import type { BarStyle } from "../view-store";
-import { extent, ROW_HEIGHT } from "./bars";
+import { extent, halfHeight, ROW_HEIGHT } from "./bars";
 import type { Timeline } from "./timeline";
 
 const STUB = 8;
 
 /**
- * Elbow path from the end of a predecessor (row `from`) to the start of its successor (row `to`):
- * out to the right, down, and in from the left; when the successor starts too early for that,
- * it doubles back between the two rows.
+ * Path from a predecessor to its successor: down (or up) out of the predecessor's bottom (or top)
+ * edge, then across into the successor's left side. The drop sits near the predecessor's end, but
+ * always far enough left to arrive from the left; when the successor starts too early for that,
+ * the path runs between the rows and comes back round.
  */
-export function elbow(fromX: number, fromY: number, toX: number, toY: number, rowHeight: number): string {
-  if (toX - STUB >= fromX + STUB) return `M${fromX},${fromY} H${fromX + STUB} V${toY} H${toX}`;
-  const between = fromY + (toY > fromY ? rowHeight / 2 : -rowHeight / 2);
-  return `M${fromX},${fromY} H${fromX + STUB} V${between} H${toX - STUB} V${toY} H${toX}`;
+export function elbow(from: { left: number; right: number; y: number; half: number }, to: { left: number; y: number }, rowHeight: number): string {
+  const down = to.y >= from.y;
+  const startY = down ? from.y + from.half : from.y - from.half;
+  const center = (from.left + from.right) / 2;
+  // Near the end of the bar (the middle of short bars and diamonds), but left of the successor.
+  const x = Math.min(Math.max(from.right - STUB, center), to.left - STUB);
+  if (x >= from.left + 2) return `M${x},${startY} V${to.y} H${to.left}`;
+  const between = from.y + (down ? rowHeight / 2 : -rowHeight / 2);
+  return `M${center},${startY} V${between} H${to.left - STUB} V${to.y} H${to.left}`;
 }
 
 /** Dependency arrows between shown rows that touch the rendered window [firstRow, lastRow). */
@@ -42,7 +48,8 @@ export function Dependencies({
     const start = extent(predecessor.kind, predecessor.span, timeline, style);
     const end = extent(entry.kind, entry.span, timeline, style);
     const y = (i: number) => i * rowHeight + rowHeight / 2;
-    paths.push({ key: row.id, d: elbow(start.right, y(from!), end.left, y(to), rowHeight), violation: entry.violation });
+    const d = elbow({ ...start, y: y(from!), half: halfHeight(predecessor.kind, style) }, { left: end.left, y: y(to) }, rowHeight);
+    paths.push({ key: row.id, d, violation: entry.violation });
   });
   return (
     <svg aria-hidden className="pointer-events-none absolute top-0 left-0 overflow-visible" width={timeline.width} height={rows.length * rowHeight}>

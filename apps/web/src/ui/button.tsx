@@ -36,7 +36,7 @@ export function IconButton({ label, children, className = "", ...props }: Button
         </button>
       </Tooltip.Trigger>
       <Tooltip.Portal>
-        <Tooltip.Content sideOffset={6} className="rounded bg-text px-2 py-1 text-xs text-bg shadow">
+        <Tooltip.Content sideOffset={6} className="z-50 rounded bg-text px-2 py-1 text-xs text-bg shadow">
           {label}
         </Tooltip.Content>
       </Tooltip.Portal>

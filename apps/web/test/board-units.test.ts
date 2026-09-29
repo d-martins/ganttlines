@@ -71,8 +71,15 @@ describe("list and arrows", () => {
     expect(predecessorText(entry(-1), numbers)).toBe("#3 −1");
   });
 
-  it("routes arrows straight when there is room, around when the successor starts earlier", () => {
-    expect(elbow(100, 15, 140, 45, 30)).toBe("M100,15 H108 V45 H140");
-    expect(elbow(100, 15, 90, 45, 30)).toBe("M100,15 H108 V30 H82 V45 H90");
+  it("routes arrows out of the predecessor's bottom or top into the successor's left side", () => {
+    const pred = { left: 40, right: 100, y: 15, half: 7 };
+    // successor starts after the predecessor ends: drop near the predecessor's end
+    expect(elbow(pred, { left: 140, y: 45 }, 30)).toBe("M92,22 V45 H140");
+    // successor above: leave from the top edge
+    expect(elbow({ ...pred, y: 45 }, { left: 140, y: 15 }, 30)).toBe("M92,38 V15 H140");
+    // overlapping successor: drop further left so the arrow still arrives from the left
+    expect(elbow(pred, { left: 70, y: 45 }, 30)).toBe("M62,22 V45 H70");
+    // successor starts before there's room: go round between the rows
+    expect(elbow(pred, { left: 44, y: 45 }, 30)).toBe("M70,22 V30 H36 V45 H44");
   });
 });

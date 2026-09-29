@@ -138,7 +138,7 @@ function Viewers({ sync }: { sync: BoardSync }) {
             </span>
           </Tooltip.Trigger>
           <Tooltip.Portal>
-            <Tooltip.Content sideOffset={6} className="rounded bg-text px-2 py-1 text-xs text-bg shadow">
+            <Tooltip.Content sideOffset={6} className="z-50 rounded bg-text px-2 py-1 text-xs text-bg shadow">
               {viewer.name}
             </Tooltip.Content>
           </Tooltip.Portal>

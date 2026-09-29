@@ -118,6 +118,10 @@ describe("board", () => {
     await user.hover(bar);
     expect(await screen.findByRole("tooltip")).toHaveTextContent("ui");
     expect(localStorage.getItem("gp.barStyle")).toBe('"roomy"');
+    // "review" is one day wide: too short for its title, which moves to the right of the bar
+    const review = screen.getAllByRole("img", { name: /^review,/ })[0]!;
+    expect(within(review).queryByText("review")).not.toBeInTheDocument();
+    expect(within(review.parentElement!).getByText("review")).toBeInTheDocument();
   });
 
   it("hiding weekends and zooming out shorten bars", async () => {

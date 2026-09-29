@@ -21,6 +21,37 @@ export function extent(kind: DrawKind | Ghost["kind"], span: Span, timeline: Tim
   return { left: timeline.x(span.start), right: Math.max(timeline.xEnd(span.end), timeline.x(span.start) + 2) };
 }
 
+/** Half the drawn height of a row's shape: where dependency arrows leave it (top or bottom edge). */
+export function halfHeight(kind: DrawKind | Ghost["kind"], style: BarStyle): number {
+  if (kind === "milestone") return (DIAMOND[style] * Math.SQRT2) / 2; // a rotated square
+  if (kind === "parent") return 5;
+  if (kind === "section") return 2;
+  return BAR_HEIGHT[style] / 2;
+}
+
+const TITLE_FONT = '600 12px system-ui, -apple-system, "Segoe UI", sans-serif';
+let measureContext: CanvasRenderingContext2D | null | undefined;
+const measured = new Map<string, number>();
+
+/** Rendered width of a bar title (estimated where canvas is unavailable, e.g. tests). */
+export function titleWidth(text: string): number {
+  let width = measured.get(text);
+  if (width === undefined) {
+    if (measureContext === undefined) {
+      try {
+        measureContext = document.createElement("canvas").getContext("2d");
+      } catch {
+        measureContext = null;
+      }
+      if (measureContext) measureContext.font = TITLE_FONT;
+    }
+    width = measureContext ? measureContext.measureText(text).width : text.length * 7;
+    if (measured.size > 5000) measured.clear();
+    measured.set(text, width);
+  }
+  return width;
+}
+
 /** "Oct 5 – Oct 9, Ana" */
 export function barDetails(span: Span, assignee: string | undefined): string {
   const dates = span.start === span.end ? formatDay(span.start) : `${formatDay(span.start)} – ${formatDay(span.end)}`;
@@ -146,27 +177,36 @@ function RowBar({
       </>
     );
   }
-  // Roomy: avatar then title inside, cut off with "…"; hovering shows the whole title beside the bar.
+  // Roomy: avatar then the title inside when it fits; otherwise the title goes to the right of the bar.
+  const showAvatar = Boolean(assignee) && width >= 44;
+  const inside = 12 + (showAvatar ? 24 : 0) + (locked ? 16 : 0) + titleWidth(row.title) <= width;
   return (
-    <Tooltip.Root>
-      <Tooltip.Trigger asChild>
-        <div
-          role="img"
-          aria-label={label}
-          className={`absolute flex items-center gap-1.5 overflow-hidden rounded-[4px] px-1.5 text-xs font-semibold ${entry.violation ? "outline-2 outline-offset-1 outline-[var(--violation)]" : ""}`}
-          style={{ left, width, top: (rowHeight - barHeight) / 2, height: barHeight, background: fill, color: ink }}
-        >
-          {assignee && width >= 44 ? <Avatar name={assignee.name} color={assignee.avatarColor} size={18} /> : null}
-          {locked}
-          <span className="truncate">{row.title}</span>
-        </div>
-      </Tooltip.Trigger>
-      <Tooltip.Portal>
-        <Tooltip.Content side="right" sideOffset={8} className="z-50 max-w-80 rounded-md border border-border bg-bg px-2.5 py-1.5 text-xs text-text shadow-lg">
-          <p className="font-semibold">{row.title || "Untitled"}</p>
-          <p className="text-muted">{details}</p>
-        </Tooltip.Content>
-      </Tooltip.Portal>
-    </Tooltip.Root>
+    <>
+      <Tooltip.Root>
+        <Tooltip.Trigger asChild>
+          <div
+            role="img"
+            aria-label={label}
+            className={`absolute flex items-center gap-1.5 overflow-hidden rounded-[4px] px-1.5 text-xs font-semibold ${entry.violation ? "outline-2 outline-offset-1 outline-[var(--violation)]" : ""}`}
+            style={{ left, width, top: (rowHeight - barHeight) / 2, height: barHeight, background: fill, color: ink }}
+          >
+            {showAvatar ? <Avatar name={assignee!.name} color={assignee!.avatarColor} size={18} /> : null}
+            {inside ? (
+              <>
+                {locked}
+                <span className="truncate">{row.title}</span>
+              </>
+            ) : null}
+          </div>
+        </Tooltip.Trigger>
+        <Tooltip.Portal>
+          <Tooltip.Content side="right" sideOffset={8} className="z-50 max-w-80 rounded-md border border-border bg-bg px-2.5 py-1.5 text-xs text-text shadow-lg">
+            <p className="font-semibold">{row.title || "Untitled"}</p>
+            <p className="text-muted">{details}</p>
+          </Tooltip.Content>
+        </Tooltip.Portal>
+      </Tooltip.Root>
+      {inside ? null : outsideTitle}
+    </>
   );
 }
