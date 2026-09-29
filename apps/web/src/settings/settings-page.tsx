@@ -15,6 +15,7 @@ import {
 import { ChangePasswordForm } from "../auth/auth-pages";
 import { useTheme, type ThemePreference } from "../theme";
 import { Button } from "../ui/button";
+import { ConfirmButton } from "../ui/confirm";
 import { ErrorText, Field } from "../ui/field";
 import { Section, WEEKDAYS } from "../ui/section";
 
@@ -112,9 +113,12 @@ function UsersSection({ me }: { me: UserDto }) {
                   Reset password
                 </Button>
                 {user.id !== me.id ? (
-                  <Button variant="danger" onClick={() => window.confirm(`Delete ${user.name}? Their team member stays.`) && remove.mutate(user.id)}>
-                    Delete
-                  </Button>
+                  <ConfirmButton
+                    label="Delete"
+                    title={`Delete ${user.name}?`}
+                    message="They can no longer sign in. Their team member (and task assignments) stays."
+                    onConfirm={() => remove.mutate(user.id)}
+                  />
                 ) : null}
               </td>
             </tr>

@@ -1,5 +1,6 @@
 import type { CalendarDto, ResourceDto } from "@ganttlines/protocol";
 import { describe, expect, it } from "vitest";
+import { within } from "@testing-library/react";
 import { ADMIN, renderApp, screen, signedIn, VIEWER } from "./utils";
 
 const CALENDAR: CalendarDto = { instanceVersion: 1, workingWeekdays: [1, 2, 3, 4, 5], holidays: [], timeOff: [] };
@@ -72,6 +73,35 @@ describe("team & calendar", () => {
       endDate: "2026-10-08",
       appliesTo: ["r-ana"],
     });
+  });
+
+  it("asks for confirmation before deleting a holiday", async () => {
+    const api = signedIn(ADMIN);
+    api.on("GET /api/resources", () => ({ body: { resources: [ANA] } }));
+    api.on("GET /api/calendar", () => ({ body: { ...CALENDAR, holidays: [{ id: "h1", name: "Carnival", startDate: "2027-02-09", endDate: "2027-02-09", appliesTo: "all" }] } }));
+    api.on("DELETE /api/holidays/h1", () => ({ status: 204 }));
+    const { user } = renderApp("/team");
+    await user.click(await screen.findByRole("button", { name: "Delete" }));
+    expect(await screen.findByRole("dialog", { name: "Delete “Carnival”?" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(api.calls.some((c) => c.key === "DELETE /api/holidays/h1")).toBe(false);
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Delete" }));
+    expect(api.calls.some((c) => c.key === "DELETE /api/holidays/h1")).toBe(true);
+  });
+
+  it("hides edit and delete on other entries while one is being edited", async () => {
+    const api = signedIn(ADMIN);
+    api.on("GET /api/resources", () => ({ body: { resources: [ANA] } }));
+    api.on("GET /api/calendar", () => ({
+      body: { ...CALENDAR, timeOff: [{ id: "t1", resourceId: "r-ana", startDate: "2026-10-12", endDate: "2026-10-16", note: "" }] },
+    }));
+    const { user } = renderApp("/team");
+    await user.click(await screen.findByRole("button", { name: "Edit" }));
+    expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
   });
 
   it("is read-only for viewers", async () => {

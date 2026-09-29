@@ -16,6 +16,7 @@ import {
 } from "../api/queries";
 import { Avatar } from "../ui/avatar";
 import { Button } from "../ui/button";
+import { ConfirmButton } from "../ui/confirm";
 import { ErrorText, Field } from "../ui/field";
 import { Section } from "../ui/section";
 
@@ -110,14 +111,18 @@ function Holidays({ holidays, people, editable }: { holidays: Holiday[]; people:
               <strong>{holiday.name}</strong> <span className="text-muted">· {range(holiday.startDate, holiday.endDate)}</span>
             </span>
             <span className="text-muted">{holiday.appliesTo === "all" ? "Everyone" : holiday.appliesTo.map(nameOf).join(", ")}</span>
-            {editable ? (
+            {/* Row actions are hidden while a holiday is being edited, so nothing is deleted mid-edit. */}
+            {editable && !editing ? (
               <>
                 <Button variant="ghost" onClick={() => setEditing({ ...holiday })}>
                   Edit
                 </Button>
-                <Button variant="danger" onClick={() => remove.mutate(holiday.id)}>
-                  Delete
-                </Button>
+                <ConfirmButton
+                  label="Delete"
+                  title={`Delete “${holiday.name}”?`}
+                  message="Tasks that were stretched around this holiday will be rescheduled."
+                  onConfirm={() => remove.mutate(holiday.id)}
+                />
               </>
             ) : null}
           </li>
@@ -194,14 +199,18 @@ function TimeOff({ entries, people, editable }: { entries: TimeOffDto[]; people:
               <strong>{nameOf(entry.resourceId)}</strong> <span className="text-muted">· {range(entry.startDate, entry.endDate)}</span>
               {entry.note ? <span className="text-muted"> · {entry.note}</span> : null}
             </span>
-            {editable ? (
+            {/* Row actions are hidden while an entry is being edited, so nothing is deleted mid-edit. */}
+            {editable && !editing ? (
               <>
                 <Button variant="ghost" onClick={() => setEditing({ ...entry })}>
                   Edit
                 </Button>
-                <Button variant="danger" onClick={() => remove.mutate(entry.id)}>
-                  Delete
-                </Button>
+                <ConfirmButton
+                  label="Delete"
+                  title={`Delete ${nameOf(entry.resourceId)}’s time off?`}
+                  message={`${range(entry.startDate, entry.endDate)}. Their tasks will be rescheduled.`}
+                  onConfirm={() => remove.mutate(entry.id)}
+                />
               </>
             ) : null}
           </li>

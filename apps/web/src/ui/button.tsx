@@ -1,12 +1,13 @@
 import * as Tooltip from "@radix-ui/react-tooltip";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 
-type Variant = "primary" | "secondary" | "danger" | "ghost";
+type Variant = "primary" | "secondary" | "danger" | "dangerSolid" | "ghost";
 
 const variants: Record<Variant, string> = {
   primary: "bg-accent text-accent-text border-accent hover:opacity-90",
   secondary: "bg-bg text-text border-border hover:bg-surface-2",
   danger: "bg-bg text-danger border-border hover:bg-surface-2",
+  dangerSolid: "bg-danger text-bg border-danger hover:opacity-90",
   ghost: "bg-transparent text-text border-transparent hover:bg-surface-2",
 };
 
