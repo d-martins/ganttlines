@@ -228,7 +228,6 @@ export function ChartRows({
                         "aria-describedby": BAR_HELP_ID,
                         onPointerDown: (event) => (movable ? startDrag(event, entry, absoluteIndex, "move") : undefined),
                         onKeyDown: (event) => onBarKey(event, entry),
-                        onDoubleClick: () => useSelection.getState().openPanel(row.id),
                         onFocus: (event) => event.currentTarget.matches(":focus-visible") && select(row.id),
                         className: `${movable ? "cursor-grab active:cursor-grabbing" : ""} focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus)]`,
                       }

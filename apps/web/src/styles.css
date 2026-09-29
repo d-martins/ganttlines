@@ -113,3 +113,14 @@ body {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
+
+/* The details panel slides in from the right when it first appears. */
+@keyframes panel-in {
+  from {
+    translate: 100% 0;
+  }
+}
+
+@theme {
+  --animate-panel-in: panel-in 200ms ease-out;
+}

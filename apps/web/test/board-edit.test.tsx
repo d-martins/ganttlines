@@ -175,13 +175,12 @@ describe("editing the task list", () => {
     const { user } = await editableBoard();
     screen.getByRole("button", { name: "Title “ui”" }).focus();
     const stops: string[] = [];
-    for (let i = 0; i < 7; i++) {
+    for (let i = 0; i < 6; i++) {
       await user.tab();
       stops.push(document.activeElement?.getAttribute("aria-label") ?? "");
     }
     expect(stops).toEqual([
       "Add a subtask to “ui”",
-      "Details of “ui”",
       "Assignee of “ui”: nobody",
       "Working days of “ui”",
       "Calendar days of “ui”",

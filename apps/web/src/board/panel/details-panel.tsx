@@ -76,7 +76,14 @@ export function DetailsPanel({ numbers }: { numbers: ReadonlyMap<RowId, number> 
   const me = useQuery(currentUser);
   const run = useRun();
   const panel = useRef<HTMLElement>(null);
-  const row = selectedId ? state.rows[selectedId] : undefined;
+  const selected = selectedId ? state.rows[selectedId] : undefined;
+  const open = panelOpen && selected !== undefined;
+  // While sliding out, keep showing the row it had (the selection may already be gone).
+  const [lastId, setLastId] = useState<RowId | null>(null);
+  useEffect(() => {
+    if (open) setLastId(selected.id);
+  }, [open, selected?.id]);
+  const row = open ? selected : lastId ? state.rows[lastId] : undefined;
   const schedule = useMemo<Schedule | null>(() => {
     try {
       return computeSchedule(state, calendar);
@@ -86,27 +93,19 @@ export function DetailsPanel({ numbers }: { numbers: ReadonlyMap<RowId, number> 
     }
   }, [state, calendar]);
 
-  // Opening moves focus into the panel and closing gives it back. Retargeting doesn't move focus:
-  // arrowing through the list with the panel open must keep working.
-  const visible = panelOpen && row !== undefined;
-  useEffect(() => {
-    if (!visible) return;
-    const previous = document.activeElement as HTMLElement | null;
-    panel.current?.focus({ preventScroll: true });
-    return () => {
-      // Only if focus was in the panel (it falls back to <body> once the panel is gone), not if it moved elsewhere.
-      const active = document.activeElement;
-      const lost = !active || active === document.body || panel.current?.contains(active);
-      if (previous?.isConnected && lost) previous.focus({ preventScroll: true });
-    };
-  }, [visible]);
-
-  if (!panelOpen || !row) return null;
+  if (!row) return null;
+  // Selecting a row opens the panel without taking focus (the list keeps the keyboard). Closing it
+  // from inside hands focus back to the row's title in the list.
+  const close = () => {
+    const inside = panel.current?.contains(document.activeElement) ?? false;
+    closePanel();
+    if (inside) (document.querySelector<HTMLElement>(`[data-cell="${CSS.escape(row.id)}:title"]`) ?? document.querySelector<HTMLElement>('[role="treegrid"]'))?.focus();
+  };
   const onKey = (event: KeyboardEvent) => {
     const target = event.target as HTMLElement;
     if (event.key === "Escape" && !["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) {
       event.stopPropagation();
-      closePanel();
+      close();
     }
   };
   const tree = buildTree(state);
@@ -119,20 +118,25 @@ export function DetailsPanel({ numbers }: { numbers: ReadonlyMap<RowId, number> 
       ref={panel}
       tabIndex={-1}
       aria-label={`Details of “${row.title || "Untitled"}”`}
+      aria-hidden={!open}
+      inert={!open}
       onKeyDown={onKey}
-      className="absolute top-0 right-0 bottom-0 z-30 flex w-[min(26rem,92%)] flex-col overflow-y-auto border-l border-border bg-bg shadow-xl outline-none"
+      // Slides in (on first mount by the keyframes, later by the transition) and out; still for reduced motion.
+      className={`animate-panel-in absolute top-0 right-0 bottom-0 z-30 flex w-[min(26rem,92%)] flex-col overflow-y-auto border-l border-border bg-bg shadow-xl outline-none transition-[translate,visibility] duration-200 ease-out motion-reduce:animate-none motion-reduce:transition-none ${
+        open ? "visible translate-x-0" : "invisible translate-x-full"
+      }`}
     >
       <header className="sticky top-0 z-10 flex items-center gap-2 border-b border-border bg-bg px-4 py-2">
         <span className="text-xs text-muted">
           #{numbers.get(row.id)} · {kindLabel}
         </span>
-        <IconButton label="Close details (Esc)" className="ml-auto" onClick={closePanel}>
+        <IconButton label="Close details (Esc)" className="ml-auto" onClick={close}>
           <X size={16} />
         </IconButton>
       </header>
       <div className="flex flex-col gap-3 px-4 py-3">
         <CommitInput
-          aria-label="Title"
+          aria-label="Task title"
           value={row.title}
           placeholder="Untitled"
           maxLength={COMMAND_LIMITS.titleMax}
@@ -339,11 +343,11 @@ function Description({ task }: { task: TaskRow }) {
 }
 
 function ChildLink({ child, schedule, numbers }: { child: Row; schedule: Schedule | null; numbers: ReadonlyMap<RowId, number> }) {
-  const openPanel = useSelection((selection) => selection.openPanel);
+  const select = useSelection((selection) => selection.select);
   const span = schedule?.get(child.id)?.span;
   return (
     <li>
-      <button type="button" onClick={() => openPanel(child.id)} className="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left hover:bg-surface-2">
+      <button type="button" onClick={() => select(child.id)} className="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left hover:bg-surface-2">
         <span className="w-8 text-right text-xs text-muted tabular-nums">#{numbers.get(child.id)}</span>
         <span className="truncate">{child.title || "Untitled"}</span>
         <span className="ml-auto shrink-0 text-xs text-muted">{span ? (span.start === span.end ? formatDay(span.start) : `${formatDay(span.start)} – ${formatDay(span.end)}`) : "–"}</span>

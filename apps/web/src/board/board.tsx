@@ -178,7 +178,7 @@ export function Board({
   );
 
   return (
-    <div className="relative flex h-full flex-col">
+    <div className="relative flex h-full flex-col overflow-hidden">
       {model.cycle ? (
         <p role="alert" className="border-b border-border bg-surface px-4 py-2 text-sm text-danger">
           These tasks' dependencies form a loop, so their dates can't be worked out.

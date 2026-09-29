@@ -61,6 +61,11 @@ async function panelBoard(rows: ProjectStateDto["rows"] = ROWS, user = ADMIN, co
 const sentCommands = (): Command[] =>
   FakeWebSocket.last.sent.flatMap((message) => ((message as { type: string }).type === "command" ? [(message as { command: Command }).command] : []));
 const panel = () => screen.getByRole("complementary", { name: /^Details of/ });
+/** Selects a row by clicking its number in the list (which opens the panel). */
+const selectRow = async (user: ReturnType<typeof import("@testing-library/user-event").default.setup>, title: string) => {
+  const row = screen.getAllByRole("row").find((candidate) => within(candidate).queryByText(title, { exact: true }))!;
+  await user.click(row.querySelector('[aria-label^="Row "]')!);
+};
 
 describe("details panel", () => {
   beforeEach(() => {
@@ -69,13 +74,13 @@ describe("details panel", () => {
   });
   afterEach(() => vi.useRealTimers());
 
-  it("opens from a row, edits fields, closes with Escape and gives focus back", async () => {
+  it("opens when a row is selected, edits fields, closes with Escape and gives focus back to the row", async () => {
     const { user } = await panelBoard();
-    const open = screen.getByRole("button", { name: "Details of “hooks”" });
-    await user.click(open);
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    await selectRow(user, "hooks");
     expect(panel()).toHaveAccessibleName("Details of “hooks”");
-    expect(panel()).toHaveFocus();
-    const title = within(panel()).getByRole("textbox", { name: "Title" });
+    expect(panel()).not.toHaveFocus(); // the list keeps the keyboard
+    const title = within(panel()).getByRole("textbox", { name: "Task title" });
     await user.clear(title);
     await user.type(title, "Hooks v2{Enter}");
     expect(sentCommands().at(-1)).toEqual({ type: "updateTitle", id: "hooks", title: "Hooks v2" });
@@ -88,16 +93,17 @@ describe("details panel", () => {
     await user.type(within(panel()).getByRole("textbox", { name: "Description" }), "Billing events");
     await user.click(title); // leaving the description saves it
     expect(sentCommands().at(-1)).toEqual({ type: "setDescription", id: "hooks", description: "Billing events" });
-    panel().focus();
+    within(panel()).getByRole("button", { name: "Close details (Esc)" }).focus();
     await user.keyboard("{Escape}");
-    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
-    expect(open).toHaveFocus();
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument(); // closed: hidden and inert while it slides out
+    expect(screen.getByRole("button", { name: "Title “Hooks v2”" })).toHaveFocus();
+    await selectRow(user, "ui");
+    expect(panel()).toHaveAccessibleName("Details of “ui”"); // selecting again reopens it
   });
 
   it("follows the selection without taking focus from the list", async () => {
     const { user } = await panelBoard();
-    await user.click(within(screen.getAllByRole("row")[1]!).getByText("2"));
-    await user.keyboard("{Alt>}{Enter}{/Alt}");
+    await selectRow(user, "ui");
     expect(panel()).toHaveAccessibleName("Details of “ui”");
     screen.getByRole("treegrid", { name: "Tasks" }).focus();
     await user.keyboard("{ArrowDown}");
@@ -112,7 +118,7 @@ describe("details panel", () => {
       posted.push(body);
       return { status: 201, body: { comment: comment("c3", { body: (body as { body: string }).body, mine: true, author: { userId: ADMIN.id, label: ADMIN.name } }) } };
     });
-    await user.click(screen.getByRole("button", { name: "Details of “hooks”" }));
+    await selectRow(user, "hooks");
     const list = await within(panel()).findByText("first");
     expect(list.tagName).toBe("STRONG");
     expect(within(panel()).getByText("Comment deleted.")).toBeInTheDocument();
@@ -130,15 +136,15 @@ describe("details panel", () => {
 
   it("shows the task's history, with share-link actors marked", async () => {
     const { user } = await panelBoard();
-    await user.click(screen.getByRole("button", { name: "Details of “hooks”" }));
+    await selectRow(user, "hooks");
     expect(await within(panel()).findByText(/assigned it to Ana Silva/)).toBeInTheDocument();
     expect(within(panel()).getByText("via share link")).toBeInTheDocument();
   });
 
   it("is read-only for viewers, who can still comment", async () => {
     const { user } = await panelBoard(ROWS, VIEWER);
-    await user.click(screen.getByRole("button", { name: "Details of “hooks”" }));
-    expect(within(panel()).getByRole("textbox", { name: "Title" })).toBeDisabled();
+    await selectRow(user, "hooks");
+    expect(within(panel()).getByRole("textbox", { name: "Task title" })).toBeDisabled();
     expect(within(panel()).getByRole("combobox", { name: "Predecessor" })).toBeDisabled();
     expect(within(panel()).queryByRole("button", { name: /^Add a/ })).not.toBeInTheDocument();
     expect(within(panel()).getByRole("textbox", { name: "Write a comment" })).toBeEnabled();

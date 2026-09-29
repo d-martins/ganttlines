@@ -7,11 +7,10 @@ interface Selection {
   editingId: string | null;
   /** a row created by this person that is still untitled: dropped again if they cancel */
   draftId: string | null;
-  /** the details panel is open; it shows the selected row (selecting another retargets it) */
+  /** the details panel is open: selecting a row opens it (and retargets it); × / Escape close it */
   panelOpen: boolean;
   select: (id: string | null) => void;
   edit: (id: string | null, draft?: boolean) => void;
-  openPanel: (id: string) => void;
   closePanel: () => void;
 }
 
@@ -21,10 +20,9 @@ export const useSelection = create<Selection>((set) => ({
   editingId: null,
   draftId: null,
   panelOpen: false,
-  select: (selectedId) => set({ selectedId }),
+  select: (selectedId) => set((state) => ({ selectedId, panelOpen: selectedId !== null ? true : state.panelOpen })),
   edit: (editingId, draft = false) =>
     set((state) => ({ editingId, selectedId: editingId ?? state.selectedId, draftId: draft ? editingId : editingId === null ? null : state.draftId })),
-  openPanel: (id) => set({ selectedId: id, panelOpen: true }),
   closePanel: () => set({ panelOpen: false }),
 }));
 
