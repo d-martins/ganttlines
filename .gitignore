@@ -10,3 +10,4 @@ coverage/
 !.yarn/releases
 .env
 .DS_Store
+.superpowers/
