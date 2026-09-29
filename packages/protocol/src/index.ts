@@ -39,4 +39,18 @@ export {
   type ShareInfoDto,
   type ShareLinkDto,
 } from "./sharing";
+export {
+  BOARD_LIMITS,
+  CommentBody,
+  CreateBaselineBody,
+  EditCommentBody,
+  HighlightBody,
+  type ActivityDto,
+  type ActivityEntryDto,
+  type BaselineDto,
+  type BaselineSnapshotDto,
+  type BaselineTaskDto,
+  type CommentDto,
+  type HighlightDto,
+} from "./board";
 export type { ProjectStateDto } from "./state";

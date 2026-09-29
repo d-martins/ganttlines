@@ -1,6 +1,7 @@
 import type { RowChange } from "@ganttlines/engine";
 import { z } from "zod";
 import type { ProjectDto } from "./api";
+import type { BaselineDto, CommentDto, HighlightDto } from "./board";
 import { CommandSchema } from "./commands";
 
 const id = z.uuid();
@@ -41,4 +42,7 @@ export type ServerMessage =
   | { type: "presence"; projectId: string; viewers: Viewer[] }
   | { type: "project"; project: ProjectDto }
   | { type: "instance"; version: number }
+  | { type: "comment"; projectId: string; comment: CommentDto }
+  | { type: "highlights"; projectId: string; highlights: HighlightDto[] }
+  | { type: "baselines"; projectId: string; baselines: BaselineDto[] }
   | { type: "error"; message: string };
