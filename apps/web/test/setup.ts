@@ -1,9 +1,14 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
+import { resetSelection } from "../src/board/selection";
+import { useToasts } from "../src/ui/toast";
 
 afterEach(() => {
   cleanup();
+  // App-wide stores outlive a render: start every test clean.
+  useToasts.setState({ toasts: [] });
+  resetSelection();
   localStorage.clear();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
