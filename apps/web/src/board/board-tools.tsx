@@ -2,10 +2,11 @@ import type { ResourceDto, Viewer } from "@ganttlines/protocol";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { CalendarRange, GalleryVertical, Layers } from "lucide-react";
+import { CalendarRange, GalleryVertical, Layers, Redo2, Undo2 } from "lucide-react";
 import { useStore } from "zustand";
 import { baselineList, resourceList } from "../api/queries";
 import type { BoardSync } from "../sync/board-sync";
+import { useActiveBoard } from "./active-board";
 import { Avatar } from "../ui/avatar";
 import { Button, IconButton } from "../ui/button";
 import { Menu, MenuLabel, MenuRadio, MenuSeparator } from "../ui/menu";
@@ -24,44 +25,57 @@ const MAX_AVATARS = 5;
 /** Board controls in the top bar: baseline, zoom, bar style, weekends, today, connection, viewers. */
 export function BoardTools({ sync }: { sync: BoardSync }) {
   const { zoom, barStyle, showWeekends, setZoom, setBarStyle, setShowWeekends, goToToday } = useBoardView();
+  const canEdit = useActiveBoard((state) => state.canEdit);
+  const mod = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
   return (
-    <div className="flex min-w-0 items-center gap-1">
-      <BaselinePicker projectId={sync.projectId} />
-      <div role="group" aria-label="Zoom" className="ml-1 flex rounded-md border border-border bg-bg p-0.5">
-        {ZOOMS.map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            aria-pressed={zoom === option.value}
-            onClick={() => setZoom(option.value)}
-            className={`rounded px-2 py-0.5 text-xs ${zoom === option.value ? "bg-accent-soft font-semibold text-text" : "text-muted hover:text-text"}`}
-          >
-            {option.label}
-          </button>
-        ))}
+    <>
+      {/* Tools scroll sideways when the window is narrow; connection and viewers stay at the end. */}
+      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&>*]:shrink-0">
+        <IconButton label={`Undo (${mod}Z)`} disabled={!canEdit} onClick={() => sync.requestHistory("undo")} className="disabled:opacity-40">
+          <Undo2 size={16} />
+        </IconButton>
+        <IconButton label={`Redo (${mod}Shift+Z)`} disabled={!canEdit} onClick={() => sync.requestHistory("redo")} className="disabled:opacity-40">
+          <Redo2 size={16} />
+        </IconButton>
+        <BaselinePicker projectId={sync.projectId} />
+        <div role="group" aria-label="Zoom" className="ml-1 flex rounded-md border border-border bg-bg p-0.5">
+          {ZOOMS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              aria-pressed={zoom === option.value}
+              onClick={() => setZoom(option.value)}
+              className={`rounded px-2 py-0.5 text-xs ${zoom === option.value ? "bg-accent-soft font-semibold text-text" : "text-muted hover:text-text"}`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+        <IconButton
+          label={barStyle === "roomy" ? "Compact bars" : "Roomy bars"}
+          aria-pressed={barStyle === "roomy"}
+          onClick={() => setBarStyle(barStyle === "roomy" ? "compact" : "roomy")}
+          className={barStyle === "roomy" ? "bg-accent-soft text-text" : ""}
+        >
+          <GalleryVertical size={16} />
+        </IconButton>
+        <IconButton
+          label={showWeekends ? "Hide weekends" : "Show weekends"}
+          aria-pressed={!showWeekends}
+          onClick={() => setShowWeekends(!showWeekends)}
+          className={showWeekends ? "" : "bg-accent-soft text-text"}
+        >
+          <CalendarRange size={16} />
+        </IconButton>
+        <Button variant="ghost" className="px-2 py-1 text-xs" onClick={goToToday}>
+          Today
+        </Button>
       </div>
-      <IconButton
-        label={barStyle === "roomy" ? "Compact bars" : "Roomy bars"}
-        aria-pressed={barStyle === "roomy"}
-        onClick={() => setBarStyle(barStyle === "roomy" ? "compact" : "roomy")}
-        className={barStyle === "roomy" ? "bg-accent-soft text-text" : ""}
-      >
-        <GalleryVertical size={16} />
-      </IconButton>
-      <IconButton
-        label={showWeekends ? "Hide weekends" : "Show weekends"}
-        aria-pressed={!showWeekends}
-        onClick={() => setShowWeekends(!showWeekends)}
-        className={showWeekends ? "" : "bg-accent-soft text-text"}
-      >
-        <CalendarRange size={16} />
-      </IconButton>
-      <Button variant="ghost" className="px-2 py-1 text-xs" onClick={goToToday}>
-        Today
-      </Button>
-      <Connection sync={sync} />
-      <Viewers sync={sync} />
-    </div>
+      <div className="flex shrink-0 items-center">
+        <Connection sync={sync} />
+        <Viewers sync={sync} />
+      </div>
+    </>
   );
 }
 

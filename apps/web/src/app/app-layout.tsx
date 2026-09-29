@@ -3,6 +3,7 @@ import { Navigate, Outlet, useRouterState } from "@tanstack/react-router";
 import { errorMessage } from "../api/client";
 import { currentUser, setupStatus } from "../api/queries";
 import { Button } from "../ui/button";
+import { Toaster } from "../ui/toast";
 import { Sidebar } from "./sidebar";
 import { TopBar } from "./top-bar";
 
@@ -40,6 +41,7 @@ export function AppLayout() {
         <main className="min-h-0 flex-1 overflow-auto">
           <Outlet />
         </main>
+        <Toaster />
       </div>
     </div>
   );

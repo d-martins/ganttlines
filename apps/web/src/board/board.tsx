@@ -1,13 +1,15 @@
-import { Calendar, toDay, weekday, type DayNum, type ProjectState } from "@ganttlines/engine";
+import { toDay, weekday, type Calendar, type DayNum, type ProjectState } from "@ganttlines/engine";
 import type { BaselineTaskDto, CalendarDto, HighlightDto, ResourceDto } from "@ganttlines/protocol";
-import { useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Bars, ROW_HEIGHT } from "./chart/bars";
 import { ChartHeader } from "./chart/chart-header";
 import { Dependencies } from "./chart/dependencies";
 import { Shading } from "./chart/shading";
 import { chartRange, DAY_WIDTH, Timeline } from "./chart/timeline";
 import { today } from "./format";
-import { ListHeader, ListRows } from "./list/task-list";
+import { useBoard } from "./board-context";
+import { ListHeader, ListRows, useListKeys } from "./list/task-list";
+import { useSelection } from "./selection";
 import { boardModel, type CompareMode } from "./model";
 import { useBoardView } from "./view-store";
 
@@ -39,20 +41,25 @@ const measure = (element: HTMLElement): Viewport => ({
  */
 export function Board({
   state,
+  calendar,
   calendarDto,
   resources,
   highlights,
   baseline,
 }: {
   state: ProjectState;
+  calendar: Calendar;
   calendarDto: CalendarDto;
   resources: readonly ResourceDto[];
   highlights: readonly HighlightDto[];
   baseline: { mode: CompareMode; tasks: readonly BaselineTaskDto[] } | null;
 }) {
   const { zoom, barStyle, showWeekends, listWidth, todayRequest, setListWidth } = useBoardView();
-  const calendar = useMemo(() => new Calendar(calendarDto), [calendarDto]);
-  const model = useMemo(() => boardModel(state, calendar, baseline), [state, calendar, baseline]);
+  const [query, setQuery] = useState("");
+  const model = useMemo(() => boardModel(state, calendar, baseline, query), [state, calendar, baseline, query]);
+  const { canEdit } = useBoard();
+  const selectedId = useSelection((selection) => selection.selectedId);
+  const onListKey = useListKeys(model.rows);
   const resourceMap = useMemo(() => new Map(resources.map((resource) => [resource.id, resource])), [resources]);
   const todayDay = today();
   const highlightDays = useMemo(() => highlights.map((highlight) => ({ day: toDay(highlight.date), highlight })), [highlights]);
@@ -113,7 +120,19 @@ export function Board({
   const lastRow = Math.min(Math.ceil((viewport.top + viewport.height) / rowHeight) + OVERSCAN_ROWS, model.rows.length);
   const shown = model.rows.slice(firstRow, lastRow);
   const days = timeline.daysBetween(viewport.left - OVERSCAN_PX, viewport.left + chartWidth + OVERSCAN_PX);
-  const bodyHeight = Math.max(model.rows.length * rowHeight, viewport.height - HEADER_HEIGHT);
+  // One spare row under the last task holds "+ Add task / + Add section".
+  const bodyHeight = Math.max((model.rows.length + (canEdit ? 1 : 0)) * rowHeight, viewport.height - HEADER_HEIGHT);
+  const selectedIndex = model.rows.findIndex((entry) => entry.row.id === selectedId);
+
+  // Keep the selected row on screen (keyboard moves, new rows).
+  useEffect(() => {
+    const element = scroller.current;
+    if (!element || selectedIndex < 0) return;
+    const top = selectedIndex * rowHeight;
+    const visibleHeight = element.clientHeight - HEADER_HEIGHT;
+    if (top < element.scrollTop) element.scrollTop = top;
+    else if (visibleHeight > 0 && top + rowHeight > element.scrollTop + visibleHeight) element.scrollTop = top + rowHeight - visibleHeight;
+  }, [selectedIndex, rowHeight]);
   const grid = { backgroundImage: `linear-gradient(to bottom, transparent ${rowHeight - 1}px, var(--grid) ${rowHeight - 1}px)`, backgroundSize: `100% ${rowHeight}px` };
 
   const startResize = (event: ReactPointerEvent) => {
@@ -149,14 +168,27 @@ export function Board({
         <div style={{ width: listWidth + timeline.width }}>
           <div className="sticky top-0 z-20 flex" style={{ height: HEADER_HEIGHT }}>
             <div className="sticky left-0 z-10 shrink-0 overflow-hidden border-r border-border bg-surface" style={{ width: listWidth }}>
-              <ListHeader />
+              <ListHeader query={query} onQuery={setQuery} rows={model.rows} />
               {divider}
             </div>
             <ChartHeader timeline={timeline} zoom={zoom} stickyLeft={listWidth} days={days} highlights={highlightDays} todayDay={todayDay} />
           </div>
           <div className="flex" style={{ height: bodyHeight }}>
-            <div role="treegrid" aria-label="Tasks" aria-rowcount={model.rows.length} className="sticky left-0 z-10 shrink-0 overflow-hidden border-r border-border bg-bg" style={{ width: listWidth, height: bodyHeight, ...grid }}>
-              <ListRows rows={shown} firstRow={firstRow} rowHeight={rowHeight} numbers={model.numbers} calendar={calendar} resources={resourceMap} />
+            <div
+              role="treegrid"
+              aria-label="Tasks"
+              aria-rowcount={model.rows.length}
+              aria-multiselectable={false}
+              tabIndex={0}
+              onKeyDown={onListKey}
+              onMouseDown={(event) => {
+                // Clicking a row keeps keyboard focus on the list (not on a button inside the row).
+                if (!(event.target as HTMLElement).closest("button, input")) event.currentTarget.focus({ preventScroll: true });
+              }}
+              className="sticky left-0 z-10 shrink-0 overflow-hidden border-r border-border bg-bg outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] focus-visible:ring-inset"
+              style={{ width: listWidth, height: bodyHeight, ...grid }}
+            >
+              <ListRows rows={shown} allRows={model.rows} firstRow={firstRow} rowHeight={rowHeight} numbers={model.numbers} searching={query.trim() !== ""} />
               {divider}
             </div>
             <div className="relative shrink-0 overflow-hidden" style={{ width: timeline.width, height: bodyHeight, ...grid }}>
@@ -171,6 +203,9 @@ export function Board({
                 height={bodyHeight}
                 highlights={highlightDays}
               />
+              {selectedIndex >= 0 ? (
+                <div aria-hidden className="absolute right-0 left-0 bg-accent-soft opacity-60" style={{ top: selectedIndex * rowHeight, height: rowHeight }} />
+              ) : null}
               <div aria-hidden className="absolute top-0 w-0.5 bg-[var(--today)]" style={{ left: timeline.x(todayDay) + timeline.dayWidth / 2 - 1, height: bodyHeight }} />
               <Dependencies rows={model.rows} firstRow={firstRow} lastRow={lastRow} timeline={timeline} style={barStyle} />
               <Bars rows={shown} firstRow={firstRow} timeline={timeline} style={barStyle} resources={resourceMap} />

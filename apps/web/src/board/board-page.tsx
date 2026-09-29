@@ -1,3 +1,4 @@
+import { Calendar } from "@ganttlines/engine";
 import type { CalendarDto } from "@ganttlines/protocol";
 import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router";
@@ -9,6 +10,10 @@ import { lastProjectKey } from "../projects/project-pages";
 import { writePref } from "../storage";
 import { BoardSync, type BoardEvent, type SocketLike } from "../sync/board-sync";
 import { Button } from "../ui/button";
+import { toast } from "../ui/toast";
+import { BoardContext, type BoardContextValue } from "./board-context";
+import { replay } from "./pending";
+import { resetSelection } from "./selection";
 import { useActiveBoard } from "./active-board";
 import { Board } from "./board";
 
@@ -42,6 +47,13 @@ function applyEvent(client: QueryClient, projectId: string, event: BoardEvent): 
       return replaceList(client, keys.baselines(projectId), event.baselines);
     case "comment":
       return; // comments arrive with the details panel (plan 3d)
+    case "rejected":
+      return toast(`Change not saved: ${event.message}`, { tone: "error" });
+    case "history":
+      if (event.skipped > 0) toast(`Part of that change was left as is: the board changed since (${event.skipped} ${event.skipped === 1 ? "field" : "fields"}).`);
+      return;
+    case "historyFailed":
+      return toast(event.message, { tone: "error" });
   }
 }
 
@@ -92,6 +104,48 @@ function LiveBoard({ sync }: { sync: BoardSync }) {
   const tasks = snapshot.data?.tasks;
   const baseline = useMemo(() => (baselineMode && tasks ? { mode: baselineMode, tasks } : null), [baselineMode, tasks]);
 
+  const calendarDto = calendarQuery.data;
+  const engineCalendar = useMemo(() => (calendarDto ? new Calendar(calendarDto) : null), [calendarDto]);
+  const rendered = useMemo(
+    () => (engineCalendar ? replay(state.confirmed, state.pending, engineCalendar) : state.confirmed),
+    [state.confirmed, state.pending, engineCalendar],
+  );
+  const role = me.data?.role;
+  const canEdit =
+    (role === "editor" || role === "admin") && state.status === "live" && state.project?.archived === false && baselineMode !== "switch";
+  const resourceData = resources.data;
+  const context = useMemo<BoardContextValue | null>(
+    () =>
+      engineCalendar && resourceData
+        ? {
+            sync,
+            calendar: engineCalendar,
+            state: rendered,
+            resources: resourceData,
+            resourceMap: new Map(resourceData.map((resource) => [resource.id, resource])),
+            canEdit,
+            canCreateResources: role === "editor" || role === "admin",
+          }
+        : null,
+    [sync, engineCalendar, rendered, resourceData, canEdit, role],
+  );
+  useEffect(() => {
+    useActiveBoard.setState({ canEdit });
+  }, [canEdit]);
+  useEffect(resetSelection, [projectId]);
+  // Undo / redo from the keyboard, unless typing somewhere.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "z" || !canEdit) return;
+      const target = event.target as HTMLElement | null;
+      if (target && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))) return;
+      event.preventDefault();
+      sync.requestHistory(event.shiftKey ? "redo" : "undo");
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [sync, canEdit]);
+
   const userId = me.data?.id;
   const loaded = state.project !== null;
   useEffect(() => {
@@ -113,7 +167,7 @@ function LiveBoard({ sync }: { sync: BoardSync }) {
       </div>
     );
   }
-  if (!state.project || calendarQuery.isPending || resources.isPending) return <p className="p-6 text-muted">Loading…</p>;
+  if (!state.project || !context || calendarQuery.isPending || resources.isPending) return <p className="p-6 text-muted">Loading…</p>;
   if (calendarQuery.error || resources.error) return <p className="p-6 text-danger">{errorMessage(calendarQuery.error ?? resources.error)}</p>;
 
   return (
@@ -147,7 +201,9 @@ function LiveBoard({ sync }: { sync: BoardSync }) {
         </p>
       ) : null}
       <div className="min-h-0 flex-1">
-        <Board state={state.confirmed} calendarDto={calendarQuery.data} resources={resources.data} highlights={highlights.data ?? []} baseline={baseline} />
+        <BoardContext.Provider value={context}>
+          <Board state={rendered} calendar={context.calendar} calendarDto={calendarQuery.data!} resources={context.resources} highlights={highlights.data ?? []} baseline={baseline} />
+        </BoardContext.Provider>
       </div>
     </div>
   );
