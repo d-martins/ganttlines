@@ -61,13 +61,47 @@ describe("editing the task list", () => {
     expect(sentCommands()).toEqual([{ type: "setAssignee", id: "ui", resourceId: ANA.id }]);
   });
 
-  it("indents with Tab while typing, and Escape drops an untitled new row", async () => {
+  it("indents with Alt+Shift+→ while typing; Tab just moves on, keeping the title", async () => {
     const { user } = await editableBoard();
     await user.dblClick(within(listRow("hooks")).getByText("hooks"));
-    await user.keyboard("{Tab}");
+    await user.keyboard("{Alt>}{Shift>}{ArrowRight}{/Shift}{/Alt}");
     expect(sentCommands()).toEqual([{ type: "indent", id: "hooks" }]);
-    expect(screen.getByRole("row", { name: /hooks/ })).toHaveAttribute("aria-level", "3");
-    await user.keyboard("{Escape}");
+    const input = screen.getByRole("textbox", { name: "Title" });
+    expect(input.closest('[role="row"]')).toHaveAttribute("aria-level", "3");
+    await user.type(input, " v2");
+    await user.tab();
+    expect(sentCommands()).toEqual([
+      { type: "indent", id: "hooks" },
+      { type: "updateTitle", id: "hooks", title: "hooks v2" },
+    ]);
+    expect(input).not.toBeInTheDocument();
+  });
+
+  it("indents the selected row from the keyboard or the header, never with Tab", async () => {
+    const { user } = await editableBoard();
+    await user.click(within(listRow("hooks")).getByText("3"));
+    await user.keyboard("{Tab}");
+    expect(sentCommands()).toEqual([]);
+    await user.click(within(listRow("hooks")).getByText("3"));
+    await user.keyboard("{Alt>}{Shift>}{ArrowLeft}{/Shift}{/Alt}");
+    expect(sentCommands()).toEqual([{ type: "outdent", id: "hooks" }]);
+    await user.click(screen.getByRole("button", { name: /^Indent/ }));
+    expect(sentCommands().at(-1)).toEqual({ type: "indent", id: "hooks" });
+  });
+
+  it("collapses rows in this browser only, for viewers too", async () => {
+    const { user } = await editableBoard(ROWS, VIEWER);
+    const list = within(screen.getByRole("treegrid", { name: "Tasks" }));
+    await user.click(within(listRow("design")).getByRole("button", { name: "Collapse" }));
+    expect(list.queryByText("ui", { exact: true })).not.toBeInTheDocument();
+    expect(JSON.parse(localStorage.getItem(`gp.collapsed:${PROJECT_ID}`)!)).toEqual(["design"]);
+    expect(sentCommands()).toEqual([]);
+    await user.click(screen.getByRole("button", { name: "Expand all" }));
+    expect(list.getByText("ui", { exact: true })).toBeInTheDocument();
+  });
+
+  it("drops an untitled new row on Escape", async () => {
+    const { user } = await editableBoard();
     await user.click(screen.getByRole("button", { name: "Add task" }));
     const created = (sentCommands().at(-1) as Extract<Command, { type: "createRow" }>).id;
     expect(sentCommands().at(-1)).toMatchObject({ type: "createRow", parentId: null, afterId: "design", kind: "task" });

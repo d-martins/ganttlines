@@ -45,20 +45,25 @@ describe("Timeline", () => {
 
 describe("outline", () => {
   it("numbers every row depth-first and leaves out children of collapsed rows", () => {
-    const { visible, numbers } = outline({
-      rows: {
-        s: section("s", { position: "a0", collapsed: true }),
-        a: task("a", { parentId: "s", position: "a0" }),
-        b: task("b", { position: "b0" }),
-        c: task("c", { parentId: "b", position: "a0" }),
+    const { visible, numbers } = outline(
+      {
+        rows: {
+          s: section("s", { position: "a0" }),
+          a: task("a", { parentId: "s", position: "a0" }),
+          b: task("b", { position: "b0", collapsed: true }), // the stored flag is ignored: collapsing is per browser
+          c: task("c", { parentId: "b", position: "a0" }),
+        },
       },
-    });
+      undefined,
+      new Set(["s"]),
+    );
     expect(visible.map((entry) => [entry.row.id, entry.number, entry.depth])).toEqual([
       ["s", 1, 0],
       ["b", 3, 0],
       ["c", 4, 1],
     ]);
     expect(numbers.get("a")).toBe(2);
+    expect(visible[0]!.collapsed).toBe(true);
     expect(visible[1]!.isParent).toBe(true);
   });
 });

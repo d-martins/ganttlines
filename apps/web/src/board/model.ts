@@ -37,9 +37,11 @@ export function boardModel(
   baseline: { mode: CompareMode; tasks: readonly BaselineTaskDto[] } | null,
   /** search text: show matching rows (and their ancestors) only */
   query = "",
+  /** rows collapsed in this browser */
+  collapsed: ReadonlySet<RowId> = new Set(),
 ): BoardModel {
   const needle = query.trim().toLocaleLowerCase();
-  const { visible, numbers } = outline(state, needle ? (row) => row.title.toLocaleLowerCase().includes(needle) : undefined);
+  const { visible, numbers } = outline(state, needle ? (row) => row.title.toLocaleLowerCase().includes(needle) : undefined, collapsed);
   let schedule: ReturnType<typeof computeSchedule> | null = null;
   try {
     schedule = computeSchedule(state, calendar);

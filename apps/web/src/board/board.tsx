@@ -8,6 +8,7 @@ import { Shading } from "./chart/shading";
 import { chartRange, DAY_WIDTH, Timeline } from "./chart/timeline";
 import { today } from "./format";
 import { useBoard } from "./board-context";
+import { useCollapsed } from "./collapse";
 import { ListHeader, ListRows, useListKeys } from "./list/task-list";
 import { useSelection } from "./selection";
 import { boardModel, type CompareMode } from "./model";
@@ -56,8 +57,9 @@ export function Board({
 }) {
   const { zoom, barStyle, showWeekends, listWidth, todayRequest, setListWidth } = useBoardView();
   const [query, setQuery] = useState("");
-  const model = useMemo(() => boardModel(state, calendar, baseline, query), [state, calendar, baseline, query]);
-  const { canEdit } = useBoard();
+  const { canEdit, sync } = useBoard();
+  const collapsed = useCollapsed(sync.projectId);
+  const model = useMemo(() => boardModel(state, calendar, baseline, query, collapsed), [state, calendar, baseline, query, collapsed]);
   const selectedId = useSelection((selection) => selection.selectedId);
   const onListKey = useListKeys(model.rows);
   const resourceMap = useMemo(() => new Map(resources.map((resource) => [resource.id, resource])), [resources]);
@@ -168,7 +170,7 @@ export function Board({
         <div style={{ width: listWidth + timeline.width }}>
           <div className="sticky top-0 z-20 flex" style={{ height: HEADER_HEIGHT }}>
             <div className="sticky left-0 z-10 shrink-0 overflow-hidden border-r border-border bg-surface" style={{ width: listWidth }}>
-              <ListHeader query={query} onQuery={setQuery} rows={model.rows} />
+              <ListHeader query={query} onQuery={setQuery} />
               {divider}
             </div>
             <ChartHeader timeline={timeline} zoom={zoom} stickyLeft={listWidth} days={days} highlights={highlightDays} todayDay={todayDay} />

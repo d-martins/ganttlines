@@ -86,9 +86,13 @@ describe("board", () => {
     expect(arrows.filter((arrow) => arrow.dataset["violation"])).toHaveLength(1);
   });
 
-  it("hides the children of collapsed rows", async () => {
-    await joinedBoard(ROWS.map((row) => (row.id === "parent" ? { ...row, collapsed: true } : row)));
-    expect(screen.queryByText("child", { exact: true })).not.toBeInTheDocument();
+  it("hides the children of rows collapsed in this browser", async () => {
+    localStorage.setItem(`gp.collapsed:${PROJECT_ID}`, JSON.stringify(["parent"]));
+    // A collapsed flag stored on the server has no effect: collapsing is a per-browser view.
+    await joinedBoard(ROWS.map((row) => (row.id === "design" ? { ...row, collapsed: true } : row)));
+    const list = within(screen.getByRole("treegrid", { name: "Tasks" }));
+    expect(list.queryByText("child", { exact: true })).not.toBeInTheDocument();
+    expect(list.getByText("hooks", { exact: true })).toBeInTheDocument();
     expect(listRow("parent")).toHaveAttribute("aria-expanded", "false");
     expect(within(listRow("ms")).getByText("5")).toBeInTheDocument();
   });

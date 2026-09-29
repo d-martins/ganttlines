@@ -9,6 +9,8 @@ export interface ListRow {
   hasChildren: boolean;
   /** a task whose dates roll up from child tasks (drawn as a bracket) */
   isParent: boolean;
+  /** its children are hidden in this browser (see collapse.ts) */
+  collapsed: boolean;
 }
 
 export interface Outline {
@@ -22,7 +24,7 @@ export interface Outline {
  * The project as an outline: depth-first by position, numbered 1…n. With `filter`, only rows that
  * match it and their ancestors are shown, collapsed or not (search).
  */
-export function outline(state: ProjectState, filter?: (row: Row) => boolean): Outline {
+export function outline(state: ProjectState, filter?: (row: Row) => boolean, collapsed: ReadonlySet<RowId> = new Set()): Outline {
   const tree = buildTree(state);
   const visible: ListRow[] = [];
   const numbers = new Map<RowId, number>();
@@ -32,8 +34,9 @@ export function outline(state: ProjectState, filter?: (row: Row) => boolean): Ou
       numbers.set(row.id, numbers.size + 1);
       const hasChildren = childrenOf(tree, row.id).length > 0;
       const show = shown ? shown.has(row.id) : !hidden;
-      if (show) visible.push({ row, number: numbers.size, depth, hasChildren, isParent: isParentTask(tree, row) });
-      visit(row.id, depth + 1, hidden || row.collapsed);
+      const isCollapsed = hasChildren && collapsed.has(row.id);
+      if (show) visible.push({ row, number: numbers.size, depth, hasChildren, isParent: isParentTask(tree, row), collapsed: isCollapsed });
+      visit(row.id, depth + 1, hidden || isCollapsed);
     }
   };
   visit(null, 0, false);

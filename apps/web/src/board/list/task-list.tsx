@@ -1,12 +1,13 @@
 import { TASK_COLORS, type Calendar, type RowId, type TaskColor, type TaskRow } from "@ganttlines/engine";
 import * as Popover from "@radix-ui/react-popover";
-import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, GripVertical, Plus, Search } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, GripVertical, IndentDecrease, IndentIncrease, Plus, Search } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { Avatar } from "../../ui/avatar";
 import { useFocusReturnOnKeyboardClose } from "../../ui/popover-focus";
 import { IconButton } from "../../ui/button";
 import { AssigneePicker } from "../assignee-picker";
 import { useBoard, useRun } from "../board-context";
+import { setCollapsed } from "../collapse";
 import { taskColors } from "../format";
 import type { BoardRow } from "../model";
 import { useSelection } from "../selection";
@@ -19,11 +20,15 @@ import { addAtEnd, addRowBelow, addSubtask, deleteRow, dropMove, setPredecessor,
 const COLUMNS = "grid grid-cols-[40px_minmax(96px,1fr)_120px_40px_40px_56px_28px] items-center";
 const INDENT = 16;
 
-export function ListHeader({ query, onQuery, rows }: { query: string; onQuery: (query: string) => void; rows: readonly BoardRow[] }) {
-  const { canEdit } = useBoard();
+export function ListHeader({ query, onQuery }: { query: string; onQuery: (query: string) => void }) {
+  const { canEdit, sync, state } = useBoard();
   const run = useRun();
+  const selectedId = useSelection((selection) => selection.selectedId);
+  // Collapse every row that has children; expand everything (including rows inside collapsed ones).
   const setAll = (collapsed: boolean) => {
-    for (const { row, hasChildren } of rows) if (hasChildren && row.collapsed !== collapsed) run({ type: "toggleCollapsed", id: row.id, collapsed });
+    const rows = Object.values(state.rows);
+    const ids = collapsed ? new Set(rows.flatMap((row) => (row.parentId ? [row.parentId] : []))) : rows.map((row) => row.id);
+    setCollapsed(sync.projectId, ids, collapsed);
   };
   return (
     <div className="flex h-full flex-col border-b border-border">
@@ -42,14 +47,20 @@ export function ListHeader({ query, onQuery, rows }: { query: string; onQuery: (
         </label>
         {canEdit ? (
           <>
-            <IconButton label="Expand all" className="h-5 w-5" onClick={() => setAll(false)}>
-              <ChevronsUpDown size={13} />
+            <IconButton label="Outdent (Alt+Shift+←)" className="h-5 w-5" disabled={!selectedId} onClick={() => selectedId && run({ type: "outdent", id: selectedId })}>
+              <IndentDecrease size={13} />
             </IconButton>
-            <IconButton label="Collapse all" className="h-5 w-5" onClick={() => setAll(true)}>
-              <ChevronsDownUp size={13} />
+            <IconButton label="Indent (Alt+Shift+→)" className="h-5 w-5" disabled={!selectedId} onClick={() => selectedId && run({ type: "indent", id: selectedId })}>
+              <IndentIncrease size={13} />
             </IconButton>
           </>
         ) : null}
+        <IconButton label="Expand all" className="h-5 w-5" onClick={() => setAll(false)}>
+          <ChevronsUpDown size={13} />
+        </IconButton>
+        <IconButton label="Collapse all" className="h-5 w-5" onClick={() => setAll(true)}>
+          <ChevronsDownUp size={13} />
+        </IconButton>
       </div>
       {/* Visual column headings; each row's cells carry their own labels for assistive tech. */}
       <div aria-hidden className={`${COLUMNS} h-6 px-1 text-xs font-semibold text-muted`}>
@@ -106,7 +117,10 @@ function InlineInput({
   className?: string;
   onCommit: (value: string) => void;
   onCancel: () => void;
-  /** extra keys (Tab, Enter…); return true when handled */
+  /**
+   * Extra keys (Enter, Alt+Shift+arrows…); return true when the key finished the editing (nothing
+   * more is saved from this input). Tab is left alone: it moves focus, which saves.
+   */
   onKey?: (event: KeyboardEvent<HTMLInputElement>, value: string) => boolean;
   inputMode?: "numeric" | "text";
 }) {
@@ -233,7 +247,7 @@ export function ListRows({
             role="row"
             aria-level={entry.depth + 1}
             aria-selected={selected}
-            aria-expanded={entry.hasChildren ? !row.collapsed : undefined}
+            aria-expanded={entry.hasChildren ? !entry.collapsed : undefined}
             onClick={() => select(row.id)}
             onDoubleClick={() => canEdit && edit(row.id)}
             className={`group ${COLUMNS} absolute right-0 left-0 px-1 text-sm ${selected ? "bg-accent-soft" : "hover:bg-surface"} ${drag?.id === row.id ? "opacity-50" : ""}`}
@@ -256,15 +270,15 @@ export function ListRows({
               {entry.hasChildren ? (
                 <button
                   type="button"
-                  aria-label={row.collapsed ? "Expand" : "Collapse"}
-                  disabled={!canEdit || searching}
+                  aria-label={entry.collapsed ? "Expand" : "Collapse"}
+                  disabled={searching}
                   onClick={(event) => {
                     event.stopPropagation();
-                    run({ type: "toggleCollapsed", id: row.id, collapsed: !row.collapsed });
+                    setCollapsed(board.sync.projectId, [row.id], !entry.collapsed);
                   }}
                   className="shrink-0 rounded text-muted hover:text-text disabled:cursor-default disabled:hover:text-muted"
                 >
-                  {row.collapsed && !searching ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                  {entry.collapsed && !searching ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
                 </button>
               ) : (
                 <span className="w-3.5 shrink-0" />
@@ -296,16 +310,16 @@ export function ListRows({
                         return true;
                       }
                       commitTitle(row, value);
-                      if (!addRowBelow(board, state, row)) edit(null);
+                      if (!addRowBelow(board, state, row, entry.collapsed)) edit(null);
                       return true;
                     }
-                    if (event.key === "Tab") {
-                      // Tab / Shift+Tab: keep the title and indent / outdent, still typing.
+                    if (event.altKey && event.shiftKey && (event.key === "ArrowRight" || event.key === "ArrowLeft")) {
+                      // Alt+Shift+→ / ←: keep the title and indent / outdent, still typing.
                       event.preventDefault();
                       commitTitle(row, value);
-                      run({ type: event.shiftKey ? "outdent" : "indent", id: row.id });
+                      run({ type: event.key === "ArrowRight" ? "indent" : "outdent", id: row.id });
                       edit(row.id, draftId === row.id && !value.trim());
-                      return true;
+                      return false; // still typing: this input must still save on Enter / blur
                     }
                     return false;
                   }}
@@ -503,7 +517,7 @@ function DropIndicator({ target, depth, rowHeight, valid }: { target: NonNullabl
 
 /**
  * Keys on the task list (when not typing): ↑/↓ select, Enter/F2 edit the title, Delete removes,
- * Tab / Shift+Tab indent / outdent, Escape clears the selection.
+ * Alt+Shift+→ / ← indent / outdent, Escape clears the selection. Tab is never taken: it moves focus.
  */
 export function useListKeys(allRows: readonly BoardRow[]) {
   const board = useBoard();
@@ -518,6 +532,11 @@ export function useListKeys(allRows: readonly BoardRow[]) {
       if (next) select(next.row.id);
     };
     switch (event.key) {
+      case "ArrowRight":
+      case "ArrowLeft":
+        if (!(event.altKey && event.shiftKey) || !current || !board.canEdit) return;
+        run({ type: event.key === "ArrowRight" ? "indent" : "outdent", id: current.row.id });
+        break;
       case "ArrowDown":
         move(index + 1);
         break;
@@ -536,10 +555,6 @@ export function useListKeys(allRows: readonly BoardRow[]) {
       case "Backspace":
         if (!current || !board.canEdit) return;
         deleteRow(board, current.row);
-        break;
-      case "Tab":
-        if (!current || !board.canEdit) return;
-        run({ type: event.shiftKey ? "outdent" : "indent", id: current.row.id });
         break;
       default:
         return;

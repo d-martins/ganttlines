@@ -1,6 +1,7 @@
 import { buildTree, childrenOf, type ProjectState, type Row, type RowId, type TaskRow } from "@ganttlines/engine";
 import { toast } from "../../ui/toast";
 import { runCommand, type BoardContextValue } from "../board-context";
+import { setCollapsed } from "../collapse";
 import { useSelection } from "../selection";
 
 type Board = Pick<BoardContextValue, "sync" | "calendar" | "canEdit">;
@@ -24,15 +25,15 @@ function createAndEdit(board: Board, parentId: RowId | null, afterId: RowId | nu
  * Enter on a row: a new task on the line below. Below an expanded section or parent that line is
  * its first child; otherwise it's the next sibling.
  */
-export function addRowBelow(board: Board, state: ProjectState, row: Row): RowId | null {
+export function addRowBelow(board: Board, state: ProjectState, row: Row, collapsed: boolean): RowId | null {
   const hasChildren = children(state, row.id).length > 0;
-  if ((row.kind === "section" || hasChildren) && !row.collapsed) return createAndEdit(board, row.id, null);
+  if ((row.kind === "section" || hasChildren) && !collapsed) return createAndEdit(board, row.id, null);
   return createAndEdit(board, row.parentId, row.id, row.kind === "section" ? "section" : "task");
 }
 
 /** "+ subtask": a new last child (expanding the row first so it can be seen). */
 export function addSubtask(board: Board, state: ProjectState, row: Row): RowId | null {
-  if (row.collapsed && !runCommand(board, { type: "toggleCollapsed", id: row.id, collapsed: false })) return null;
+  setCollapsed(board.sync.projectId, [row.id], false);
   return createAndEdit(board, row.id, children(state, row.id).at(-1)?.id ?? null);
 }
 
