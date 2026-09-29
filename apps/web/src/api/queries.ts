@@ -1,0 +1,113 @@
+import type {
+  CalendarDto,
+  CreateProjectBody,
+  CreateResourceBody,
+  CreateUserBody,
+  HolidayBody,
+  ProjectDto,
+  ResourceDto,
+  TimeOffBody,
+  UpdateProjectBody,
+  UpdateResourceBody,
+  UpdateUserBody,
+  UserDto,
+} from "@ganttlines/protocol";
+import { queryOptions, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { api, ApiError } from "./client";
+
+export const keys = {
+  setup: ["setup"] as const,
+  me: ["me"] as const,
+  projects: (archived: boolean) => ["projects", { archived }] as const,
+  users: ["users"] as const,
+  calendar: ["calendar"] as const,
+  resources: ["resources"] as const,
+};
+
+export const setupStatus = queryOptions({
+  queryKey: keys.setup,
+  queryFn: () => api<{ needsSetup: boolean }>("GET", "/api/setup"),
+});
+
+/** The signed-in user, or null when nobody is signed in. */
+export const currentUser = queryOptions({
+  queryKey: keys.me,
+  queryFn: async () => {
+    try {
+      return (await api<{ user: UserDto }>("GET", "/api/auth/me")).user;
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) return null;
+      throw error;
+    }
+  },
+});
+
+export const projectList = (includeArchived: boolean) =>
+  queryOptions({
+    queryKey: keys.projects(includeArchived),
+    queryFn: async () => (await api<{ projects: ProjectDto[] }>("GET", `/api/projects${includeArchived ? "?archived=true" : ""}`)).projects,
+  });
+
+export const userList = queryOptions({
+  queryKey: keys.users,
+  queryFn: async () => (await api<{ users: UserDto[] }>("GET", "/api/users")).users,
+});
+
+export const calendar = queryOptions({ queryKey: keys.calendar, queryFn: () => api<CalendarDto>("GET", "/api/calendar") });
+
+export const resourceList = queryOptions({
+  queryKey: keys.resources,
+  queryFn: async () => (await api<{ resources: ResourceDto[] }>("GET", "/api/resources")).resources,
+});
+
+/** A mutation that refreshes the given queries when it succeeds. */
+function useApiMutation<TInput, TResult>(run: (input: TInput) => Promise<TResult>, invalidate: (client: QueryClient) => unknown) {
+  const client = useQueryClient();
+  return useMutation({ mutationFn: run, onSuccess: () => invalidate(client) });
+}
+
+/**
+ * After signing in/out or setting up, the cached "who am I" answers are dropped (not just marked
+ * stale): otherwise the next screen would briefly act on the old answer and bounce back.
+ */
+const refreshAuth = (client: QueryClient) => {
+  client.removeQueries({ queryKey: keys.me });
+  client.removeQueries({ queryKey: keys.setup });
+};
+const refreshProjects = (client: QueryClient) => client.invalidateQueries({ queryKey: ["projects"] });
+const refreshCalendar = (client: QueryClient) => Promise.all([client.invalidateQueries({ queryKey: keys.calendar }), client.invalidateQueries({ queryKey: keys.resources })]);
+
+export const useSetup = () =>
+  useApiMutation((body: { email: string; name: string; password: string }) => api<{ user: UserDto }>("POST", "/api/setup", body), refreshAuth);
+export const useLogin = () => useApiMutation((body: { email: string; password: string }) => api<{ user: UserDto }>("POST", "/api/auth/login", body), refreshAuth);
+export const useLogout = () => {
+  const client = useQueryClient();
+  return useMutation({ mutationFn: () => api<void>("POST", "/api/auth/logout"), onSuccess: () => client.clear() });
+};
+export const useChangePassword = () =>
+  useApiMutation((body: { currentPassword: string; newPassword: string }) => api<void>("POST", "/api/auth/password", body), refreshAuth);
+
+export const useCreateProject = () => useApiMutation((body: CreateProjectBody) => api<{ project: ProjectDto }>("POST", "/api/projects", body), refreshProjects);
+export const useUpdateProject = () =>
+  useApiMutation(({ id, ...body }: UpdateProjectBody & { id: string }) => api<{ project: ProjectDto }>("PATCH", `/api/projects/${id}`, body), refreshProjects);
+
+const refreshUsers = (client: QueryClient) => Promise.all([client.invalidateQueries({ queryKey: keys.users }), client.invalidateQueries({ queryKey: keys.resources })]);
+export const useCreateUser = () =>
+  useApiMutation((body: CreateUserBody) => api<{ user: UserDto; temporaryPassword: string }>("POST", "/api/users", body), refreshUsers);
+export const useUpdateUser = () =>
+  useApiMutation(({ id, ...body }: UpdateUserBody & { id: string }) => api<{ user: UserDto }>("PATCH", `/api/users/${id}`, body), refreshUsers);
+export const useResetPassword = () =>
+  useApiMutation((id: string) => api<{ temporaryPassword: string }>("POST", `/api/users/${id}/reset-password`), refreshUsers);
+export const useDeleteUser = () => useApiMutation((id: string) => api<void>("DELETE", `/api/users/${id}`), refreshUsers);
+
+export const useSetWorkingWeekdays = () =>
+  useApiMutation((workingWeekdays: number[]) => api<CalendarDto>("PUT", "/api/calendar/working-weekdays", { workingWeekdays }), refreshCalendar);
+export const useCreateResource = () => useApiMutation((body: CreateResourceBody) => api<{ resource: ResourceDto }>("POST", "/api/resources", body), refreshCalendar);
+export const useUpdateResource = () =>
+  useApiMutation(({ id, ...body }: UpdateResourceBody & { id: string }) => api<{ resource: ResourceDto }>("PATCH", `/api/resources/${id}`, body), refreshCalendar);
+export const useSaveHoliday = () =>
+  useApiMutation(({ id, ...body }: HolidayBody & { id?: string }) => (id ? api("PUT", `/api/holidays/${id}`, body) : api("POST", "/api/holidays", body)), refreshCalendar);
+export const useDeleteHoliday = () => useApiMutation((id: string) => api<void>("DELETE", `/api/holidays/${id}`), refreshCalendar);
+export const useSaveTimeOff = () =>
+  useApiMutation(({ id, ...body }: TimeOffBody & { id?: string }) => (id ? api("PUT", `/api/time-off/${id}`, body) : api("POST", "/api/time-off", body)), refreshCalendar);
+export const useDeleteTimeOff = () => useApiMutation((id: string) => api<void>("DELETE", `/api/time-off/${id}`), refreshCalendar);
