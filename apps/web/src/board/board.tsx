@@ -63,7 +63,7 @@ export function Board({
 }) {
   const { zoom, barStyle, showWeekends, listWidth, todayRequest, setListWidth } = useBoardView();
   const [query, setQuery] = useState("");
-  const { canEdit, sync } = useBoard();
+  const { canEdit, canEditCalendar, sync } = useBoard();
   const collapsed = useCollapsed(sync.projectId);
   // While a bar is dragged, show the board as the drop would leave it (successors pushed and all).
   const dragCommand = useChartDrag((store) => store.drag?.command ?? null);
@@ -238,6 +238,7 @@ export function Board({
             <DayMenu
               projectId={sync.projectId}
               enabled={canEdit}
+              canEditCalendar={canEditCalendar}
               dayAt={(clientX) => timeline.dayAt(clientX - (chartBody.current?.getBoundingClientRect().left ?? 0))}
               highlights={highlightDays}
               resources={resources}

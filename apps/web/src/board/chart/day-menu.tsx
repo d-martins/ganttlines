@@ -22,6 +22,7 @@ const DEFAULT_HIGHLIGHT = "#e5892f";
 export function DayMenu({
   projectId,
   enabled,
+  canEditCalendar,
   dayAt,
   highlights,
   resources,
@@ -29,6 +30,8 @@ export function DayMenu({
 }: {
   projectId: string;
   enabled: boolean;
+  /** holidays and time off are team-wide: signed-in editors only (not share-link visitors) */
+  canEditCalendar: boolean;
   /** the day under a viewport x coordinate */
   dayAt: (clientX: number) => DayNum;
   highlights: readonly { day: DayNum; highlight: HighlightDto }[];
@@ -61,13 +64,17 @@ export function DayMenu({
                 Remove highlight
               </ContextMenu.Item>
             ) : null}
-            <ContextMenu.Separator className="my-1 h-px bg-border" />
-            <ContextMenu.Item className={ITEM} onSelect={() => setDialog("holiday")}>
-              Add a holiday…
-            </ContextMenu.Item>
-            <ContextMenu.Item className={ITEM} onSelect={() => setDialog("timeOff")}>
-              Add time off…
-            </ContextMenu.Item>
+            {canEditCalendar ? (
+              <>
+                <ContextMenu.Separator className="my-1 h-px bg-border" />
+                <ContextMenu.Item className={ITEM} onSelect={() => setDialog("holiday")}>
+                  Add a holiday…
+                </ContextMenu.Item>
+                <ContextMenu.Item className={ITEM} onSelect={() => setDialog("timeOff")}>
+                  Add time off…
+                </ContextMenu.Item>
+              </>
+            ) : null}
           </ContextMenu.Content>
         </ContextMenu.Portal>
       </ContextMenu.Root>

@@ -2,6 +2,7 @@ import { Calendar } from "@ganttlines/engine";
 import type { CalendarDto } from "@ganttlines/protocol";
 import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router";
+import type { BoardSearch } from "../router";
 import { useEffect, useMemo, useState } from "react";
 import { useStore } from "zustand";
 import { ApiError, errorMessage } from "../api/client";
@@ -17,7 +18,15 @@ import { resetSelection } from "./selection";
 import { useActiveBoard } from "./active-board";
 import { Board } from "./board";
 
-const webSocketUrl = () => `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
+/** In link mode the socket carries the link's token (the REST client sends it as a header). */
+const webSocketUrl = (shareToken: string | null) =>
+  `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws${shareToken ? `?share=${encodeURIComponent(shareToken)}` : ""}`;
+
+/** The board opened through a share link: its token and whether the link lets people edit. */
+export interface ShareAccess {
+  token: string;
+  collaboration: boolean;
+}
 
 /** A broadcast list is the newest truth: drop any refetch still in flight so it can't overwrite it. */
 function replaceList(client: QueryClient, queryKey: readonly unknown[], list: unknown[]): void {
@@ -58,7 +67,7 @@ function applyEvent(client: QueryClient, projectId: string, event: BoardEvent): 
 }
 
 /** One live board: created per project, started on mount, stopped on unmount. */
-function useBoardSync(projectId: string): BoardSync | null {
+function useBoardSync(projectId: string, shareToken: string | null): BoardSync | null {
   const client = useQueryClient();
   const [sync, setSync] = useState<BoardSync | null>(null);
   useEffect(() => {
@@ -66,7 +75,7 @@ function useBoardSync(projectId: string): BoardSync | null {
       projectId,
       // Through the query cache, so a lost session is noticed like any other request.
       loadState: () => client.fetchQuery({ queryKey: [...keys.project(projectId), "state"], queryFn: () => loadProjectState(projectId), staleTime: 0, gcTime: 0 }),
-      openSocket: () => new WebSocket(webSocketUrl()) as unknown as SocketLike,
+      openSocket: () => new WebSocket(webSocketUrl(shareToken)) as unknown as SocketLike,
       onEvent: (event) => applyEvent(client, projectId, event),
       isFatal: (error) => error instanceof ApiError && error.status >= 400 && error.status < 500,
     });
@@ -77,22 +86,27 @@ function useBoardSync(projectId: string): BoardSync | null {
       next.stop();
       if (useActiveBoard.getState().sync === next) useActiveBoard.setState({ sync: null });
     };
-  }, [client, projectId]);
+  }, [client, projectId, shareToken]);
   return sync?.projectId === projectId ? sync : null;
 }
 
 export function BoardPage() {
   const { projectId } = useParams({ from: "/app/p/$projectId" });
-  const sync = useBoardSync(projectId);
-  if (!sync) return <p className="p-6 text-muted">Loading…</p>;
-  return <LiveBoard key={projectId} sync={sync} />;
+  return <BoardScreen projectId={projectId} share={null} />;
 }
 
-function LiveBoard({ sync }: { sync: BoardSync }) {
+/** A live board — signed in normally, or opened through a share link (`share`). */
+export function BoardScreen({ projectId, share }: { projectId: string; share: ShareAccess | null }) {
+  const sync = useBoardSync(projectId, share?.token ?? null);
+  if (!sync) return <p className="p-6 text-muted">Loading…</p>;
+  return <LiveBoard key={projectId} sync={sync} share={share} />;
+}
+
+function LiveBoard({ sync, share }: { sync: BoardSync; share: ShareAccess | null }) {
   const projectId = sync.projectId;
   const client = useQueryClient();
   const navigate = useNavigate();
-  const search = useSearch({ from: "/app/p/$projectId" });
+  const search = useSearch({ strict: false }) as BoardSearch;
   const state = useStore(sync.store);
   const me = useQuery(currentUser);
   const calendarQuery = useQuery(calendar);
@@ -110,9 +124,14 @@ function LiveBoard({ sync }: { sync: BoardSync }) {
     () => (engineCalendar ? replay(state.confirmed, state.pending, engineCalendar) : state.confirmed),
     [state.confirmed, state.pending, engineCalendar],
   );
+  // Rights (mirroring the server): members act as themselves, even through a link; a collaborative
+  // link also lets guests, viewers and anonymous visitors edit and comment. Only signed-in editors
+  // and admins change the team calendar, add team members, share, and save baselines.
   const role = me.data?.role;
-  const canEdit =
-    (role === "editor" || role === "admin") && state.status === "live" && state.project?.archived === false && baselineMode !== "switch";
+  const member = me.data !== null && me.data !== undefined && role !== "guest" && !me.data.mustChangePassword;
+  const editorRole = member && (role === "editor" || role === "admin");
+  const mayEdit = editorRole || share?.collaboration === true;
+  const canEdit = mayEdit && state.status === "live" && state.project?.archived === false && baselineMode !== "switch";
   const resourceData = resources.data;
   const context = useMemo<BoardContextValue | null>(
     () =>
@@ -124,14 +143,17 @@ function LiveBoard({ sync }: { sync: BoardSync }) {
             resources: resourceData,
             resourceMap: new Map(resourceData.map((resource) => [resource.id, resource])),
             canEdit,
-            canCreateResources: role === "editor" || role === "admin",
+            canCreateResources: editorRole,
+            canComment: member || share?.collaboration === true,
+            canEditCalendar: editorRole,
           }
         : null,
-    [sync, engineCalendar, rendered, resourceData, canEdit, role],
+    [sync, engineCalendar, rendered, resourceData, canEdit, editorRole, member, share],
   );
+  const canManage = editorRole && !share;
   useEffect(() => {
-    useActiveBoard.setState({ canEdit });
-  }, [canEdit]);
+    useActiveBoard.setState({ canEdit, canManage });
+  }, [canEdit, canManage]);
   useEffect(resetSelection, [projectId]);
   // Every change to the board adds history: refresh the history lists on screen (details panel).
   useEffect(() => {
@@ -153,14 +175,30 @@ function LiveBoard({ sync }: { sync: BoardSync }) {
   const userId = me.data?.id;
   const loaded = state.project !== null;
   useEffect(() => {
-    if (userId && loaded) writePref(lastProjectKey(userId), projectId);
-  }, [userId, loaded, projectId]);
-  // The server ended the session: re-check who is signed in (the layout then sends people to sign in).
+    if (userId && loaded && !share) writePref(lastProjectKey(userId), projectId);
+  }, [userId, loaded, projectId, share]);
+  // The server ended the session (or turned the link off): re-check who is signed in and, in link
+  // mode, what the link still allows — the screens above then show sign-in / "link turned off".
+  const shareToken = share?.token;
   useEffect(() => {
-    if (state.endReason === "signed_out") void client.invalidateQueries({ queryKey: keys.me });
-  }, [state.endReason, client]);
+    if (state.endReason !== "signed_out") return;
+    void client.invalidateQueries({ queryKey: keys.me });
+    if (shareToken) void client.invalidateQueries({ queryKey: keys.shareInfo(shareToken) });
+  }, [state.endReason, client, shareToken]);
 
-  if (state.loadError) return <LoadError error={state.loadError} />;
+  if (state.loadError) return <LoadError error={state.loadError} viaLink={share !== null} />;
+  if (state.endReason === "deleted") {
+    return (
+      <div className="p-8">
+        <p>This project was deleted.</p>
+        {share ? null : (
+          <Link to="/" className="mt-2 inline-block text-accent underline">
+            Go to your projects
+          </Link>
+        )}
+      </div>
+    );
+  }
   if (state.endReason === "flooding") {
     return (
       <div className="p-8">
@@ -213,20 +251,26 @@ function LiveBoard({ sync }: { sync: BoardSync }) {
   );
 }
 
-function LoadError({ error }: { error: unknown }) {
+function LoadError({ error, viaLink }: { error: unknown; viaLink: boolean }) {
   const status = error instanceof ApiError ? error.status : 0;
   const text =
-    status === 404
-      ? "This project doesn't exist — it may have been deleted."
-      : status === 403
-        ? "You don't have access to this project."
-        : `Couldn't open the project: ${errorMessage(error)}`;
+    status === 410
+      ? "This share link was turned off."
+      : status === 404
+        ? viaLink
+          ? "This link doesn't open anything any more — the project may have been deleted."
+          : "This project doesn't exist — it may have been deleted."
+        : status === 403
+          ? "You don't have access to this project."
+          : `Couldn't open the project: ${errorMessage(error)}`;
   return (
     <div className="p-8">
       <p>{text}</p>
-      <Link to="/" className="mt-2 inline-block text-accent underline">
-        Go to your projects
-      </Link>
+      {viaLink ? null : (
+        <Link to="/" className="mt-2 inline-block text-accent underline">
+          Go to your projects
+        </Link>
+      )}
     </div>
   );
 }

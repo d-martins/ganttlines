@@ -16,6 +16,10 @@ export interface BoardContextValue {
   canEdit: boolean;
   /** may add team members from the assignee picker */
   canCreateResources: boolean;
+  /** may write comments (members; everyone on a collaborative share link) */
+  canComment: boolean;
+  /** may add holidays and time off (signed-in editors and admins, not share-link visitors) */
+  canEditCalendar: boolean;
 }
 
 export const BoardContext = createContext<BoardContextValue | null>(null);

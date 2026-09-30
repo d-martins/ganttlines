@@ -11,8 +11,8 @@ import { createAppRouter } from "../src/router";
 export type Handler = (body: unknown, url: URL) => { status?: number; body?: unknown } | undefined;
 
 export interface FakeApi {
-  /** every request made, as "METHOD /path" with its parsed body */
-  calls: { key: string; body: unknown }[];
+  /** every request made, as "METHOD /path" with its parsed body and headers */
+  calls: { key: string; body: unknown; headers: Record<string, string> }[];
   on(key: string, handler: Handler): void;
 }
 
@@ -24,7 +24,7 @@ export function fakeApi(handlers: Record<string, Handler> = {}): FakeApi {
     const url = new URL(input, "http://localhost");
     const key = `${init.method ?? "GET"} ${url.pathname}`;
     const body = typeof init.body === "string" ? (JSON.parse(init.body) as unknown) : undefined;
-    calls.push({ key, body });
+    calls.push({ key, body, headers: (init.headers ?? {}) as Record<string, string> });
     const reply = routes.get(key)?.(body, url) ?? { status: 404, body: { error: "not_found", message: `No handler for ${key}` } };
     const status = reply.status ?? 200;
     return new Response(status === 204 ? null : JSON.stringify(reply.body ?? {}), { status, headers: { "content-type": "application/json" } });

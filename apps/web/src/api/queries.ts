@@ -5,6 +5,8 @@ import type {
   CalendarDto,
   CommentDto,
   CommentsDto,
+  CreatedShareLinkDto,
+  CreateShareLinkBody,
   CreateProjectBody,
   CreateResourceBody,
   CreateUserBody,
@@ -14,6 +16,8 @@ import type {
   ProjectDto,
   ProjectStateDto,
   ResourceDto,
+  ShareInfoDto,
+  ShareLinkDto,
   TimeOffBody,
   UpdateProjectBody,
   UpdateResourceBody,
@@ -37,6 +41,8 @@ export const keys = {
   baseline: (id: string, baselineId: string) => ["project", id, "baseline", baselineId] as const,
   comments: (id: string, taskId: string) => ["project", id, "comments", taskId] as const,
   activity: (id: string, rowId: string) => ["project", id, "activity", rowId] as const,
+  shareLinks: (id: string) => ["project", id, "share-links"] as const,
+  shareInfo: (token: string) => ["share", token] as const,
   /** every activity list of a project (refreshed whenever the project changes) */
   allActivity: (id: string) => ["project", id, "activity"] as const,
 };
@@ -228,3 +234,54 @@ export const useDeleteComment = (projectId: string) => {
     onSuccess: (_result, comment) => upsertComment(client, projectId, { ...comment, body: "", deleted: true }),
   });
 };
+
+/** What a share link opens and what the visitor still has to do (sign in / pick a name). */
+export const shareInfo = (token: string) =>
+  queryOptions({
+    queryKey: keys.shareInfo(token),
+    queryFn: () => api<ShareInfoDto>("GET", `/api/share/${encodeURIComponent(token)}`),
+    retry: false,
+  });
+
+export const useVisitorName = (token: string) =>
+  useApiMutation(
+    (name: string) => api<{ visitor: { name: string } }>("POST", `/api/share/${encodeURIComponent(token)}/visitor`, { name }),
+    (client) => client.invalidateQueries({ queryKey: keys.shareInfo(token) }),
+  );
+
+/** A project's share links (editors and admins), newest first, turned-off ones left out. */
+export const shareLinkList = (projectId: string) =>
+  queryOptions({
+    queryKey: keys.shareLinks(projectId),
+    queryFn: async () =>
+      (await api<{ links: ShareLinkDto[] }>("GET", `/api/projects/${projectId}/share-links`)).links
+        .filter((link) => !link.revoked)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+  });
+const refreshShareLinks = (projectId: string) => (client: QueryClient) => client.invalidateQueries({ queryKey: keys.shareLinks(projectId) });
+export const useCreateShareLink = (projectId: string) =>
+  useApiMutation((body: CreateShareLinkBody) => api<CreatedShareLinkDto>("POST", `/api/projects/${projectId}/share-links`, body), refreshShareLinks(projectId));
+export const useUpdateShareLink = (projectId: string) =>
+  useApiMutation(({ id, ...body }: { id: string; collaboration?: boolean; label?: string }) => api<{ link: ShareLinkDto }>("PATCH", `/api/share-links/${id}`, body), refreshShareLinks(projectId));
+export const useRevokeShareLink = (projectId: string) => useApiMutation((id: string) => api<void>("DELETE", `/api/share-links/${id}`), refreshShareLinks(projectId));
+
+/** Deletes an archived project for good; everything cached for it goes too. */
+export const useDeleteProject = () => {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api<void>("DELETE", `/api/projects/${id}`),
+    onSuccess: (_result, id) => {
+      client.removeQueries({ queryKey: keys.project(id) });
+      return client.invalidateQueries({ queryKey: ["projects"] });
+    },
+  });
+};
+
+/** Saves the board's current dates as a baseline (the server broadcasts the new list). */
+export const useCreateBaseline = (projectId: string) =>
+  useApiMutation(
+    (name: string) => api<{ baseline: BaselineDto }>("POST", `/api/projects/${projectId}/baselines`, { name }),
+    (client) => client.invalidateQueries({ queryKey: keys.baselines(projectId) }),
+  );
+export const useDeleteBaseline = (projectId: string) =>
+  useApiMutation((id: string) => api<void>("DELETE", `/api/baselines/${id}`), (client) => client.invalidateQueries({ queryKey: keys.baselines(projectId) }));

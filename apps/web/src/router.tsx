@@ -6,6 +6,7 @@ import { BoardPage } from "./board/board-page";
 import type { CompareMode } from "./board/model";
 import { HomeRedirect } from "./projects/project-pages";
 import { SettingsPage } from "./settings/settings-page";
+import { SharePage } from "./share/share-page";
 import { TeamPage } from "./team/team-page";
 
 const rootRoute = createRootRoute({ component: Outlet });
@@ -20,6 +21,13 @@ const loginRoute = createRoute({
 const changePasswordRoute = createRoute({ getParentRoute: () => rootRoute, path: "/change-password", component: ChangePasswordPage });
 const appRoute = createRoute({ getParentRoute: () => rootRoute, id: "app", component: AppLayout });
 const homeRoute = createRoute({ getParentRoute: () => appRoute, path: "/", component: HomeRedirect });
+/** `?baseline=<id>&compare=switch`: only well-formed values are kept. */
+function validateBoardSearch(search: Record<string, unknown>): BoardSearch {
+  const baseline = typeof search["baseline"] === "string" && /^[0-9a-f-]{36}$/i.test(search["baseline"]) ? search["baseline"] : undefined;
+  if (!baseline) return {};
+  return search["compare"] === "switch" ? { baseline, compare: "switch" } : { baseline };
+}
+
 /** Board URL state: the baseline being compared (`?baseline=<id>&compare=switch`, overlay by default). */
 export interface BoardSearch {
   baseline?: string;
@@ -29,12 +37,10 @@ const boardRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/p/$projectId",
   component: BoardPage,
-  validateSearch: (search: Record<string, unknown>): BoardSearch => {
-    const baseline = typeof search["baseline"] === "string" && /^[0-9a-f-]{36}$/i.test(search["baseline"]) ? search["baseline"] : undefined;
-    if (!baseline) return {};
-    return search["compare"] === "switch" ? { baseline, compare: "switch" } : { baseline };
-  },
+  validateSearch: validateBoardSearch,
 });
+/** A board opened through a share link: outside the signed-in layout (no sidebar; may be anonymous). */
+const shareRoute = createRoute({ getParentRoute: () => rootRoute, path: "/s/$token", component: SharePage, validateSearch: validateBoardSearch });
 const teamRoute = createRoute({ getParentRoute: () => appRoute, path: "/team", component: TeamPage });
 const settingsRoute = createRoute({ getParentRoute: () => appRoute, path: "/settings", component: SettingsPage });
 
@@ -42,6 +48,7 @@ const routeTree = rootRoute.addChildren([
   setupRoute,
   loginRoute,
   changePasswordRoute,
+  shareRoute,
   appRoute.addChildren([homeRoute, boardRoute, teamRoute, settingsRoute]),
 ]);
 

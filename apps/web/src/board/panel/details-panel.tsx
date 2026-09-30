@@ -167,7 +167,7 @@ export function DetailsPanel({ numbers }: { numbers: ReadonlyMap<RowId, number> 
       </Section>
       {row.kind === "task" ? (
         <Section title="Comments">
-          <Comments projectId={sync.projectId} taskId={row.id} canComment={me.data !== null && me.data !== undefined} isAdmin={me.data?.role === "admin"} />
+          <Comments projectId={sync.projectId} taskId={row.id} canComment={board.canComment} isAdmin={me.data?.role === "admin"} />
         </Section>
       ) : null}
       <Section title="History">
