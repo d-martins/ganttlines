@@ -334,6 +334,61 @@ describe("resizeTask, setDuration, convertMilestone", () => {
   });
 });
 
+describe("half days", () => {
+  const base = project(task("a", { userStart: "2026-10-06", duration: 2 }), task("b", { userStart: "2026-10-06", predecessorId: "a" }));
+
+  it("takes durations in half days; a task fills the days it touches and its successor starts the next working day", () => {
+    const state = run(base, cal, { type: "setDuration", id: "a", duration: 2.5 });
+    expect(taskIn(state, "a").duration).toBe(2.5);
+    expect(datesIn(state, "a")).toEqual({ start: "2026-10-06", end: "2026-10-08" }); // Tue–Thu
+    expect(datesIn(state, "b")?.start).toBe("2026-10-09");
+    const half = run(base, cal, { type: "setDuration", id: "a", duration: 0.5 });
+    expect(datesIn(half, "a")).toEqual({ start: "2026-10-06", end: "2026-10-06" });
+    expect(datesIn(half, "b")?.start).toBe("2026-10-07");
+  });
+
+  it("refuses other fractions and anything under half a day", () => {
+    for (const duration of [0.25, 1.3, -0.5]) {
+      expect(applyCommand(base, cal, { type: "setDuration", id: "a", duration })).toMatchObject({ ok: false, reason: "invalid" });
+    }
+  });
+});
+
+describe("setActualDuration", () => {
+  const base = project(
+    task("a", { userStart: "2026-10-06", duration: 3 }),
+    task("b", { userStart: "2026-10-06", predecessorId: "a" }),
+    task("p"),
+    task("c", { parentId: "p", userStart: "2026-10-05" }),
+  );
+
+  it("records the working days a task really took, without moving anything", () => {
+    const before = computeSchedule(base, cal);
+    const state = run(base, cal, { type: "setActualDuration", id: "a", days: 5 });
+    expect(taskIn(state, "a").actualDuration).toBe(5);
+    expect(computeSchedule(state, cal)).toEqual(before);
+    expect(taskIn(run(state, cal, { type: "setActualDuration", id: "a", days: 2.5 }), "a").actualDuration).toBe(2.5);
+    expect(taskIn(run(state, cal, { type: "setActualDuration", id: "a", days: null }), "a").actualDuration).toBeNull();
+  });
+
+  it("works on locked tasks, but not on milestones, parents or odd values", () => {
+    const locked = run(base, cal, { type: "setLocked", id: "a", locked: true }, { type: "setActualDuration", id: "a", days: 4 });
+    expect(taskIn(locked, "a").actualDuration).toBe(4);
+    const milestone = run(base, cal, { type: "convertMilestone", id: "a", milestone: true });
+    expect(applyCommand(milestone, cal, { type: "setActualDuration", id: "a", days: 1 })).toMatchObject({ ok: false, reason: "invalid" });
+    expect(applyCommand(base, cal, { type: "setActualDuration", id: "p", days: 1 })).toMatchObject({ ok: false, reason: "invalid" });
+    for (const days of [0, 0.3, MAX_DURATION + 1]) {
+      expect(applyCommand(base, cal, { type: "setActualDuration", id: "a", days })).toMatchObject({ ok: false, reason: "invalid" });
+    }
+  });
+
+  it("is cleared when a task becomes a milestone and not copied by duplicating", () => {
+    const state = run(base, cal, { type: "setActualDuration", id: "a", days: 5 });
+    expect(taskIn(run(state, cal, { type: "convertMilestone", id: "a", milestone: true }), "a").actualDuration).toBeNull();
+    expect(taskIn(run(state, cal, { type: "duplicateTask", id: "a", newId: "a2" }), "a2").actualDuration).toBeNull();
+  });
+});
+
 describe("setLocked", () => {
   it("pins the currently displayed start when locking", () => {
     const state = run(

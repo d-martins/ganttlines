@@ -45,6 +45,21 @@ describe("project commands", () => {
     expect(reloaded).toEqual(state);
   });
 
+  it("stores half-day durations and actual work days", async () => {
+    const { editor, projectId } = await editorWithProject();
+    const id = randomUUID();
+    await send(editor, projectId, createTask(id, "Build", "2026-10-05"));
+    expect((await send(editor, projectId, { type: "setDuration", id, duration: 2.5 })).statusCode).toBe(200);
+    expect((await send(editor, projectId, { type: "setActualDuration", id, days: 3.5 })).statusCode).toBe(200);
+    expect((await send(editor, projectId, { type: "setDuration", id, duration: 1.25 })).statusCode).toBe(400);
+
+    // A fresh server (empty cache) reads them back from the database.
+    const restarted = await buildApp({ db: t.db, config: testConfig });
+    const reloaded = (await restarted.inject({ url: `/api/projects/${projectId}/state`, headers: { cookie: editor } })).json();
+    await restarted.close();
+    expect(reloaded.rows).toEqual([expect.objectContaining({ id, duration: 2.5, actualDuration: 3.5 })]);
+  });
+
   it("returns the original result when a command is retried with the same commandId", async () => {
     const { editor, projectId } = await editorWithProject();
     const commandId = randomUUID();

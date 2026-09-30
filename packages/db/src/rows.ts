@@ -24,6 +24,7 @@ export function toEngineRow(row: DbRow): Row {
     predecessorId: row.predecessorId,
     offset: row.offset,
     description: row.description,
+    actualDuration: row.actualDuration,
   };
 }
 
@@ -48,6 +49,7 @@ export function toDbColumns(row: Row): Omit<DbRow, "projectId"> {
       predecessorId: null,
       offset: 0,
       description: "",
+      actualDuration: null,
     };
   }
   return {
@@ -60,5 +62,6 @@ export function toDbColumns(row: Row): Omit<DbRow, "projectId"> {
     predecessorId: row.predecessorId,
     offset: row.offset,
     description: row.description,
+    actualDuration: row.actualDuration,
   };
 }

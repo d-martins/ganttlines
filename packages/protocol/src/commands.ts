@@ -10,6 +10,12 @@ export const COMMAND_LIMITS = {
 const id = z.uuid();
 const date = z.iso.date().refine((value) => value >= MIN_DATE && value <= MAX_DATE, `Dates must be between ${MIN_DATE} and ${MAX_DATE}`);
 const title = z.string().max(COMMAND_LIMITS.titleMax);
+/** Working days in whole or half steps (0.5, 1, 2.5 …). */
+const halfDays = z
+  .number()
+  .min(0.5)
+  .max(MAX_DURATION)
+  .refine((days) => Number.isInteger(days * 2), "Use whole or half days");
 const cmd = <T extends string, S extends z.ZodRawShape>(type: T, shape: S) => z.strictObject({ type: z.literal(type), ...shape });
 
 /** Wire schema for every engine row command (spec §5.7), bounding what the engine does not. */
@@ -29,7 +35,8 @@ export const CommandSchema = z.discriminatedUnion("type", [
   cmd("setAssignee", { id, resourceId: id.nullable() }),
   cmd("moveTask", { id, start: date }),
   cmd("resizeTask", { id, edge: z.enum(["start", "end"]), date }),
-  cmd("setDuration", { id, duration: z.int().min(1).max(MAX_DURATION) }),
+  cmd("setDuration", { id, duration: halfDays }),
+  cmd("setActualDuration", { id, days: halfDays.nullable() }),
   cmd("convertMilestone", { id, milestone: z.boolean() }),
   cmd("setLocked", { id, locked: z.boolean() }),
   cmd("linkTasks", { fromId: id, toId: id }),

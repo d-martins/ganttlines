@@ -23,8 +23,13 @@ export interface TaskRow extends RowBase {
   kind: "task";
   /** Date the user last placed the task on; null = not scheduled yet. */
   userStart: IsoDate | null;
-  /** Working days; 0 = milestone. Ignored for parent tasks (dates roll up from children). */
+  /**
+   * Working days, in half-day steps (0.5, 1, 2.5 …); 0 = milestone. A task fills the days it touches
+   * (2.5 → three days). Ignored for parent tasks (dates roll up from children).
+   */
   duration: number;
+  /** Working days the task really took, when recorded — informational only, never moves the schedule. */
+  actualDuration: number | null;
   resourceId: ResourceId | null;
   color: TaskColor;
   locked: boolean;
@@ -49,4 +54,5 @@ export const TASK_DEFAULTS = {
   predecessorId: null,
   offset: 0,
   description: "",
+  actualDuration: null,
 } as const satisfies Partial<TaskRow>;
