@@ -11,3 +11,5 @@ coverage/
 .env
 .DS_Store
 .superpowers/
+test-results/
+playwright-report/

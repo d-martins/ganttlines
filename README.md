@@ -105,7 +105,11 @@ docker compose down -v   # stops it and deletes the database and backup volumes
 ## Development
 
 Yarn 4 + Turborepo monorepo (TypeScript). `yarn install`, then from the repo root:
-`yarn test`, `yarn type-check`. See `CLAUDE.md` and `docs/superpowers/`.
+
+- `yarn test` — unit and integration tests (the server's use a throwaway PostgreSQL in Docker)
+- `yarn type-check`
+- `yarn e2e` — end-to-end tests in a real browser against the production build (needs Docker; the
+  first time, install the browser with `yarn workspace @ganttlines/e2e playwright install chromium`)
 
 ## License
 
