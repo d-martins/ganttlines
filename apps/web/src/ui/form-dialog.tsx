@@ -16,6 +16,7 @@ export function FormDialog({
   onSubmit,
   pending = false,
   error,
+  danger = false,
   children,
 }: {
   open: boolean;
@@ -26,6 +27,8 @@ export function FormDialog({
   onSubmit: () => void;
   pending?: boolean;
   error?: string | null;
+  /** the submit button destroys something (red) */
+  danger?: boolean;
   children: ReactNode;
 }) {
   const submit = (event: FormEvent) => {
@@ -46,7 +49,7 @@ export function FormDialog({
               <Dialog.Close asChild>
                 <Button>Cancel</Button>
               </Dialog.Close>
-              <Button type="submit" variant="primary" disabled={pending}>
+              <Button type="submit" variant={danger ? "dangerSolid" : "primary"} disabled={pending}>
                 {submitLabel}
               </Button>
             </div>

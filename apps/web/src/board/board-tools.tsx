@@ -3,16 +3,23 @@ import * as Tooltip from "@radix-ui/react-tooltip";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { CalendarRange, GalleryVertical, Layers, Redo2, Undo2 } from "lucide-react";
+import { useState } from "react";
 import { useStore } from "zustand";
-import { baselineList, resourceList } from "../api/queries";
+import { errorMessage } from "../api/client";
+import { baselineList, resourceList, useCreateBaseline, useDeleteBaseline } from "../api/queries";
+import type { BoardSearch } from "../router";
 import type { BoardSync } from "../sync/board-sync";
 import { useActiveBoard } from "./active-board";
 import { Avatar } from "../ui/avatar";
 import { Button, IconButton } from "../ui/button";
-import { Menu, MenuLabel, MenuRadio, MenuSeparator } from "../ui/menu";
+import { Field } from "../ui/field";
+import { FormDialog } from "../ui/form-dialog";
+import { Menu, MenuItem, MenuLabel, MenuRadio, MenuSeparator } from "../ui/menu";
 import type { Zoom } from "./chart/timeline";
 import { colorFor } from "./format";
 import type { CompareMode } from "./model";
+import { formatDay, today } from "./format";
+import { ShareDialog } from "./share-dialog";
 import { useBoardView } from "./view-store";
 
 const ZOOMS: { value: Zoom; label: string }[] = [
@@ -72,6 +79,7 @@ export function BoardTools({ sync }: { sync: BoardSync }) {
         </Button>
       </div>
       <div className="flex shrink-0 items-center">
+        <ShareButton sync={sync} />
         <Connection sync={sync} />
         <Viewers sync={sync} />
       </div>
@@ -79,10 +87,27 @@ export function BoardTools({ sync }: { sync: BoardSync }) {
   );
 }
 
+function ShareButton({ sync }: { sync: BoardSync }) {
+  const canManage = useActiveBoard((state) => state.canManage);
+  const name = useStore(sync.store, (state) => state.project?.name);
+  if (!canManage || name === undefined) return null;
+  return (
+    <span className="mr-2">
+      <ShareDialog projectId={sync.projectId} projectName={name} />
+    </span>
+  );
+}
+
+/** Compare with a saved baseline (overlay or switch); editors also save and delete baselines here. */
 function BaselinePicker({ projectId }: { projectId: string }) {
   const navigate = useNavigate();
-  const search = useSearch({ from: "/app/p/$projectId" });
+  const search = useSearch({ strict: false }) as BoardSearch;
+  const canManage = useActiveBoard((state) => state.canManage);
   const baselines = useQuery(baselineList(projectId));
+  const save = useCreateBaseline(projectId);
+  const remove = useDeleteBaseline(projectId);
+  const [dialog, setDialog] = useState<"save" | "delete" | null>(null);
+  const [name, setName] = useState("");
   const list = baselines.data ?? [];
   const current = list.find((baseline) => baseline.id === search.baseline);
   const compare: CompareMode = search.compare ?? "overlay";
@@ -91,31 +116,84 @@ function BaselinePicker({ projectId }: { projectId: string }) {
     if (search.baseline) void navigate({ to: ".", search: { baseline: search.baseline, ...(mode === "switch" ? { compare: mode } : {}) } });
   };
   return (
-    <Menu
-      trigger={
-        <Button variant="ghost" className="px-2 py-1 text-xs" aria-label="Baseline">
-          <Layers size={14} />
-          {current ? `${current.name} · ${compare === "switch" ? "switched" : "overlay"}` : "Baseline"}
-        </Button>
-      }
-    >
-      <MenuLabel>Compare with a baseline</MenuLabel>
-      {list.length === 0 ? <MenuLabel>No baselines saved yet.</MenuLabel> : null}
-      <MenuRadio value={current?.id ?? "none"} options={[{ value: "none", label: "None" }, ...list.map((baseline) => ({ value: baseline.id, label: baseline.name }))]} onChange={choose} />
-      {current ? (
-        <>
-          <MenuSeparator />
-          <MenuRadio
-            value={compare}
-            options={[
-              { value: "overlay", label: "Overlay on the live plan" },
-              { value: "switch", label: "Switch to the baseline" },
-            ]}
-            onChange={setCompare}
-          />
-        </>
-      ) : null}
-    </Menu>
+    <>
+      <Menu
+        trigger={
+          <Button variant="ghost" className="px-2 py-1 text-xs" aria-label="Baseline">
+            <Layers size={14} />
+            {current ? `${current.name} · ${compare === "switch" ? "switched" : "overlay"}` : "Baseline"}
+          </Button>
+        }
+      >
+        <MenuLabel>Compare with a baseline</MenuLabel>
+        {list.length === 0 ? <MenuLabel>No baselines saved yet.</MenuLabel> : null}
+        <MenuRadio value={current?.id ?? "none"} options={[{ value: "none", label: "None" }, ...list.map((baseline) => ({ value: baseline.id, label: baseline.name }))]} onChange={choose} />
+        {current ? (
+          <>
+            <MenuSeparator />
+            <MenuRadio
+              value={compare}
+              options={[
+                { value: "overlay", label: "Overlay on the live plan" },
+                { value: "switch", label: "Switch to the baseline" },
+              ]}
+              onChange={setCompare}
+            />
+          </>
+        ) : null}
+        {canManage ? (
+          <>
+            <MenuSeparator />
+            <MenuItem
+              onSelect={() => {
+                save.reset();
+                setName(`Baseline ${formatDay(today())}`);
+                setDialog("save");
+              }}
+            >
+              Save the current plan as a baseline…
+            </MenuItem>
+            {current ? (
+              <MenuItem danger onSelect={() => setDialog("delete")}>
+                Delete “{current.name}”…
+              </MenuItem>
+            ) : null}
+          </>
+        ) : null}
+      </Menu>
+      <FormDialog
+        open={dialog === "save"}
+        onOpenChange={(open) => !open && setDialog(null)}
+        title="Save a baseline"
+        description="Keeps today's dates of every task, to compare the plan against later."
+        submitLabel="Save baseline"
+        pending={save.isPending}
+        error={save.error ? errorMessage(save.error) : null}
+        onSubmit={() => name.trim() && save.mutate(name.trim(), { onSuccess: () => setDialog(null) })}
+      >
+        <Field label="Name" value={name} required maxLength={100} autoFocus onChange={(event) => setName(event.target.value)} />
+      </FormDialog>
+      <FormDialog
+        open={dialog === "delete" && current !== undefined}
+        onOpenChange={(open) => !open && setDialog(null)}
+        title={`Delete the baseline “${current?.name ?? ""}”?`}
+        description="Its saved dates are gone for good; the live plan is not affected."
+        submitLabel="Delete baseline"
+        pending={remove.isPending}
+        error={remove.error ? errorMessage(remove.error) : null}
+        onSubmit={() =>
+          current &&
+          remove.mutate(current.id, {
+            onSuccess: () => {
+              setDialog(null);
+              void navigate({ to: ".", search: {} });
+            },
+          })
+        }
+      >
+        {null}
+      </FormDialog>
+    </>
   );
 }
 

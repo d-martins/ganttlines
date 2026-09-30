@@ -1,10 +1,11 @@
 import type { ProjectDto, UserDto } from "@ganttlines/protocol";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
-import { Archive, ArchiveRestore, ChevronDown, ChevronRight, MoreHorizontal, Pencil, Plus } from "lucide-react";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
+import { Archive, ArchiveRestore, ChevronDown, ChevronRight, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { errorMessage } from "../api/client";
-import { projectList, useCreateProject, useUpdateProject } from "../api/queries";
+import { projectList, useCreateProject, useDeleteProject, useUpdateProject } from "../api/queries";
+import { FormDialog } from "../ui/form-dialog";
 import { IconButton } from "../ui/button";
 import { ErrorText } from "../ui/field";
 import { Menu, MenuItem } from "../ui/menu";
@@ -64,7 +65,11 @@ export function SidebarProjects({ user }: { user: UserDto }) {
 
 function ProjectItem({ project, manage }: { project: ProjectDto; manage: boolean }) {
   const update = useUpdateProject();
+  const remove = useDeleteProject();
+  const navigate = useNavigate();
+  const viewing = useParams({ strict: false }) as { projectId?: string };
   const [renaming, setRenaming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   if (renaming) {
     return (
       <>
@@ -107,8 +112,44 @@ function ProjectItem({ project, manage }: { project: ProjectDto; manage: boolean
               {project.archived ? <ArchiveRestore size={14} /> : <Archive size={14} />} {project.archived ? "Unarchive" : "Archive"}
             </span>
           </MenuItem>
+          {project.archived ? (
+            // Only archived projects can be deleted: archiving first makes deleting a two-step decision.
+            <MenuItem
+              danger
+              onSelect={() => {
+                remove.reset();
+                setDeleting(true);
+              }}
+            >
+              <span className="flex items-center gap-2">
+                <Trash2 size={14} /> Delete…
+              </span>
+            </MenuItem>
+          ) : null}
         </Menu>
       ) : null}
+      <FormDialog
+        open={deleting}
+        onOpenChange={setDeleting}
+        danger
+        title={`Delete “${project.name}”?`}
+        description="Its tasks, history, comments, highlights, baselines and share links are deleted for good, and anyone who has it open is disconnected. This can't be undone."
+        submitLabel="Delete project"
+        pending={remove.isPending}
+        error={remove.error ? errorMessage(remove.error) : null}
+        onSubmit={() => {
+          // Awaited rather than an onSuccess option: this item unmounts as soon as the list refreshes.
+          remove
+            .mutateAsync(project.id)
+            .then(() => {
+              setDeleting(false);
+              if (viewing.projectId === project.id) void navigate({ to: "/" });
+            })
+            .catch(() => undefined); // shown by `remove.error`
+        }}
+      >
+        {null}
+      </FormDialog>
     </div>
   );
 }
