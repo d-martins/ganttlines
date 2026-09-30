@@ -196,12 +196,14 @@ export function RowBar({
     );
   }
   if (kind === "parent") {
+    // The bracket over the subtasks, in the parent's own color.
+    const background = taskColors(task!.color).fill;
     return (
       <>
         <div {...shapeAttrs} className={`absolute ${shapeClass}`} style={{ left, width, top: rowHeight / 2 - 3, height: 10 }}>
-          <div className="h-1.5 rounded-sm bg-[var(--parent)]" />
-          <div className="absolute top-0 left-0 h-2.5 w-1 bg-[var(--parent)] [clip-path:polygon(0_0,100%_0,0_100%)]" />
-          <div className="absolute top-0 right-0 h-2.5 w-1 bg-[var(--parent)] [clip-path:polygon(0_0,100%_0,100%_100%)]" />
+          <div className="h-1.5 rounded-sm" style={{ background }} />
+          <div className="absolute top-0 left-0 h-2.5 w-1 [clip-path:polygon(0_0,100%_0,0_100%)]" style={{ background }} />
+          <div className="absolute top-0 right-0 h-2.5 w-1 [clip-path:polygon(0_0,100%_0,100%_100%)]" style={{ background }} />
         </div>
         {outsideTitle}
       </>

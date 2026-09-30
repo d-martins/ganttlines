@@ -111,13 +111,14 @@ describe("half days and actual work days", () => {
     expect(sentCommands().at(-1)).toEqual({ type: "resizeTask", id: "hooks", edge: "end", date: "2026-10-12", half: "afternoon" });
   });
 
-  it("draws a collapsed parent as a bar in its own color (the bracket is grey)", async () => {
+  it("draws a parent in its own color: a bracket over its subtasks, a bar when collapsed", async () => {
     const { user } = await board(ROWS.map((row) => (row.id === "parent" && row.kind === "task" ? { ...row, color: "green" as const } : row)));
     const shape = () => screen.getByRole("button", { name: /^parent,/ });
+    const green = swatch(taskColors("green").fill);
     expect(shape().style.background).toBe("");
+    expect([...shape().children].map((part) => (part as HTMLElement).style.background)).toEqual([green, green, green]);
     await user.click(within(listRow("parent")).getByRole("button", { name: "Collapse" }));
-    expect(shape().style.background).not.toBe("");
-    expect(shape().style.background).toBe(swatch(taskColors("green").fill));
+    expect(shape().style.background).toBe(green);
   });
 
   it("records actual days in the details panel", async () => {

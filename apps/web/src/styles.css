@@ -24,7 +24,6 @@
   --today: #e5484d;
   --dependency: #8a93a3;
   --violation: #d32f2f;
-  --parent: #3a4150;
   --section: #8a93a3;
   --baseline: rgba(29, 35, 48, 0.28);
   /* actual work days track: longer / shorter than planned / on plan */
@@ -67,7 +66,6 @@
   --today: #ff6b6b;
   --dependency: #8b8f99;
   --violation: #ff7b7b;
-  --parent: #d5d7dc;
   --section: #8b8f99;
   --baseline: rgba(232, 232, 234, 0.3);
   --awd-over: #ff7b7b;
