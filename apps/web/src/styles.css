@@ -137,6 +137,10 @@ body {
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
+/* The editor's box shows the focus (description, comments); the text area inside it doesn't. */
+.rich-text:focus-visible {
+  outline: none;
+}
 .rich-text > * + * {
   margin-top: 0.4em;
 }

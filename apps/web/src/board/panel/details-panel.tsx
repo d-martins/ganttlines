@@ -158,7 +158,7 @@ export function DetailsPanel({ numbers }: { numbers: ReadonlyMap<RowId, number> 
           maxLength={COMMAND_LIMITS.titleMax}
           disabled={!board.canEdit}
           onCommit={(title) => run({ type: "updateTitle", id: row.id, title: title.trim() })}
-          className="border-transparent px-1 text-base font-semibold hover:border-border focus:border-border-strong"
+          className="-ml-px border-transparent pl-0 text-base font-semibold transition-[padding,border-color] duration-200 ease-out focus:border-border-strong focus:pl-2 motion-reduce:transition-none"
         />
         {row.kind === "task" ? <Description task={row} maxHeight={halfHeight} /> : null}
         {row.kind === "task" ? <TaskFields task={row} isParent={isParent} schedule={schedule} numbers={numbers} /> : null}
