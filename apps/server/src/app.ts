@@ -11,6 +11,7 @@ import { forbidden, HttpError } from "./errors";
 import { ProjectService } from "./projects/project-service";
 import { KeyedQueue } from "./queue";
 import { Hub } from "./realtime/hub";
+import { aboutRoutes } from "./routes/about";
 import { activityRoutes } from "./routes/activity";
 import { authRoutes } from "./routes/auth";
 import { baselineRoutes } from "./routes/baselines";
@@ -24,9 +25,12 @@ import { realtimeRoutes } from "./routes/realtime";
 import { setupRoutes } from "./routes/setup";
 import { sharingRoutes } from "./routes/sharing";
 import { userRoutes } from "./routes/users";
+import { UpdateChecker } from "./updates";
 import { webRoutes } from "./web";
 
 export interface AppOptions {
+  /** asks GitHub for new releases (tests pass a fake) */
+  updates?: UpdateChecker;
   db: Db;
   config: Config;
   /** Clock for session expiry (tests) */
@@ -36,7 +40,7 @@ export interface AppOptions {
 
 const SESSION_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 
-export async function buildApp({ db, config, now, logger = false }: AppOptions): Promise<FastifyInstance> {
+export async function buildApp({ db, config, now, logger = false, updates = new UpdateChecker() }: AppOptions): Promise<FastifyInstance> {
   const hops = config.trustProxy;
   // A hop count N means "trust the N closest proxies" (proxy-addr trust function: hop 0 = direct peer).
   const trustProxy = typeof hops === "number" ? (_address: string, hop: number) => hop < hops : hops;
@@ -125,6 +129,7 @@ export async function buildApp({ db, config, now, logger = false }: AppOptions):
   highlightRoutes(app, context);
   baselineRoutes(app, context);
   activityRoutes(app, context);
+  aboutRoutes(app, context, updates);
   if (config.webDir) await webRoutes(app, config.webDir);
   return app;
 }

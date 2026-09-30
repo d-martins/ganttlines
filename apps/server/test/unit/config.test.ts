@@ -13,12 +13,14 @@ describe("loadConfig", () => {
       port: 3000,
       bind: "127.0.0.1",
       trustProxy: false,
+      version: "dev",
     });
   });
 
   it("serves the web app from WEB_DIR only when it holds a build", () => {
     const base = { DATABASE_URL: "postgresql://db/gp", SESSION_SECRET: SECRET };
     expect(loadConfig({ ...base, WEB_DIR: "/nowhere" }).webDir).toBeNull();
+    expect(loadConfig({ ...base, APP_VERSION: "1.4.0" }).version).toBe("1.4.0");
   });
 
   it("reads optional overrides", () => {

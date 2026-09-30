@@ -15,6 +15,8 @@ export interface Config {
    * cannot spoof their address; a hop count (e.g. 1) or an address/CIDR list when behind a reverse proxy.
    */
   trustProxy: boolean | number | string;
+  /** The running version (the image's APP_VERSION; "dev" otherwise) */
+  version: string;
   /** The built web app to serve (apps/web/dist); null when it isn't built (development, tests) */
   webDir: string | null;
 }
@@ -34,6 +36,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     bind: env["BIND"] ?? "127.0.0.1",
     trustProxy: parseTrustProxy(env["TRUST_PROXY"]),
     webDir: webDir(env["WEB_DIR"]),
+    version: env["APP_VERSION"] || "dev",
   };
 }
 

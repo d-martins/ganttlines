@@ -6,7 +6,8 @@ baselines and share links. One app container plus PostgreSQL.
 
 ## Run it
 
-You need Docker with Compose v2.20 or newer.
+You need Docker with Compose v2.20 or newer. Only `docker-compose.yml` and `.env` are needed on
+the server; the app image comes from `ghcr.io/d-martins/ganttlines`.
 
 ```sh
 cp .env.example .env
@@ -20,7 +21,7 @@ Open <http://localhost:3000> and create the first (admin) account.
 | --- | --- |
 | Stop / start | `docker compose stop` · `docker compose start` |
 | Logs | `docker compose logs -f app` |
-| Version | `docker compose exec app ganttlines version` |
+| Version | `docker compose exec app ganttlines version` (also under Settings → About) |
 
 ### Settings (`.env`)
 
@@ -77,17 +78,28 @@ To restore a file from this machine, copy it in first: `docker compose cp ./my.d
 ## Upgrade
 
 ```sh
-docker compose pull      # or: docker compose build, when building from source
+docker compose pull
 docker compose up -d
 ```
+
+Admins see under Settings → About (and as a dot on Settings) when a newer version is out: about
+once a day the server asks GitHub for the latest release — nothing about your projects or people
+is sent. Admins can switch this off there.
 
 On start the app checks whether the new version changes the database. If it does, it **first
 backs up** the database into `/backups` (`…-before-<version>.dump`), then migrates, then serves.
 If the backup or the migration fails, the app does not start and the log says how to go back:
 restore the pre-upgrade backup and run the previous version again (set `GP_TAG` to it).
 
-Pin a version in `.env` with `GP_TAG` — a major version (`1`) follows its compatible updates; an
-exact version (`1.4.0`) never changes.
+Pin a version in `.env` with `GP_TAG` — a major version (`1`) follows its compatible updates, a
+minor (`1.4`) only fixes, and an exact version (`1.4.0`) never changes. Release notes are on
+<https://github.com/d-martins/ganttlines/releases>.
+
+### Build from source
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+```
 
 ## Access from your network and HTTPS
 
@@ -110,6 +122,12 @@ Yarn 4 + Turborepo monorepo (TypeScript). `yarn install`, then from the repo roo
 - `yarn type-check`
 - `yarn e2e` — end-to-end tests in a real browser against the production build (needs Docker; the
   first time, install the browser with `yarn workspace @ganttlines/e2e playwright install chromium`)
+
+### Releasing
+
+Push a version tag, e.g. `git tag v0.2.0 && git push origin v0.2.0`. GitHub Actions runs the tests,
+publishes the image (`0.2.0`, `0.2`, `latest`; from 1.0 also the major) for amd64 and arm64, and
+creates the GitHub release with notes from the commits.
 
 ## License
 

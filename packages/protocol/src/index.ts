@@ -55,3 +55,4 @@ export {
   type HighlightDto,
 } from "./board";
 export type { ProjectStateDto } from "./state";
+export { UpdateCheckBody, type AboutDto } from "./about";

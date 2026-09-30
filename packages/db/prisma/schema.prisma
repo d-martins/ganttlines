@@ -104,6 +104,8 @@ model Settings {
   id              Int   @id @default(1)
   workingWeekdays Int[] @default([1, 2, 3, 4, 5])
   instanceVersion Int   @default(0)
+  /// ask GitHub for new releases (admins can switch it off)
+  updateCheck     Boolean @default(true)
 }
 
 model Holiday {

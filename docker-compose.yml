@@ -3,8 +3,7 @@ name: ganttlines
 
 services:
   app:
-    image: ${GP_IMAGE:-ganttlines}:${GP_TAG:-latest}
-    build: .
+    image: ${GP_IMAGE:-ghcr.io/d-martins/ganttlines}:${GP_TAG:-latest}
     restart: unless-stopped
     environment:
       # The bundled database, unless DATABASE_URL points at your own

@@ -14,6 +14,7 @@ export const testConfig: Config = {
   bind: "127.0.0.1",
   trustProxy: false,
   webDir: null,
+  version: "1.2.0",
 };
 
 export interface TestContext {

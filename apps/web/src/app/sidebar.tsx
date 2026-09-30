@@ -1,5 +1,7 @@
 import type { UserDto } from "@ganttlines/protocol";
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
+import { about } from "../api/queries";
 import { ChevronsLeft, ChevronsRight, FolderKanban, Settings, Users } from "lucide-react";
 import { SidebarProjects } from "../projects/sidebar-projects";
 import { IconButton } from "../ui/button";
@@ -8,6 +10,9 @@ import { useSidebar } from "./sidebar-store";
 /** Left sidebar: projects, Team and Settings. Collapses to an icon rail via the bottom-right button. */
 export function Sidebar({ user }: { user: UserDto }) {
   const { collapsed, toggle } = useSidebar();
+  // Admins get a dot on Settings when a newer version is out.
+  const info = useQuery({ ...about, enabled: user.role === "admin" });
+  const update = info.data?.updates?.available ? info.data.updates.latest?.version : undefined;
   const toggleButton = (
     <IconButton label={collapsed ? "Expand sidebar" : "Collapse sidebar"} onClick={toggle}>
       {collapsed ? <ChevronsRight size={16} /> : <ChevronsLeft size={16} />}
@@ -21,7 +26,7 @@ export function Sidebar({ user }: { user: UserDto }) {
           <FolderKanban size={18} />
         </IconButton>
         {user.role !== "guest" ? <RailLink to="/team" label="Team & calendar" icon={<Users size={18} />} /> : null}
-        <RailLink to="/settings" label="Settings" icon={<Settings size={18} />} />
+        <RailLink to="/settings" label={update ? `Settings (GanttLines ${update} is available)` : "Settings"} icon={<Settings size={18} />} dot={Boolean(update)} />
         <div className="mt-auto">{toggleButton}</div>
       </nav>
     );
@@ -44,6 +49,12 @@ export function Sidebar({ user }: { user: UserDto }) {
           ) : null}
           <SideLink to="/settings" icon={<Settings size={16} />}>
             Settings
+            {update ? (
+              <span title={`GanttLines ${update} is available`} className="ml-auto flex items-center gap-1 text-xs font-normal text-accent">
+                <span aria-hidden className="h-2 w-2 rounded-full bg-accent" />
+                <span className="sr-only">GanttLines {update} is available</span>
+              </span>
+            ) : null}
           </SideLink>
         </section>
       </div>
@@ -61,10 +72,11 @@ function SideLink({ to, icon, children }: { to: "/team" | "/settings"; icon: Rea
   );
 }
 
-function RailLink({ to, label, icon }: { to: "/team" | "/settings"; label: string; icon: React.ReactNode }) {
+function RailLink({ to, label, icon, dot = false }: { to: "/team" | "/settings"; label: string; icon: React.ReactNode; dot?: boolean }) {
   return (
-    <Link to={to} aria-label={label} title={label} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted hover:bg-surface-2 hover:text-text">
+    <Link to={to} aria-label={label} title={label} className="relative inline-flex h-8 w-8 items-center justify-center rounded-md text-muted hover:bg-surface-2 hover:text-text">
       {icon}
+      {dot ? <span aria-hidden className="absolute top-1 right-1 h-2 w-2 rounded-full bg-accent" /> : null}
     </Link>
   );
 }

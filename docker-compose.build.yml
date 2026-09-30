@@ -1,0 +1,6 @@
+# Build the image from this source tree instead of pulling a release:
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+services:
+  app:
+    image: ganttlines:local
+    build: .

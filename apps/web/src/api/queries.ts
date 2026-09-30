@@ -1,4 +1,5 @@
 import type {
+  AboutDto,
   ActivityDto,
   BaselineDto,
   BaselineSnapshotDto,
@@ -29,6 +30,7 @@ import { api, ApiError } from "./client";
 
 export const keys = {
   setup: ["setup"] as const,
+  about: ["about"] as const,
   me: ["me"] as const,
   projects: (archived: boolean) => ["projects", { archived }] as const,
   users: ["users"] as const,
@@ -153,6 +155,11 @@ export const useUpdateUser = () =>
 export const useResetPassword = () =>
   useApiMutation((id: string) => api<{ temporaryPassword: string }>("POST", `/api/users/${id}/reset-password`), refreshUsers);
 export const useDeleteUser = () => useApiMutation((id: string) => api<void>("DELETE", `/api/users/${id}`), refreshUsers);
+
+/** The running version, and for admins whether a newer one is out (the server asks GitHub at most daily). */
+export const about = queryOptions({ queryKey: keys.about, queryFn: () => api<AboutDto>("GET", "/api/about"), staleTime: 60 * 60 * 1000 });
+export const useSetUpdateCheck = () =>
+  useApiMutation((enabled: boolean) => api<{ enabled: boolean }>("PUT", "/api/settings/update-check", { enabled }), (client) => client.invalidateQueries({ queryKey: keys.about }));
 
 export const useSetWorkingWeekdays = () =>
   useApiMutation((workingWeekdays: number[]) => api<CalendarDto>("PUT", "/api/calendar/working-weekdays", { workingWeekdays }), refreshCalendar);

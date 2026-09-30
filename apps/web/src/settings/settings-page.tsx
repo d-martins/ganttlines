@@ -3,12 +3,14 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { errorMessage } from "../api/client";
 import {
+  about,
   calendar,
   currentUser,
   useCreateUser,
   useDeleteUser,
   useResetPassword,
   userList,
+  useSetUpdateCheck,
   useSetWorkingWeekdays,
   useUpdateUser,
 } from "../api/queries";
@@ -36,6 +38,7 @@ export function SettingsPage() {
           <WorkingWeekdaysSection />
         </>
       ) : null}
+      <AboutSection />
     </div>
   );
 }
@@ -169,6 +172,38 @@ function UsersSection({ me }: { me: UserDto }) {
         </p>
       ) : null}
       <ErrorText>{failure ? errorMessage(failure) : null}</ErrorText>
+    </Section>
+  );
+}
+
+/** The running version; admins also see whether a newer release is out and can switch the check off. */
+function AboutSection() {
+  const info = useQuery(about);
+  const setCheck = useSetUpdateCheck();
+  if (!info.data) return null;
+  const { version, updates } = info.data;
+  return (
+    <Section title="About" description={`GanttLines ${version === "dev" ? "(development build)" : version}`}>
+      {updates ? (
+        <div className="flex flex-col gap-2 text-sm">
+          {updates.available && updates.latest ? (
+            <p role="status" className="rounded-md bg-accent-soft px-3 py-2">
+              GanttLines {updates.latest.version} is available.{" "}
+              <a href={updates.latest.url} target="_blank" rel="noopener noreferrer" className="font-medium text-accent underline">
+                What's new and how to update
+              </a>
+            </p>
+          ) : updates.enabled && updates.latest ? (
+            <p className="text-muted">You're on the latest version.</p>
+          ) : null}
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={updates.enabled} disabled={setCheck.isPending} onChange={(event) => setCheck.mutate(event.target.checked)} />
+            Check for new versions
+          </label>
+          <p className="text-xs text-muted">About once a day the server asks GitHub for the latest release. Nothing about your projects or people is sent.</p>
+          <ErrorText>{setCheck.error ? errorMessage(setCheck.error) : null}</ErrorText>
+        </div>
+      ) : null}
     </Section>
   );
 }

@@ -33,10 +33,36 @@ describe("settings", () => {
   });
 
   it("only shows account settings to non-admins", async () => {
-    signedIn(VIEWER);
+    const api = signedIn(VIEWER);
+    api.on("GET /api/about", () => ({ body: { version: "1.2.0" } }));
     renderApp("/settings");
     expect(await screen.findByRole("heading", { name: "Your account" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Users" })).not.toBeInTheDocument();
+    expect(await screen.findByText("GanttLines 1.2.0")).toBeInTheDocument(); // the version, without update details
+    expect(screen.queryByLabelText("Check for new versions")).not.toBeInTheDocument();
+  });
+
+  it("tells admins when a newer version is out, and lets them switch the check off", async () => {
+    const api = signedIn(ADMIN);
+    api.on("GET /api/users", () => ({ body: { users: [ADMIN] } }));
+    api.on("GET /api/calendar", () => ({ body: CALENDAR }));
+    const url = "https://github.com/d-martins/ganttlines/releases/tag/v1.3.0";
+    let enabled = true;
+    api.on("GET /api/about", () => ({
+      body: { version: "1.2.0", updates: enabled ? { enabled, available: true, latest: { version: "1.3.0", url } } : { enabled, available: false, latest: null } },
+    }));
+    api.on("PUT /api/settings/update-check", (body) => {
+      enabled = (body as { enabled: boolean }).enabled;
+      return { body: { enabled } };
+    });
+    const { user } = renderApp("/settings");
+    expect(await screen.findByText("GanttLines 1.3.0 is available.", { exact: false })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "What's new and how to update" })).toHaveAttribute("href", url);
+    expect(within(screen.getByRole("navigation", { name: "Main" })).getByText("GanttLines 1.3.0 is available")).toBeInTheDocument(); // the sidebar dot
+    await user.click(screen.getByLabelText("Check for new versions"));
+    expect(api.calls.find((c) => c.key === "PUT /api/settings/update-check")?.body).toEqual({ enabled: false });
+    expect(await screen.findByLabelText("Check for new versions")).not.toBeChecked();
+    expect(screen.queryByText("GanttLines 1.3.0 is available.", { exact: false })).not.toBeInTheDocument();
   });
 });
 
