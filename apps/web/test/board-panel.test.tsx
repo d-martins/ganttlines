@@ -220,6 +220,11 @@ describe("details panel", () => {
     await selectRow(user, "hooks");
     const list = await within(panel()).findByText("first");
     expect(list.tagName).toBe("STRONG");
+    // Each comment is its own card, led by the author's avatar and name.
+    const card = list.closest("li")!;
+    expect(card).toHaveClass("border");
+    expect(within(card).getByText("R", { selector: "[aria-hidden]" })).toBeInTheDocument();
+    expect(within(card).getByText("Rui")).toBeInTheDocument();
     expect(within(panel()).getByText("Comment deleted.")).toBeInTheDocument();
     expect(within(panel()).queryByRole("button", { name: "Edit" })).not.toBeInTheDocument(); // not mine
     expect(within(panel()).getAllByRole("button", { name: "Delete" })).toHaveLength(1); // admins may delete any
@@ -236,7 +241,18 @@ describe("details panel", () => {
   it("shows the task's history, with share-link actors marked", async () => {
     const { user } = await panelBoard();
     await selectRow(user, "hooks");
-    expect(await within(panel()).findByText(/assigned it to Ana Silva/)).toBeInTheDocument();
+    // Comments and history are tabs; comments come first and are shown by default.
+    const tabs = within(panel()).getAllByRole("tab");
+    expect(tabs.map((tab) => tab.textContent)).toEqual(["Comments", "History"]);
+    expect(tabs[0]).toHaveAttribute("aria-selected", "true");
+    expect(within(panel()).getByRole("tabpanel", { name: "Comments" })).toBeVisible();
+    expect(within(panel()).queryByText(/assigned it to Ana Silva/)).not.toBeVisible();
+    tabs[0]!.focus();
+    await user.keyboard("{ArrowRight}");
+    expect(tabs[1]).toHaveAttribute("aria-selected", "true");
+    expect(tabs[1]).toHaveFocus();
+    expect(within(panel()).getByRole("tabpanel", { name: "History" })).toBeVisible();
+    expect(await within(panel()).findByText(/assigned it to Ana Silva/)).toBeVisible();
     expect(within(panel()).getByText("via share link")).toBeInTheDocument();
   });
 

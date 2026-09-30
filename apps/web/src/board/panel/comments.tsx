@@ -7,7 +7,9 @@ import { Button } from "../../ui/button";
 import { ConfirmButton } from "../../ui/confirm";
 import { ErrorText } from "../../ui/field";
 import { toast } from "../../ui/toast";
-import { fullTime, timeAgo } from "../format";
+import { Avatar } from "../../ui/avatar";
+import { useBoard } from "../board-context";
+import { colorFor, fullTime, timeAgo } from "../format";
 import { RichTextEditor, RichTextView } from "../../ui/rich-text";
 
 
@@ -82,7 +84,7 @@ export function Comments({
         <p className="text-sm text-danger">{errorMessage(query.error)}</p>
       ) : (
         <>
-          <ol className="flex flex-col gap-3">
+          <ol className="flex flex-col gap-2">
             {query.data.pages
               .flatMap((page) => page.comments)
               .map((comment) => (
@@ -105,9 +107,13 @@ function CommentItem({ projectId, comment, canDelete, maxHeight }: { projectId: 
   const edit = useEditComment(projectId);
   const remove = useDeleteComment(projectId);
   const [editing, setEditing] = useState<string | null>(null);
+  const { resources } = useBoard();
+  // The author's team-member color when they have one (as in the viewers list); otherwise one from their id or name.
+  const { userId, label } = comment.author;
+  const avatarColor = resources.find((resource) => userId && resource.userId === userId)?.avatarColor ?? colorFor(userId ?? label);
 
   if (comment.deleted) {
-    return <li className="text-sm text-muted italic">Comment deleted.</li>;
+    return <li className="rounded-md border border-dashed border-border px-3 py-2 text-sm text-muted italic">Comment deleted.</li>;
   }
   const save = () => {
     const body = editing?.trim();
@@ -116,8 +122,9 @@ function CommentItem({ projectId, comment, canDelete, maxHeight }: { projectId: 
     edit.mutate({ id: comment.id, body }, { onSuccess: () => setEditing(null) });
   };
   return (
-    <li className="flex flex-col gap-1 text-sm">
-      <div className="flex items-baseline gap-2 text-xs text-muted">
+    <li className="flex flex-col gap-1.5 rounded-md border border-border bg-surface px-3 py-2 text-sm">
+      <div className="flex items-center gap-2 text-xs text-muted">
+        <Avatar name={comment.author.label} color={avatarColor} size={20} />
         <span className="font-semibold text-text">{comment.author.label}</span>
         <time dateTime={comment.createdAt} title={fullTime(comment.createdAt)}>
           {timeAgo(comment.createdAt)}

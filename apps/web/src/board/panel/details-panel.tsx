@@ -69,6 +69,60 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
+const CONVERSATION_TABS = [
+  { id: "comments", label: "Comments" },
+  { id: "history", label: "History" },
+] as const;
+type ConversationTab = (typeof CONVERSATION_TABS)[number]["id"];
+
+/** A task's comments and history as two tabs (comments first). ←/→ move between the tabs. */
+function ConversationTabs({ comments, history }: { comments: ReactNode; history: ReactNode }) {
+  const [tab, setTab] = useState<ConversationTab>("comments");
+  const tabs = useRef<Record<ConversationTab, HTMLButtonElement | null>>({ comments: null, history: null });
+  return (
+    <section className="flex flex-col border-t border-border">
+      <div
+        role="tablist"
+        aria-label="Comments and history"
+        className="flex gap-4 border-b border-border px-4"
+        onKeyDown={(event) => {
+          if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+          event.preventDefault();
+          const next = tab === "comments" ? "history" : "comments";
+          setTab(next);
+          tabs.current[next]?.focus();
+        }}
+      >
+        {CONVERSATION_TABS.map(({ id, label }) => (
+          <button
+            key={id}
+            ref={(element) => {
+              tabs.current[id] = element;
+            }}
+            type="button"
+            role="tab"
+            id={`conversation-tab-${id}`}
+            aria-controls={`conversation-panel-${id}`}
+            aria-selected={tab === id}
+            tabIndex={tab === id ? 0 : -1}
+            onClick={() => setTab(id)}
+            className={`-mb-px border-b-2 py-2 text-xs font-semibold tracking-wide uppercase transition-colors ${
+              tab === id ? "border-accent text-text" : "border-transparent text-muted hover:text-text"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {CONVERSATION_TABS.map(({ id }) => (
+        <div key={id} role="tabpanel" id={`conversation-panel-${id}`} aria-labelledby={`conversation-tab-${id}`} hidden={tab !== id} className="px-4 py-3">
+          {id === "comments" ? comments : history}
+        </div>
+      ))}
+    </section>
+  );
+}
+
 /**
  * The details panel: slides over the chart from the right and shows the selected row — its fields
  * (edited through the same checked commands as the list and chart), description, subtasks,
@@ -177,13 +231,15 @@ export function DetailsPanel({ numbers }: { numbers: ReadonlyMap<RowId, number> 
         ) : null}
       </Section>
       {row.kind === "task" ? (
-        <Section title="Comments">
-          <Comments projectId={sync.projectId} taskId={row.id} canComment={board.canComment} isAdmin={me.data?.role === "admin"} maxHeight={halfHeight} />
+        <ConversationTabs
+          comments={<Comments projectId={sync.projectId} taskId={row.id} canComment={board.canComment} isAdmin={me.data?.role === "admin"} maxHeight={halfHeight} />}
+          history={<Activity projectId={sync.projectId} rowId={row.id} names={{ state, resources: board.resourceMap }} />}
+        />
+      ) : (
+        <Section title="History">
+          <Activity projectId={sync.projectId} rowId={row.id} names={{ state, resources: board.resourceMap }} />
         </Section>
-      ) : null}
-      <Section title="History">
-        <Activity projectId={sync.projectId} rowId={row.id} names={{ state, resources: board.resourceMap }} />
-      </Section>
+      )}
     </aside>
   );
 }
