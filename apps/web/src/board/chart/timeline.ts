@@ -1,4 +1,4 @@
-import { weekday, type DayNum } from "@ganttlines/engine";
+import { dayOf, halfDay, isAfternoon, weekday, type DayNum, type HalfDay } from "@ganttlines/engine";
 
 export type Zoom = "day" | "week" | "month";
 export const DAY_WIDTH: Record<Zoom, number> = { day: 32, week: 12, month: 4 };
@@ -49,6 +49,24 @@ export class Timeline {
   dayAt(x: number): DayNum {
     const index = Math.min(Math.max(Math.floor(x / this.dayWidth), 0), this.days.length - 1);
     return this.days[index] ?? this.first;
+  }
+
+  /** Left edge of half day `half`: an afternoon starts mid-column. */
+  xHalf(half: HalfDay): number {
+    const day = dayOf(half);
+    return isAfternoon(half) ? (this.x(day) + this.xEnd(day)) / 2 : this.x(day);
+  }
+
+  /** Right edge of half day `half`: a morning ends mid-column. */
+  xHalfEnd(half: HalfDay): number {
+    const day = dayOf(half);
+    return isAfternoon(half) ? this.xEnd(day) : (this.x(day) + this.xEnd(day)) / 2;
+  }
+
+  /** The visible half day under `x`. */
+  halfAt(x: number): HalfDay {
+    const day = this.dayAt(x);
+    return halfDay(day, x - this.x(day) >= this.dayWidth / 2);
   }
 
   /** Visible days whose columns overlap [left, right). */

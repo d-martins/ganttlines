@@ -162,7 +162,15 @@ export class ProjectService {
         const span = schedule.get(row.id)?.span;
         if (row.kind !== "task" || !span) continue;
         const kind = isParentTask(tree, row) ? "parent" : row.duration === 0 ? "milestone" : "task";
-        tasks.push({ rowId: row.id, kind, title: row.title, start: fromDay(span.start), end: fromDay(span.end) });
+        tasks.push({
+          rowId: row.id,
+          kind,
+          title: row.title,
+          start: fromDay(span.start),
+          end: fromDay(span.end),
+          startsAfternoon: span.startsAfternoon,
+          endsMidday: span.endsMidday,
+        });
       }
       return tasks;
     });

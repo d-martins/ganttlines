@@ -2,7 +2,7 @@ import type { ResourceDto } from "@ganttlines/protocol";
 import type { HTMLAttributes } from "react";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { Lock } from "lucide-react";
-import type { Span } from "@ganttlines/engine";
+import { spanEnd, spanStart, type Span } from "@ganttlines/engine";
 import { Avatar } from "../../ui/avatar";
 import { formatDay, taskColors } from "../format";
 import type { BoardRow, DrawKind, Ghost } from "../model";
@@ -14,13 +14,14 @@ export const BAR_HEIGHT: Record<BarStyle, number> = { compact: 14, roomy: 28 };
 const DIAMOND: Record<BarStyle, number> = { compact: 12, roomy: 16 };
 
 /** Horizontal extent of a drawn row: bars span their days; a milestone is a diamond on its day. */
-export function extent(kind: DrawKind | Ghost["kind"], span: Span, timeline: Timeline, style: BarStyle, endTrim = 0): { left: number; right: number } {
+export function extent(kind: DrawKind | Ghost["kind"], span: Span, timeline: Timeline, style: BarStyle): { left: number; right: number } {
   if (kind === "milestone") {
     const center = timeline.x(span.start) + timeline.dayWidth / 2;
     return { left: center - DIAMOND[style] / 2, right: center + DIAMOND[style] / 2 };
   }
-  // `endTrim`: a length ending on half a day (2.5) stops halfway through its last column.
-  return { left: timeline.x(span.start), right: Math.max(timeline.xEnd(span.end) - endTrim * timeline.dayWidth, timeline.x(span.start) + 2) };
+  // Half days: an afternoon start begins mid-column, a midday end stops mid-column.
+  const left = timeline.xHalf(spanStart(span));
+  return { left, right: Math.max(timeline.xHalfEnd(spanEnd(span)), left + 2) };
 }
 
 /** "2.5" — working days in half-day steps. */
@@ -34,7 +35,7 @@ const TRACK_COLOR = { over: "var(--awd-over)", under: "var(--awd-under)", even: 
  */
 export function ActualTrack({ entry, timeline, style }: { entry: BoardRow; timeline: Timeline; style: BarStyle }) {
   if (!entry.actual) return null;
-  const { left, right } = extent("task", entry.actual.span, timeline, style, entry.actual.endTrim);
+  const { left, right } = extent("task", entry.actual.span, timeline, style);
   const top = ROW_HEIGHT[style] / 2 + BAR_HEIGHT[style] / 2 + 1;
   return (
     <div
@@ -105,9 +106,11 @@ export function titleWidth(text: string): number {
   return width;
 }
 
-/** "Oct 5 – Oct 9, Ana" */
+/** "Oct 5 – Oct 9, Ana"; half days: "Oct 5 (afternoon) – Oct 9 (morning)". */
 export function barDetails(span: Span, assignee: string | undefined): string {
-  const dates = span.start === span.end ? formatDay(span.start) : `${formatDay(span.start)} – ${formatDay(span.end)}`;
+  const start = `${formatDay(span.start)}${span.startsAfternoon ? " (afternoon)" : ""}`;
+  const end = `${formatDay(span.end)}${span.endsMidday ? " (morning)" : ""}`;
+  const dates = span.start !== span.end ? `${start} – ${end}` : span.startsAfternoon ? start : span.endsMidday ? end : formatDay(span.start);
   return assignee ? `${dates}, ${assignee}` : dates;
 }
 
@@ -154,10 +157,10 @@ export function RowBar({
 }) {
   const { row, kind } = entry;
   const rowHeight = ROW_HEIGHT[style];
-  const { left, right: planRight } = extent(kind, span, timeline, style, entry.endTrim);
+  const { left, right: planRight } = extent(kind, span, timeline, style);
   const width = planRight - left;
   const actual = kind === "task" && entry.actual && entry.actual.versusPlan !== "even" ? entry.actual : null;
-  const actualRight = actual ? extent("task", actual.span, timeline, style, actual.endTrim).right : planRight;
+  const actualRight = actual ? extent("task", actual.span, timeline, style).right : planRight;
   // Titles beside the bar go after the overrun, if any.
   const right = Math.max(planRight, actualRight);
   const task = row.kind === "task" ? row : null;

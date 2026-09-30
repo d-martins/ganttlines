@@ -60,6 +60,10 @@ export interface BaselineTaskDto {
   title: string;
   start: string;
   end: string;
+  /** starts in the afternoon of `start` (absent in baselines saved before half-day scheduling) */
+  startsAfternoon?: boolean;
+  /** ends at midday of `end` */
+  endsMidday?: boolean;
 }
 
 /** Response of GET /api/baselines/:id — the saved dates, for switching to or overlaying the baseline. */

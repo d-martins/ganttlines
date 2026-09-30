@@ -86,6 +86,24 @@ describe("half days and actual work days", () => {
     expect(within(listRow("ms")).queryByRole("button", { name: /^Actual work days/ })).not.toBeInTheDocument();
   });
 
+  it("starts in the afternoon or ends at midday from the details panel, and draws it", async () => {
+    const { user } = await board(ROWS.map((row) => (row.id === "hooks" && row.kind === "task" ? { ...row, startsAfternoon: true, duration: 1.5 } : row)));
+    // Fri 9 afternoon → Mon 12 end of day: 1.5 working days; the bar starts mid-column
+    const hooks = screen.getByRole("button", { name: /^hooks, .*\(afternoon\) – / });
+    expect(width(hooks)).toBe(4 * 32 - 16);
+    await user.dblClick(within(listRow("hooks")).getByRole("gridcell", { name: "Row 2" }));
+    const panel = screen.getByRole("complementary", { name: "Details of “hooks”" });
+    const starts = within(panel).getByRole("group", { name: "Starts: morning or afternoon" });
+    expect(within(starts).getByRole("button", { name: "Starts in the afternoon" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(within(starts).getByRole("button", { name: "Starts in the morning" }));
+    expect(sentCommands().at(-1)).toEqual({ type: "moveTask", id: "hooks", start: "2026-10-09", half: "morning" });
+    // Now Fri morning → Mon midday; stretch it to the end of Monday
+    const ends = within(panel).getByRole("group", { name: "Ends: morning or afternoon" });
+    expect(within(ends).getByRole("button", { name: "Ends at midday" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(within(ends).getByRole("button", { name: "Ends at the end of the day" }));
+    expect(sentCommands().at(-1)).toEqual({ type: "resizeTask", id: "hooks", edge: "end", date: "2026-10-12", half: "afternoon" });
+  });
+
   it("records actual days in the details panel", async () => {
     const { user } = await board();
     await user.dblClick(within(listRow("hooks")).getByRole("gridcell", { name: "Row 2" }));

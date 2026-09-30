@@ -1,4 +1,19 @@
-import { buildTree, childrenOf, computeSchedule, CycleError, toDay, type Calendar, type ProjectState, type RowId, type Span, type Tree } from "@ganttlines/engine";
+import {
+  buildTree,
+  childrenOf,
+  computeSchedule,
+  CycleError,
+  halfDay,
+  spanEnd,
+  spanOfHalves,
+  spanStart,
+  toDay,
+  type Calendar,
+  type ProjectState,
+  type RowId,
+  type Span,
+  type Tree,
+} from "@ganttlines/engine";
 import type { BaselineTaskDto } from "@ganttlines/protocol";
 import { outline, type ListRow } from "./rows";
 
@@ -18,16 +33,11 @@ export interface BoardRow extends ListRow {
   violation: boolean;
   /** the baseline's dates under the live bar (overlay mode) */
   ghost: Ghost | null;
-  /** part of the last day column the bar leaves empty: 0.5 for durations like 2.5 */
-  endTrim: number;
   /** working days it really took (a task's own; parents and sections add up their subtasks'); null when none recorded */
   actualDays: number | null;
   /** single tasks with actual days: the span those days cover from its start, and how they compare with the plan */
-  actual: { span: Span; endTrim: number; versusPlan: "over" | "under" | "even" } | null;
+  actual: { span: Span; versusPlan: "over" | "under" | "even" } | null;
 }
-
-/** Half a column is left empty when a length ends on half a day (2.5 → 0.5). */
-const trimOf = (days: number) => Math.ceil(days) - days;
 
 /** Actual days of a row: a task's own, or the sum over the tasks inside it (null when none recorded). */
 export function actualDaysOf(state: ProjectState, tree: Tree, id: RowId): number | null {
@@ -72,7 +82,11 @@ export function boardModel(
     if (!(error instanceof CycleError)) throw error;
   }
   const saved = new Map<RowId, Ghost>();
-  for (const task of baseline?.tasks ?? []) saved.set(task.rowId, { kind: task.kind, span: { start: toDay(task.start), end: toDay(task.end) } });
+  for (const task of baseline?.tasks ?? []) {
+    // Baselines saved before half-day scheduling have whole days.
+    const span = { start: toDay(task.start), end: toDay(task.end), startsAfternoon: task.startsAfternoon ?? false, endsMidday: task.endsMidday ?? false };
+    saved.set(task.rowId, { kind: task.kind, span });
+  }
   const switched = baseline?.mode === "switch";
   const sectionSpans = switched ? rollUpSections(state, saved) : null;
 
@@ -85,15 +99,16 @@ export function boardModel(
     if (switched) {
       const ghost = saved.get(row.id);
       const span = row.kind === "section" ? (sectionSpans!.get(row.id) ?? null) : (ghost?.span ?? null);
-      return { ...entry, span, kind: ghost?.kind ?? liveKind, violation: false, ghost: null, endTrim: 0, actualDays, actual: null };
+      return { ...entry, span, kind: ghost?.kind ?? liveKind, violation: false, ghost: null, actualDays, actual: null };
     }
     const span = computed?.span ?? null;
     const single = row.kind === "task" && liveKind === "task";
     let actual: BoardRow["actual"] = null;
     if (single && span && row.actualDuration !== null) {
-      const end = calendar.addWorkingDays(span.start, Math.ceil(row.actualDuration) - 1, row.resourceId);
+      // The half days it really took, from where it starts.
+      const end = calendar.addWorkingHalves(spanStart(span), row.actualDuration * 2 - 1, row.resourceId);
       const versusPlan = row.actualDuration > row.duration ? "over" : row.actualDuration < row.duration ? "under" : "even";
-      actual = { span: { start: span.start, end }, endTrim: trimOf(row.actualDuration), versusPlan };
+      actual = { span: spanOfHalves(spanStart(span), end), versusPlan };
     }
     return {
       ...entry,
@@ -101,7 +116,6 @@ export function boardModel(
       kind: liveKind,
       violation: computed?.violation ?? false,
       ghost: saved.get(row.id) ?? null,
-      endTrim: single ? trimOf(row.duration) : 0,
       actualDays,
       actual,
     };
@@ -120,7 +134,7 @@ function rollUpSections(state: ProjectState, saved: ReadonlyMap<RowId, Ghost>): 
       if (!parent) break;
       if (parent.kind === "section") {
         const current = spans.get(parentId);
-        spans.set(parentId, current ? { start: Math.min(current.start, span.start), end: Math.max(current.end, span.end) } : span);
+        spans.set(parentId, current ? spanOfHalves(Math.min(spanStart(current), spanStart(span)), Math.max(spanEnd(current), spanEnd(span))) : span);
       }
       parentId = parent.parentId;
     }

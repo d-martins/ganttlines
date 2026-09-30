@@ -60,6 +60,27 @@ describe("project commands", () => {
     expect(reloaded.rows).toEqual([expect.objectContaining({ id, duration: 2.5, actualDuration: 3.5 })]);
   });
 
+  it("stores afternoon starts and half-day offsets", async () => {
+    const { editor, projectId } = await editorWithProject();
+    const [a, b] = [randomUUID(), randomUUID()];
+    await send(editor, projectId, createTask(a, "Design", "2026-10-05"));
+    await send(editor, projectId, createTask(b, "Build", "2026-10-08"));
+    expect((await send(editor, projectId, { type: "moveTask", id: a, start: "2026-10-05", half: "afternoon" })).statusCode).toBe(200);
+    expect((await send(editor, projectId, { type: "linkTasks", fromId: a, toId: b })).statusCode).toBe(200);
+    expect((await send(editor, projectId, { type: "setOffset", id: b, offset: 0.5 })).statusCode).toBe(200);
+
+    const restarted = await buildApp({ db: t.db, config: testConfig });
+    const reloaded = (await restarted.inject({ url: `/api/projects/${projectId}/state`, headers: { cookie: editor } })).json();
+    await restarted.close();
+    expect(reloaded.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: a, userStart: "2026-10-05", startsAfternoon: true }),
+        // a ends Tue 6 midday; b starts that afternoon, plus half a day: Wed 7 morning
+        expect.objectContaining({ id: b, offset: 0.5, userStart: "2026-10-07", startsAfternoon: false }),
+      ]),
+    );
+  });
+
   it("returns the original result when a command is retried with the same commandId", async () => {
     const { editor, projectId } = await editorWithProject();
     const commandId = randomUUID();

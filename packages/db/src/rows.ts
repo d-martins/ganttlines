@@ -17,6 +17,7 @@ export function toEngineRow(row: DbRow): Row {
     ...base,
     kind: "task",
     userStart: row.userStart,
+    startsAfternoon: row.startsAfternoon,
     duration: row.duration,
     resourceId: row.resourceId,
     color: row.color as TaskColor,
@@ -42,6 +43,7 @@ export function toDbColumns(row: Row): Omit<DbRow, "projectId"> {
     return {
       ...base,
       userStart: null,
+      startsAfternoon: false,
       duration: 1,
       resourceId: null,
       color: "blue",
@@ -55,6 +57,7 @@ export function toDbColumns(row: Row): Omit<DbRow, "projectId"> {
   return {
     ...base,
     userStart: row.userStart,
+    startsAfternoon: row.startsAfternoon,
     duration: row.duration,
     resourceId: row.resourceId,
     color: row.color,

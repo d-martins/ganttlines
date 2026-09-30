@@ -82,6 +82,8 @@ model Row {
   collapsed     Boolean @default(false)
   // task-only fields (defaults for sections)
   userStart     String?
+  /// placed on the afternoon of userStart
+  startsAfternoon Boolean @default(false)
   /// working days in half-day steps (0.5, 1, 2.5 …); 0 = milestone
   duration      Float   @default(1)
   /// working days the task really took (informational), when recorded
@@ -90,7 +92,8 @@ model Row {
   color         String  @default("blue")
   locked        Boolean @default(false)
   predecessorId String? @db.Uuid
-  offset        Int     @default(0)
+  /// working days in half-day steps
+  offset        Float   @default(0)
   description   String  @default("")
 
   @@index([projectId])
@@ -213,7 +216,7 @@ model Baseline {
   createdByUserId String?  @db.Uuid
   createdBy       User?    @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
   createdByLabel  String
-  /// [{ rowId, title, start, end }] of every scheduled task at creation time
+  /// [{ rowId, kind, title, start, end, startsAfternoon, endsMidday }] of every scheduled task at creation time
   snapshot        Json
 
   @@index([projectId])

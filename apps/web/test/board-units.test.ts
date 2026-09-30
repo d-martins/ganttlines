@@ -123,7 +123,7 @@ describe("chart drags", () => {
   it("turns pointer travel into moves and resizes, snapping to visible days", async () => {
     const { dragCommand, stepDay } = await import("../src/board/chart/drag");
     const timeline = new Timeline(FRI, FRI + 20, 10, weekend);
-    const span = { start: FRI, end: FRI + 3 }; // Fri → Mon
+    const span = { start: FRI, end: FRI + 3, startsAfternoon: false, endsMidday: false }; // Fri → Mon
     expect(dragCommand("move", "t", span, timeline, 4, 0)).toBeNull(); // less than half a column
     expect(dragCommand("move", "t", span, timeline, 10, 0)).toMatchObject({ type: "moveTask", start: "2026-10-12" }); // Fri → Mon, weekend skipped
     expect(dragCommand("end", "t", span, timeline, 0, 25)).toMatchObject({ type: "resizeTask", edge: "end", date: "2026-10-13" });
@@ -132,6 +132,23 @@ describe("chart drags", () => {
     expect(dragCommand("start", "t", span, timeline, 0, 15)).toMatchObject({ type: "resizeTask", edge: "start", date: "2026-10-12" });
     expect(stepDay(timeline, FRI, 1)).toBe(FRI + 3);
     expect(stepDay(timeline, FRI + 3, -1)).toBe(FRI);
+  });
+
+  it("snaps to half columns at day zoom, and keeps a task's half at wider zooms", async () => {
+    const { dragCommand, stepHalf } = await import("../src/board/chart/drag");
+    const { halfDay } = await import("@ganttlines/engine");
+    const day = new Timeline(FRI, FRI + 20, 32, weekend); // day zoom: 16 px half columns
+    const span = { start: FRI, end: FRI + 3, startsAfternoon: false, endsMidday: false }; // Fri → Mon
+    expect(dragCommand("move", "t", span, day, 7, 0)).toBeNull(); // under half a half-column
+    expect(dragCommand("move", "t", span, day, 9, 0)).toMatchObject({ type: "moveTask", start: "2026-10-09", half: "afternoon" });
+    expect(dragCommand("end", "t", span, day, 0, 32 + 10)).toMatchObject({ type: "resizeTask", edge: "end", date: "2026-10-12", half: "morning" }); // Mon morning
+    expect(dragCommand("start", "t", span, day, 0, 20)).toMatchObject({ type: "resizeTask", edge: "start", date: "2026-10-09", half: "afternoon" });
+    expect(stepHalf(day, halfDay(FRI, true), 1)).toBe(halfDay(FRI + 3)); // Fri pm → Mon am
+    expect(stepHalf(day, halfDay(FRI + 3), -1)).toBe(halfDay(FRI, true));
+    const week = new Timeline(FRI, FRI + 20, 10, weekend);
+    const afternoon = { ...span, startsAfternoon: true };
+    expect(dragCommand("move", "t", afternoon, week, 10, 0)).toMatchObject({ start: "2026-10-12", half: "afternoon" });
+    expect(stepHalf(week, halfDay(FRI, true), 1)).toBe(halfDay(FRI + 3, true));
   });
 });
 

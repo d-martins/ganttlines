@@ -145,7 +145,7 @@ describe("baselines", () => {
     const baseline = created.json().baseline;
     expect(baseline).toMatchObject({ name: "Kick-off plan", createdBy: "Ana" });
     const snapshot = (await t.app.inject({ url: `/api/baselines/${baseline.id}`, headers: { cookie: vi } })).json();
-    expect(snapshot.tasks).toEqual([{ rowId: taskId, kind: "task", title: "Design", start: "2026-10-05", end: "2026-10-05" }]);
+    expect(snapshot.tasks).toEqual([{ rowId: taskId, kind: "task", title: "Design", start: "2026-10-05", end: "2026-10-05", startsAfternoon: false, endsMidday: false }]);
     expect((await t.app.inject({ method: "POST", url: `/api/projects/${projectId}/baselines`, headers: { cookie: vi }, payload: { name: "x" } })).statusCode).toBe(403);
     const viaLink = await anonymousLink(admin, projectId, true);
     expect((await t.app.inject({ url: `/api/projects/${projectId}/baselines`, headers: viaLink })).json().baselines).toHaveLength(1);

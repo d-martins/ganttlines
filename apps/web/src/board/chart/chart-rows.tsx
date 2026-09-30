@@ -1,4 +1,4 @@
-import { fromDay, type Command, type DayNum, type RowId } from "@ganttlines/engine";
+import { fromDay, spanEnd, spanStart, type Command, type DayNum, type RowId } from "@ganttlines/engine";
 import { UserRound } from "lucide-react";
 import { useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { AssigneePicker } from "../assignee-picker";
@@ -9,7 +9,7 @@ import { useSelection } from "../selection";
 import type { BarStyle } from "../view-store";
 import { BarMenu } from "./bar-menu";
 import { ActualTrack, BAR_HEIGHT, barDetails, extent, GhostBar, ROW_HEIGHT, RowBar } from "./bars";
-import { dragCommand, stepDay, useChartDrag, type ChartDrag, type DragKind } from "./drag";
+import { dragCommand, edgeAt, startAt, stepHalf, useChartDrag, type ChartDrag, type DragKind } from "./drag";
 import type { Timeline } from "./timeline";
 
 const BAR_HELP_ID = "gp-bar-help";
@@ -109,7 +109,7 @@ export function ChartRows({
       if (kind === "link") {
         const target = shown[Math.floor(y / rowHeight)];
         const targetId = target && target.row.kind === "task" && target.span && target.row.id !== rowId ? target.row.id : null;
-        const from = extent(entry.kind, span, now, style, entry.endTrim);
+        const from = extent(entry.kind, span, now, style);
         current = {
           rowId,
           kind,
@@ -150,7 +150,7 @@ export function ChartRows({
     window.addEventListener("keydown", key, true);
   };
 
-  /** ←/→ move a focused bar a column; Shift+←/→ change its end; Enter/Space open its options; Delete removes it. */
+  /** ←/→ move a focused bar a column (half a column at day zoom); Shift+←/→ change its end; Enter/Space open its options; Delete removes it. */
   const onBarKey = (event: KeyboardEvent, entry: BoardRow) => {
     const { row, span } = entry;
     if (!span || row.kind !== "task") return;
@@ -158,11 +158,11 @@ export function ChartRows({
     if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
       const step = event.key === "ArrowRight" ? 1 : -1;
       if (event.shiftKey) {
-        const end = stepDay(now, span.end, step);
-        if (entry.kind === "task" && end >= span.start && end !== span.end) run({ type: "resizeTask", id: row.id, edge: "end", date: fromDay(end) });
+        const end = stepHalf(now, spanEnd(span), step);
+        if (entry.kind === "task" && end >= spanStart(span) && end !== spanEnd(span)) run({ type: "resizeTask", id: row.id, edge: "end", ...edgeAt(end) });
       } else {
-        const start = stepDay(now, span.start, step);
-        if (start !== span.start) run({ type: "moveTask", id: row.id, start: fromDay(start) });
+        const start = stepHalf(now, spanStart(span), step);
+        if (start !== spanStart(span)) run({ type: "moveTask", id: row.id, ...startAt(start) });
       }
     } else if (event.key === "Enter" || event.key === " ") {
       setMenuFor(row.id);
@@ -194,7 +194,7 @@ export function ChartRows({
         const task = row.kind === "task" ? row : null;
         const unscheduledLeaf = task && !entry.isParent && !span;
         const editable = canEdit && task !== null && span !== null;
-        const box = span ? extent(kind, span, timeline, style, entry.endTrim) : null;
+        const box = span ? extent(kind, span, timeline, style) : null;
         const center = rowHeight / 2;
         const dragging = drag?.rowId === row.id;
         const resizable = editable && kind === "task" && !task!.locked;

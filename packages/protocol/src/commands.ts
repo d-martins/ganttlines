@@ -16,6 +16,8 @@ const halfDays = z
   .min(0.5)
   .max(MAX_DURATION)
   .refine((days) => Number.isInteger(days * 2), "Use whole or half days");
+/** Which half of a day: moves and resizes snap to half days at day zoom. */
+const half = z.enum(["morning", "afternoon"]).optional();
 const cmd = <T extends string, S extends z.ZodRawShape>(type: T, shape: S) => z.strictObject({ type: z.literal(type), ...shape });
 
 /** Wire schema for every engine row command (spec §5.7), bounding what the engine does not. */
@@ -33,15 +35,22 @@ export const CommandSchema = z.discriminatedUnion("type", [
   cmd("setColor", { id, color: z.enum(TASK_COLORS) }),
   cmd("toggleCollapsed", { id, collapsed: z.boolean() }),
   cmd("setAssignee", { id, resourceId: id.nullable() }),
-  cmd("moveTask", { id, start: date }),
-  cmd("resizeTask", { id, edge: z.enum(["start", "end"]), date }),
+  cmd("moveTask", { id, start: date, half }),
+  cmd("resizeTask", { id, edge: z.enum(["start", "end"]), date, half }),
   cmd("setDuration", { id, duration: halfDays }),
   cmd("setActualDuration", { id, days: halfDays.nullable() }),
   cmd("convertMilestone", { id, milestone: z.boolean() }),
   cmd("setLocked", { id, locked: z.boolean() }),
   cmd("linkTasks", { fromId: id, toId: id }),
   cmd("removePredecessor", { id }),
-  cmd("setOffset", { id, offset: z.int().min(-MAX_OFFSET).max(MAX_OFFSET) }),
+  cmd("setOffset", {
+    id,
+    offset: z
+      .number()
+      .min(-MAX_OFFSET)
+      .max(MAX_OFFSET)
+      .refine((days) => Number.isInteger(days * 2), "Use whole or half days"),
+  }),
   cmd("indent", { id }),
   cmd("outdent", { id }),
   cmd("moveRow", { id, parentId: id.nullable(), afterId: id.nullable() }),

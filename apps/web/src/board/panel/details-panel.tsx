@@ -51,6 +51,32 @@ function CommitInput({ value, onCommit, ...props }: Omit<InputHTMLAttributes<HTM
   );
 }
 
+/**
+ * Morning or afternoon for a start or end date (AM / PM). An end in the morning means the task
+ * ends at midday; in the afternoon, at the end of the day.
+ */
+function HalfToggle({ what, afternoon, disabled, onChange }: { what: "Starts" | "Ends"; afternoon: boolean; disabled: boolean; onChange: (afternoon: boolean) => void }) {
+  const hint = (pm: boolean) => (what === "Starts" ? (pm ? "Starts in the afternoon" : "Starts in the morning") : pm ? "Ends at the end of the day" : "Ends at midday");
+  return (
+    <div role="group" aria-label={`${what}: morning or afternoon`} className="flex shrink-0 overflow-hidden rounded-md border border-border-strong text-xs">
+      {[false, true].map((pm) => (
+        <button
+          key={String(pm)}
+          type="button"
+          aria-label={hint(pm)}
+          title={hint(pm)}
+          aria-pressed={afternoon === pm}
+          disabled={disabled}
+          onClick={() => pm !== afternoon && onChange(pm)}
+          className={`px-2 font-medium transition-colors disabled:opacity-50 ${afternoon === pm ? "bg-accent-soft text-text" : "text-muted enabled:hover:bg-surface-2"}`}
+        >
+          {pm ? "PM" : "AM"}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="grid grid-cols-[7rem_1fr] items-center gap-2 text-sm">
@@ -278,24 +304,43 @@ function TaskFields({ task, isParent, schedule, numbers }: { task: TaskRow; isPa
         )}
       </Field>
       <Field label={milestone ? "Date" : "Start"}>
-        <CommitInput
-          type="date"
-          aria-label={milestone ? "Date" : "Start"}
-          value={span ? fromDay(span.start) : ""}
-          disabled={!canEdit || datesLocked}
-          onCommit={(date) => date && run({ type: "moveTask", id: task.id, start: date })}
-        />
+        <div className="flex gap-1.5">
+          <CommitInput
+            type="date"
+            aria-label={milestone ? "Date" : "Start"}
+            value={span ? fromDay(span.start) : ""}
+            disabled={!canEdit || datesLocked}
+            // A new date keeps the half of the day it starts in.
+            onCommit={(date) => date && run({ type: "moveTask", id: task.id, start: date, half: span?.startsAfternoon ? "afternoon" : "morning" })}
+          />
+          {!milestone ? (
+            <HalfToggle
+              what="Starts"
+              afternoon={span?.startsAfternoon ?? false}
+              disabled={!canEdit || datesLocked || !span}
+              onChange={(afternoon) => span && run({ type: "moveTask", id: task.id, start: fromDay(span.start), half: afternoon ? "afternoon" : "morning" })}
+            />
+          ) : null}
+        </div>
       </Field>
       {!milestone ? (
         <Field label="End">
-          <CommitInput
-            type="date"
-            aria-label="End"
-            value={span ? fromDay(span.end) : ""}
-            disabled={!canEdit || !leaf || datesLocked || !span}
-            min={span ? fromDay(span.start) : undefined}
-            onCommit={(date) => date && run({ type: "resizeTask", id: task.id, edge: "end", date })}
-          />
+          <div className="flex gap-1.5">
+            <CommitInput
+              type="date"
+              aria-label="End"
+              value={span ? fromDay(span.end) : ""}
+              disabled={!canEdit || !leaf || datesLocked || !span}
+              min={span ? fromDay(span.start) : undefined}
+              onCommit={(date) => date && run({ type: "resizeTask", id: task.id, edge: "end", date, half: span?.endsMidday ? "morning" : "afternoon" })}
+            />
+            <HalfToggle
+              what="Ends"
+              afternoon={!(span?.endsMidday ?? false)}
+              disabled={!canEdit || !leaf || datesLocked || !span}
+              onChange={(afternoon) => span && run({ type: "resizeTask", id: task.id, edge: "end", date: fromDay(span.end), half: afternoon ? "afternoon" : "morning" })}
+            />
+          </div>
         </Field>
       ) : null}
       {leaf ? (

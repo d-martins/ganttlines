@@ -53,11 +53,11 @@ describe("chart editing", () => {
   });
   afterEach(() => vi.useRealTimers());
 
-  it("moves a bar by dragging it, snapping to days", async () => {
+  it("moves a bar by dragging it, snapping to half days at day zoom", async () => {
     await chartBoard();
     const hooks = bar(`hooks, ${d("2026-10-12")} – ${d("2026-10-13")}`);
     drag(hooks, 100, 100 + 2 * 32 + 5);
-    expect(sentCommands()).toEqual([{ type: "moveTask", id: "hooks", start: "2026-10-14" }]);
+    expect(sentCommands()).toEqual([{ type: "moveTask", id: "hooks", start: "2026-10-14", half: "morning" }]);
     expect(bar(`hooks, ${d("2026-10-14")} – ${d("2026-10-15")}`)).toBeInTheDocument(); // shown at once
   });
 
@@ -67,7 +67,7 @@ describe("chart editing", () => {
     const end = within(hooks.parentElement!).getByTitle("Drag to change the end");
     const day = (iso: string) => (toDay(iso) - toDay("2026-08-31")) * 32 + 16; // chart starts Mon Aug 31
     drag(end, day("2026-10-13"), day("2026-10-15"));
-    expect(sentCommands()).toEqual([{ type: "resizeTask", id: "hooks", edge: "end", date: "2026-10-15" }]);
+    expect(sentCommands()).toEqual([{ type: "resizeTask", id: "hooks", edge: "end", date: "2026-10-15", half: "afternoon" }]);
     fireEvent.pointerDown(bar(/^ui,/), { button: 0, clientX: 10, clientY: 0 });
     fireEvent.pointerUp(window, { clientX: 11, clientY: 0 });
     expect(sentCommands()).toHaveLength(1);
@@ -96,10 +96,12 @@ describe("chart editing", () => {
   it("works from the keyboard: arrows move or resize, Enter opens the options", async () => {
     const { user } = await chartBoard();
     bar(/^hooks,/).focus();
+    // Half a day per step at day zoom: Mon morning → Mon afternoon; the end, Wed midday → Wed evening.
     await user.keyboard("{ArrowRight}");
-    expect(sentCommands().at(-1)).toEqual({ type: "moveTask", id: "hooks", start: "2026-10-13" });
+    expect(sentCommands().at(-1)).toEqual({ type: "moveTask", id: "hooks", start: "2026-10-12", half: "afternoon" });
+    expect(bar(`hooks, ${d("2026-10-12")} (afternoon) – ${d("2026-10-14")} (morning)`)).toBeInTheDocument();
     await user.keyboard("{Shift>}{ArrowRight}{/Shift}");
-    expect(sentCommands().at(-1)).toEqual({ type: "resizeTask", id: "hooks", edge: "end", date: "2026-10-15" });
+    expect(sentCommands().at(-1)).toEqual({ type: "resizeTask", id: "hooks", edge: "end", date: "2026-10-14", half: "afternoon" });
     expect(bar(/^hooks,/)).toHaveFocus();
     await user.keyboard("{Enter}");
     await user.click(await screen.findByRole("menuitem", { name: "Make it a milestone" }));
