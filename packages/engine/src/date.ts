@@ -24,3 +24,13 @@ export function fromDay(day: DayNum): IsoDate {
 export function weekday(day: DayNum): number {
   return (((day + 4) % 7) + 7) % 7;
 }
+
+/**
+ * Time in half days: `day * 2` is a day's morning, `day * 2 + 1` its afternoon. The schedule works in
+ * half days; stored dates stay whole days (plus a task's "starts in the afternoon" flag).
+ */
+export type HalfDay = number;
+
+export const halfDay = (day: DayNum, afternoon = false): HalfDay => day * 2 + (afternoon ? 1 : 0);
+export const dayOf = (half: HalfDay): DayNum => Math.floor(half / 2);
+export const isAfternoon = (half: HalfDay): boolean => half - dayOf(half) * 2 === 1;

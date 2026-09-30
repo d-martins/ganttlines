@@ -35,3 +35,10 @@ export function datesOf(schedule: Schedule, id: string): { start: string; end: s
   const span = schedule.get(id)?.span;
   return span ? { start: fromDay(span.start), end: fromDay(span.end) } : null;
 }
+
+/** A row's dates with their halves: "2026-10-06 pm" starts in the afternoon, "2026-10-08 am" ends at midday. */
+export function halvesOf(schedule: Schedule, id: string): { start: string; end: string } | null {
+  const span = schedule.get(id)?.span;
+  if (!span) return null;
+  return { start: `${fromDay(span.start)} ${span.startsAfternoon ? "pm" : "am"}`, end: `${fromDay(span.end)} ${span.endsMidday ? "am" : "pm"}` };
+}

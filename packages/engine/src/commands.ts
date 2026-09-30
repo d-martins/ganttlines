@@ -1,10 +1,12 @@
 import { generateKeyBetween } from "fractional-indexing";
 import type { Calendar, ResourceId } from "./calendar";
 import { diffRows, type RowChange } from "./changes";
-import { fromDay, toDay, type DayNum, type IsoDate } from "./date";
+import { dayOf, fromDay, halfDay, isAfternoon, toDay, type DayNum, type HalfDay, type IsoDate } from "./date";
 import { TASK_COLORS, TASK_DEFAULTS, type ProjectState, type Row, type RowId, type TaskColor, type TaskRow } from "./model";
-import { computeSchedule, constraintsFor, CycleError, hasCycle, requiredStart, type Schedule, type Span } from "./schedule";
+import { computeSchedule, constraintsFor, CycleError, hasCycle, floorStart, naturalStart, requiredStart, spanEnd, spanStart, type Schedule, type Span } from "./schedule";
 import { buildTree, childrenOf, descendantLeafTasks, isAncestor, isParentTask, subtreeIds, type Tree } from "./tree";
+
+export type DayHalf = "morning" | "afternoon";
 
 export type Command =
   | { type: "createRow"; id: RowId; kind: "task" | "section"; parentId: RowId | null; afterId: RowId | null; title: string; start?: IsoDate }
@@ -13,8 +15,10 @@ export type Command =
   | { type: "setColor"; id: RowId; color: TaskColor }
   | { type: "toggleCollapsed"; id: RowId; collapsed: boolean }
   | { type: "setAssignee"; id: RowId; resourceId: ResourceId | null }
-  | { type: "moveTask"; id: RowId; start: IsoDate }
-  | { type: "resizeTask"; id: RowId; edge: "start" | "end"; date: IsoDate }
+  /** `half`: the half of `start` the task starts in (default the morning). */
+  | { type: "moveTask"; id: RowId; start: IsoDate; half?: DayHalf }
+  /** `half`: the half of `date` the edge is in (default: the morning for the start, the afternoon for the end). */
+  | { type: "resizeTask"; id: RowId; edge: "start" | "end"; date: IsoDate; half?: DayHalf }
   | { type: "setDuration"; id: RowId; duration: number }
   | { type: "setActualDuration"; id: RowId; days: number | null }
   | { type: "convertMilestone"; id: RowId; milestone: boolean }
@@ -98,9 +102,9 @@ class Execution {
       case "setAssignee":
         return this.patch(this.task(command.id), { resourceId: command.resourceId });
       case "moveTask":
-        return this.moveTask(command.id, this.day(command.start));
+        return this.moveTask(command.id, halfDay(this.day(command.start), command.half === "afternoon"));
       case "resizeTask":
-        return this.resizeTask(command.id, command.edge, this.day(command.date));
+        return this.resizeTask(command.id, command.edge, halfDay(this.day(command.date), (command.half ?? (command.edge === "end" ? "afternoon" : "morning")) === "afternoon"));
       case "setDuration":
         return this.setDuration(command.id, command.duration);
       case "setActualDuration":
@@ -195,7 +199,7 @@ class Execution {
 
   // ── dates ───────────────────────────────────────────────────────────────
 
-  private moveTask(id: RowId, target: DayNum): ProjectState {
+  private moveTask(id: RowId, target: HalfDay): ProjectState {
     const task = this.task(id);
     if (!isParentTask(this.tree, task)) return this.patch(this.editableLeaf(id), this.placeLeaf(task, target));
 
@@ -205,20 +209,20 @@ class Execution {
     const leaves = descendantLeafTasks(this.tree, id).filter((leaf) => moving.has(leaf.id));
     if (leaves.length === 0) throw new Rejection("locked", "All subtasks are locked");
     // Measured from the moving subtasks, so locked subtasks never shift the others.
-    const from = Math.min(...leaves.map((leaf) => this.spanOf(leaf.id)!.start));
-    let day = this.calendar.addWorkingDays(from, this.calendar.workingDaysBetween(span.start, this.calendar.snap(target, null), null), null);
+    const from = Math.min(...leaves.map((leaf) => spanStart(this.spanOf(leaf.id)!)));
+    let half = this.calendar.addWorkingHalves(from, this.calendar.workingHalvesBetween(spanStart(span), this.calendar.snapHalf(target, null), null), null);
     // The parent's own predecessor follows the leaf rule, measured on the unassigned calendar.
     const predecessor = task.predecessorId === null ? null : this.spanOf(task.predecessorId);
     if (predecessor) {
-      const anchored = this.anchor(predecessor, day, null);
-      day = anchored.day;
+      const anchored = this.anchor(predecessor, half, null);
+      half = anchored.half;
       this.patch(task, { offset: anchored.offset });
     }
-    const delta = this.calendar.workingDaysBetween(from, day, null);
-    const shifted = new Map<RowId, DayNum>();
+    const delta = this.calendar.workingHalvesBetween(from, half, null);
+    const shifted = new Map<RowId, HalfDay>();
     for (const leaf of leaves) {
-      shifted.set(leaf.id, this.calendar.addWorkingDays(this.spanOf(leaf.id)!.start, delta, leaf.resourceId));
-      this.patch(leaf, { userStart: fromDay(shifted.get(leaf.id)!) });
+      shifted.set(leaf.id, this.calendar.addWorkingHalves(spanStart(this.spanOf(leaf.id)!), delta, leaf.resourceId));
+      this.patch(leaf, startAt(shifted.get(leaf.id)!));
     }
     // Re-anchor leaves tied to tasks outside the group against where those tasks now are
     // (outside tasks may themselves follow the group).
@@ -236,24 +240,24 @@ class Execution {
     const schedule = computeSchedule(this.result(), this.calendar);
     for (const leaf of leaves) {
       const leafSpan = schedule.get(leaf.id)?.span;
-      if (leafSpan) this.patch(this.rows[leaf.id] as TaskRow, { userStart: fromDay(leafSpan.start) });
+      if (leafSpan) this.patch(this.rows[leaf.id] as TaskRow, startAt(spanStart(leafSpan)));
     }
     return this.result();
   }
 
-  private resizeTask(id: RowId, edge: "start" | "end", date: DayNum): ProjectState {
+  private resizeTask(id: RowId, edge: "start" | "end", at: HalfDay): ProjectState {
     const task = this.editableLeaf(id);
     if (task.duration === 0) throw new Rejection("invalid", "Milestones cannot be resized");
     const span = this.spanOf(id);
     if (!span) throw new Rejection("unscheduled", "This task has no dates");
     const resource = task.resourceId;
     if (edge === "end") {
-      const end = this.calendar.snapBack(date, resource);
-      return this.patch(task, { duration: this.validDuration(this.durationBetween(span.start, end, resource)) });
+      const end = this.calendar.snapHalfBack(at, resource);
+      return this.patch(task, { duration: this.validDuration(this.durationBetween(spanStart(span), end, resource)) });
     }
-    const placement = this.placeLeaf(task, Math.min(date, span.end));
-    const start = toDay(placement.userStart);
-    return this.patch(task, { ...placement, duration: this.validDuration(this.durationBetween(start, span.end, resource)) });
+    const placement = this.placeLeaf(task, Math.min(at, spanEnd(span)));
+    const start = halfDay(toDay(placement.userStart), placement.startsAfternoon);
+    return this.patch(task, { ...placement, duration: this.validDuration(this.durationBetween(start, spanEnd(span), resource)) });
   }
 
   private setDuration(id: RowId, duration: number): ProjectState {
@@ -270,7 +274,8 @@ class Execution {
 
   private convertMilestone(id: RowId, milestone: boolean): ProjectState {
     const task = this.editableLeaf(id);
-    if (milestone) return this.patch(task, { duration: 0, actualDuration: null });
+    // A milestone is a point on its day: it's placed on the morning.
+    if (milestone) return this.patch(task, { duration: 0, actualDuration: null, startsAfternoon: false });
     return this.patch(task, { duration: task.duration === 0 ? 1 : task.duration });
   }
 
@@ -279,7 +284,7 @@ class Execution {
     if (!locked) return this.patch(this.task(id), { locked });
     const task = this.leaf(id);
     const span = this.spanOf(id);
-    return this.patch(task, locked && span ? { locked, userStart: fromDay(span.start) } : { locked });
+    return this.patch(task, locked && span ? { locked, ...startAt(spanStart(span)) } : { locked });
   }
 
   // ── dependencies ────────────────────────────────────────────────────────
@@ -291,7 +296,7 @@ class Execution {
     const fromSpan = this.spanOf(fromId);
     const toSpan = this.spanOf(toId);
     if (!fromSpan || !toSpan) throw new Rejection("unscheduled", "Both tasks need dates before they can be linked");
-    const [predecessor, successor] = toSpan.start < fromSpan.start ? [to, from] : [from, to];
+    const [predecessor, successor] = spanStart(toSpan) < spanStart(fromSpan) ? [to, from] : [from, to];
     return this.patch(successor, { predecessorId: predecessor.id, offset: 0 });
   }
 
@@ -303,8 +308,8 @@ class Execution {
   }
 
   private setOffset(id: RowId, offset: number): ProjectState {
-    if (!Number.isInteger(offset) || Math.abs(offset) > MAX_OFFSET) {
-      throw new Rejection("invalid", `Offset must be a whole number of days between -${MAX_OFFSET} and ${MAX_OFFSET}`);
+    if (!Number.isInteger(offset * 2) || Math.abs(offset) > MAX_OFFSET) {
+      throw new Rejection("invalid", `Offset must be in whole or half days, between -${MAX_OFFSET} and ${MAX_OFFSET}`);
     }
     const task = this.task(id);
     if (task.predecessorId === null) throw new Rejection("invalid", "This task has no predecessor");
@@ -315,13 +320,10 @@ class Execution {
     if (isParent || !predecessor) return this.patch(task, { offset });
 
     const resource = task.resourceId;
-    const natural = this.calendar.nextAfter(predecessor.end, resource);
-    const floor = this.calendar.nextAfter(predecessor.start, resource);
-    const clamped = Math.max(offset, this.calendar.workingDaysBetween(natural, floor, resource));
-    return this.patch(task, {
-      offset: clamped,
-      userStart: fromDay(this.calendar.addWorkingDays(natural, clamped, resource)),
-    });
+    const natural = naturalStart(this.calendar, predecessor, resource);
+    const floor = floorStart(this.calendar, predecessor, resource);
+    const clamped = Math.max(offset * 2, this.calendar.workingHalvesBetween(natural, floor, resource));
+    return this.patch(task, { offset: clamped / 2, ...startAt(this.calendar.addWorkingHalves(natural, clamped, resource)) });
   }
 
   // ── helpers ─────────────────────────────────────────────────────────────
@@ -337,11 +339,11 @@ class Execution {
       if (current?.kind !== "task" || !isParentTask(this.tree, before) || isParentTask(after, current)) continue;
       const span = this.spanOf(before.id);
       if (!span) continue;
-      let duration = 0;
-      for (let day = span.start; day <= span.end && duration < MAX_DURATION; day++) {
-        if (this.calendar.isWorkingDay(day, current.resourceId)) duration++;
+      let halves = 0;
+      for (let half = spanStart(span); half <= spanEnd(span) && halves < MAX_DURATION * 2; half++) {
+        if (this.calendar.isWorkingDay(dayOf(half), current.resourceId)) halves++;
       }
-      this.patch(current, { userStart: fromDay(span.start), duration: Math.max(1, duration) });
+      this.patch(current, { ...startAt(spanStart(span)), duration: Math.max(0.5, halves / 2) });
     }
   }
 
@@ -354,14 +356,14 @@ class Execution {
    */
   private placeLeaf(
     task: TaskRow,
-    target: DayNum,
+    target: HalfDay,
     moving: ReadonlySet<RowId> = new Set(),
     spanOf: (id: RowId) => Span | null = (id) => this.spanOf(id),
-  ): { userStart: IsoDate; offset?: number } {
+  ): { userStart: IsoDate; startsAfternoon: boolean; offset?: number } {
     const resource = task.resourceId;
     const inherited = constraintsFor(this.result(), { ...task, predecessorId: null });
-    const day = Math.max(
-      this.calendar.snap(target, resource),
+    const half = Math.max(
+      this.calendar.snapHalf(target, resource),
       requiredStart(
         this.calendar,
         resource,
@@ -370,16 +372,16 @@ class Execution {
     );
     const predecessorId = task.predecessorId;
     const predecessor = predecessorId === null || moving.has(predecessorId) ? null : spanOf(predecessorId);
-    if (!predecessor) return { userStart: fromDay(day) };
-    const anchored = this.anchor(predecessor, day, resource);
-    return { userStart: fromDay(anchored.day), offset: anchored.offset };
+    if (!predecessor) return startAt(half);
+    const anchored = this.anchor(predecessor, half, resource);
+    return { ...startAt(anchored.half), offset: anchored.offset };
   }
 
-  /** Clamps `day` to after the predecessor's start and expresses it as an offset from the natural start. */
-  private anchor(predecessor: Span, day: DayNum, resource: ResourceId | null): { day: DayNum; offset: number } {
-    const clamped = Math.max(day, this.calendar.nextAfter(predecessor.start, resource));
-    const natural = this.calendar.nextAfter(predecessor.end, resource);
-    return { day: clamped, offset: clamped < natural ? this.calendar.workingDaysBetween(natural, clamped, resource) : 0 };
+  /** Clamps `half` to after the predecessor's start and expresses it as an offset (in days) from the natural start. */
+  private anchor(predecessor: Span, half: HalfDay, resource: ResourceId | null): { half: HalfDay; offset: number } {
+    const clamped = Math.max(half, floorStart(this.calendar, predecessor, resource));
+    const natural = naturalStart(this.calendar, predecessor, resource);
+    return { half: clamped, offset: clamped < natural ? this.calendar.workingHalvesBetween(natural, clamped, resource) / 2 : 0 };
   }
 
   /** Tasks in the subtree that a drag of `id` actually moves: unlocked scheduled leaves and parents containing one. */
@@ -403,7 +405,7 @@ class Execution {
   private detachPredecessor(task: TaskRow): void {
     const isParent = isParentTask(this.tree, task);
     const span = isParent ? null : this.spanOf(task.id);
-    this.patch(task, span ? { predecessorId: null, offset: 0, userStart: fromDay(span.start) } : { predecessorId: null, offset: 0 });
+    this.patch(task, span ? { predecessorId: null, offset: 0, ...startAt(spanStart(span)) } : { predecessorId: null, offset: 0 });
     if (!isParent) return;
     const remaining = (id: RowId) => (this.rows[id] ? this.spanOf(id) : null);
     for (const leaf of descendantLeafTasks(this.tree, task.id)) {
@@ -413,8 +415,8 @@ class Execution {
       const resource = current.resourceId;
       const constraints = constraintsFor(this.result(), current).map(({ predecessorId, offset }) => ({ span: remaining(predecessorId), offset }));
       const required = requiredStart(this.calendar, resource, constraints);
-      const withoutParent = this.calendar.snap(Math.max(toDay(current.userStart), required), resource);
-      if (withoutParent !== leafSpan.start) this.patch(current, { userStart: fromDay(leafSpan.start) });
+      const withoutParent = this.calendar.snapHalf(Math.max(halfDay(toDay(current.userStart), current.startsAfternoon), required), resource);
+      if (withoutParent !== spanStart(leafSpan)) this.patch(current, startAt(spanStart(leafSpan)));
     }
   }
 
@@ -433,8 +435,9 @@ class Execution {
     return day;
   }
 
-  private durationBetween(start: DayNum, end: DayNum, resource: ResourceId | null): number {
-    return end < start ? 1 : this.calendar.workingDaysBetween(start, end, resource) + 1;
+  /** Working days from half day `start` through half day `end` (both working), at least half a day. */
+  private durationBetween(start: HalfDay, end: HalfDay, resource: ResourceId | null): number {
+    return end < start ? 0.5 : (this.calendar.workingHalvesBetween(start, end, resource) + 1) / 2;
   }
 
   private assertValidParent(kind: Row["kind"], parentId: RowId | null): void {
@@ -495,6 +498,11 @@ class Execution {
   private result(): ProjectState {
     return { rows: this.rows };
   }
+}
+
+/** Stored inputs for a task starting at `half`. */
+function startAt(half: HalfDay): { userStart: IsoDate; startsAfternoon: boolean } {
+  return { userStart: fromDay(dayOf(half)), startsAfternoon: isAfternoon(half) };
 }
 
 /** generateKeyBetween, with its errors (e.g. corrupt or equal sibling positions) turned into rejections. */

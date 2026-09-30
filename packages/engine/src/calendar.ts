@@ -1,4 +1,4 @@
-import { toDay, weekday, type DayNum, type IsoDate } from "./date";
+import { dayOf, halfDay, toDay, weekday, type DayNum, type HalfDay, type IsoDate } from "./date";
 
 export type ResourceId = string;
 
@@ -95,6 +95,46 @@ export class Calendar {
     for (let day = from; day !== to; ) {
       day += step;
       if (this.isWorkingDay(day, resourceId)) count += step;
+    }
+    return count;
+  }
+
+  // ── half days: a half day is working when its day is ──────────────────
+
+  /** `half` if its day is a working day, otherwise the morning of the next working day. */
+  snapHalf(half: HalfDay, resourceId: ResourceId | null): HalfDay {
+    const day = dayOf(half);
+    return this.isWorkingDay(day, resourceId) ? half : halfDay(this.snap(day + 1, resourceId));
+  }
+
+  /** `half` if its day is a working day, otherwise the afternoon of the previous working day. */
+  snapHalfBack(half: HalfDay, resourceId: ResourceId | null): HalfDay {
+    const day = dayOf(half);
+    return this.isWorkingDay(day, resourceId) ? half : halfDay(this.snapBack(day - 1, resourceId), true);
+  }
+
+  /** First working half day strictly after `half`. */
+  nextHalfAfter(half: HalfDay, resourceId: ResourceId | null): HalfDay {
+    return this.snapHalf(half + 1, resourceId);
+  }
+
+  /** Moves `n` working half days from working half day `half` (negative `n` moves backwards). */
+  addWorkingHalves(half: HalfDay, n: number, resourceId: ResourceId | null): HalfDay {
+    let current = half;
+    for (let remaining = Math.abs(n); remaining > 0; remaining--) {
+      current = n < 0 ? this.snapHalfBack(current - 1, resourceId) : this.snapHalf(current + 1, resourceId);
+    }
+    return current;
+  }
+
+  /** Signed k such that addWorkingHalves(from, k) === to. Both must be working half days. */
+  workingHalvesBetween(from: HalfDay, to: HalfDay, resourceId: ResourceId | null): number {
+    if (!Number.isInteger(from) || !Number.isInteger(to)) throw new RangeError("Half days must be integers");
+    const step = to >= from ? 1 : -1;
+    let count = 0;
+    for (let half = from; half !== to; ) {
+      half += step;
+      if (this.isWorkingDay(dayOf(half), resourceId)) count += step;
     }
     return count;
   }

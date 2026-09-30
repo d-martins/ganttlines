@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Calendar } from "../src/calendar";
-import { toDay } from "../src/date";
+import { dayOf, halfDay, isAfternoon, toDay } from "../src/date";
+import { calendar } from "./fixtures";
 
 const MON_FRI = [1, 2, 3, 4, 5];
 const d = toDay;
@@ -115,5 +116,27 @@ describe("Calendar input validation", () => {
     // Thu 8 + 1 working day for Ana: Fri 9, Mon 12, Tue 13 are off → Wed 14
     expect(cal.addWorkingDays(d("2026-10-08"), 1, "ana")).toBe(d("2026-10-14"));
     expect(cal.addWorkingDays(d("2026-10-08"), 1, "rudy")).toBe(d("2026-10-09"));
+  });
+});
+
+describe("half days", () => {
+  const cal = calendar();
+  const fri = toDay("2026-10-09");
+  const mon = toDay("2026-10-12");
+
+  it("walks working half days across weekends, both ways", () => {
+    expect(cal.addWorkingHalves(halfDay(fri, true), 1, null)).toBe(halfDay(mon)); // Fri pm → Mon am
+    expect(cal.addWorkingHalves(halfDay(mon), -1, null)).toBe(halfDay(fri, true));
+    expect(cal.workingHalvesBetween(halfDay(fri), halfDay(mon, true), null)).toBe(3);
+    expect(cal.workingHalvesBetween(halfDay(mon, true), halfDay(fri), null)).toBe(-3);
+  });
+
+  it("snaps half days on non-working days forward to a morning and back to an afternoon", () => {
+    const sat = toDay("2026-10-10");
+    expect(cal.snapHalf(halfDay(sat, true), null)).toBe(halfDay(mon));
+    expect(cal.snapHalfBack(halfDay(sat), null)).toBe(halfDay(fri, true));
+    expect(cal.nextHalfAfter(halfDay(fri), null)).toBe(halfDay(fri, true));
+    expect(dayOf(halfDay(fri, true))).toBe(fri);
+    expect(isAfternoon(halfDay(fri, true))).toBe(true);
   });
 });

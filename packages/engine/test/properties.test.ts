@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import { Calendar } from "../src/calendar";
 import { applyChanges } from "../src/changes";
 import { applyCommand, type Command } from "../src/commands";
-import { fromDay, toDay } from "../src/date";
+import { dayOf, fromDay, halfDay, toDay } from "../src/date";
 import type { ProjectState, Row } from "../src/model";
-import { computeSchedule, constraintsFor, hasCycle } from "../src/schedule";
+import { computeSchedule, constraintsFor, floorStart, hasCycle, naturalStart, spanEnd, spanStart } from "../src/schedule";
 import { buildTree, isParentTask } from "../src/tree";
 import { project, section, task } from "./fixtures";
 
@@ -48,12 +48,13 @@ const projectArb = fc
     fc.record({
       section: fc.integer({ min: 0, max: 99 }).map((n) => n < 20),
       userStart: fc.option(dayArb, { freq: 6 }),
+      afternoon: fc.boolean(),
       duration: fc.integer({ min: 0, max: 10 }).map((halves) => halves / 2),
       resource: fc.constantFrom(...RESOURCES),
       locked: fc.integer({ min: 0, max: 99 }).map((n) => n < 15),
       predecessor: fc.option(fc.nat(), { freq: 2 }),
       parent: fc.option(fc.nat(), { freq: 4 }),
-      offset: fc.integer({ min: -3, max: 3 }),
+      offset: fc.integer({ min: -6, max: 6 }).map((halves) => halves / 2),
     }),
     { minLength: 1, maxLength: 12 },
   )
@@ -67,6 +68,7 @@ const projectArb = fc
         const predecessor = i > 0 && spec.predecessor !== null ? spec.predecessor % i : null;
         return task(`t${i}`, {
           userStart: spec.userStart,
+          startsAfternoon: spec.afternoon,
           duration: spec.duration,
           resourceId: spec.resource,
           locked: spec.locked,
@@ -81,6 +83,8 @@ const projectArb = fc
 /** Ids that do not exist yet (for createRow / duplicateTask) plus one that never exists. */
 const FRESH_IDS = ["n0", "n1", "n2", "n3"];
 const UNKNOWN_ID = "gone";
+
+const halfArb = fc.constantFrom("morning" as const, "afternoon" as const);
 
 const commandArb = (existing: string[]): fc.Arbitrary<Command> => {
   // Mostly existing rows; sometimes rows created during the run, or one that never exists.
@@ -97,11 +101,11 @@ const commandArb = (existing: string[]): fc.Arbitrary<Command> => {
     fc.record({ type: fc.constant("setDuration" as const), id, duration: fc.integer({ min: 0, max: 12 }).map((halves) => halves / 2) }),
     fc.record({ type: fc.constant("setActualDuration" as const), id, days: fc.option(fc.integer({ min: 0, max: 12 }).map((halves) => halves / 2)) }),
     fc.record({ type: fc.constant("convertMilestone" as const), id, milestone: fc.boolean() }),
-    fc.record({ type: fc.constant("moveTask" as const), id, start: dayArb }),
-    fc.record({ type: fc.constant("resizeTask" as const), id, edge: fc.constantFrom("start" as const, "end" as const), date: dayArb }),
+    fc.record({ type: fc.constant("moveTask" as const), id, start: dayArb, half: halfArb }),
+    fc.record({ type: fc.constant("resizeTask" as const), id, edge: fc.constantFrom("start" as const, "end" as const), date: dayArb, half: halfArb }),
     fc.record({ type: fc.constant("linkTasks" as const), fromId: id, toId: id }),
     // Weighted up: offsets only apply to tasks with a predecessor (parents included).
-    { weight: 3, arbitrary: fc.record({ type: fc.constant("setOffset" as const), id, offset: fc.integer({ min: -5, max: 5 }) }) },
+    { weight: 3, arbitrary: fc.record({ type: fc.constant("setOffset" as const), id, offset: fc.integer({ min: -10, max: 10 }).map((halves) => halves / 2) }) },
     fc.record({ type: fc.constant("removePredecessor" as const), id }),
     fc.record({ type: fc.constant("setLocked" as const), id, locked: fc.boolean() }),
     fc.record({ type: fc.constant("setAssignee" as const), id, resourceId: fc.constantFrom(...RESOURCES) }),
@@ -143,17 +147,19 @@ function assertScheduleInvariants(state: ProjectState, calendar: Calendar): void
     }
     if (!span) throw new Error(`scheduled task ${row.id} has no span`);
     const resource = row.resourceId;
-    expect(calendar.isWorkingDay(span.start, resource)).toBe(true);
+    // In half days: starts on a working day and covers exactly its duration's working half days.
+    const start = spanStart(span);
+    expect(calendar.isWorkingDay(dayOf(start), resource)).toBe(true);
     if (row.duration === 0) expect(span.end).toBe(span.start);
-    else expect(calendar.workingDaysBetween(span.start, span.end, resource) + 1).toBe(Math.ceil(row.duration));
+    else expect(calendar.workingHalvesBetween(start, spanEnd(span), resource) + 1).toBe(row.duration * 2);
     if (row.locked) continue;
-    expect(span.start).toBeGreaterThanOrEqual(calendar.snap(toDay(row.userStart), resource));
+    expect(start).toBeGreaterThanOrEqual(calendar.snapHalf(halfDay(toDay(row.userStart), row.startsAfternoon), resource));
     for (const { predecessorId, offset } of constraintsFor(state, row)) {
       const predecessor = schedule.get(predecessorId)?.span;
       if (!predecessor) continue;
-      expect(span.start).toBeGreaterThan(predecessor.start);
-      const natural = calendar.nextAfter(predecessor.end, resource);
-      expect(span.start).toBeGreaterThanOrEqual(calendar.addWorkingDays(natural, offset, resource));
+      expect(start).toBeGreaterThan(spanStart(predecessor));
+      expect(start).toBeGreaterThanOrEqual(floorStart(calendar, predecessor, resource));
+      expect(start).toBeGreaterThanOrEqual(calendar.addWorkingHalves(naturalStart(calendar, predecessor, resource), offset * 2, resource));
     }
   }
 }

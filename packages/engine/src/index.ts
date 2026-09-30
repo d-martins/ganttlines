@@ -7,10 +7,11 @@ export {
   MAX_OFFSET,
   MIN_DATE,
   type Command,
+  type DayHalf,
   type CommandResult,
   type RejectReason,
 } from "./commands";
-export { fromDay, toDay, weekday, type DayNum, type IsoDate } from "./date";
+export { dayOf, fromDay, halfDay, isAfternoon, toDay, weekday, type DayNum, type HalfDay, type IsoDate } from "./date";
 export {
   TASK_COLORS,
   TASK_DEFAULTS,
@@ -21,5 +22,5 @@ export {
   type TaskColor,
   type TaskRow,
 } from "./model";
-export { computeSchedule, CycleError, hasCycle, type Computed, type Schedule, type Span } from "./schedule";
+export { computeSchedule, CycleError, hasCycle, spanEnd, spanOfHalves, spanStart, type Computed, type Schedule, type Span } from "./schedule";
 export { buildTree, childrenOf, isParentTask, type Tree } from "./tree";

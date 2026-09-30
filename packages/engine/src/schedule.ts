@@ -1,12 +1,29 @@
 import type { Calendar, ResourceId } from "./calendar";
-import { toDay, type DayNum } from "./date";
+import { dayOf, halfDay, isAfternoon, toDay, type DayNum, type HalfDay } from "./date";
 import type { ProjectState, Row, RowId, TaskRow } from "./model";
 import { buildTree, childrenOf, isParentTask } from "./tree";
 
+/** A row's dates: the days it starts and ends on, and whether it starts or ends at midday. */
 export interface Span {
   start: DayNum;
   end: DayNum;
+  /** starts in the afternoon of `start` */
+  startsAfternoon: boolean;
+  /** ends at midday of `end` (after its morning) */
+  endsMidday: boolean;
 }
+
+/** The first half day a span covers. */
+export const spanStart = (span: Span): HalfDay => halfDay(span.start, span.startsAfternoon);
+/** The last half day a span covers. */
+export const spanEnd = (span: Span): HalfDay => halfDay(span.end, !span.endsMidday);
+/** The span covering half days `start` … `end`. */
+export const spanOfHalves = (start: HalfDay, end: HalfDay): Span => ({
+  start: dayOf(start),
+  end: dayOf(end),
+  startsAfternoon: isAfternoon(start),
+  endsMidday: !isAfternoon(end),
+});
 
 export interface Computed {
   /** null when the row has no dates (unscheduled task, or container without scheduled tasks) */
@@ -63,32 +80,46 @@ export function computeSchedule(state: ProjectState, calendar: Calendar): Schedu
     if (task.userStart === null) return { span: null, violation: false };
 
     const required = requiredStart(calendar, resource, predecessors);
-    const userStart = toDay(task.userStart);
-    const start = calendar.snap(task.locked ? userStart : Math.max(userStart, required), resource);
-    // A task fills every day it touches: 2.5 working days end on the third.
-    const end = task.duration === 0 ? start : calendar.addWorkingDays(start, Math.ceil(task.duration) - 1, resource);
-    return { span: { start, end }, violation: task.locked && start < required };
+    const userStart = halfDay(toDay(task.userStart), task.startsAfternoon);
+    const start = calendar.snapHalf(task.locked ? userStart : Math.max(userStart, required), resource);
+    const violation = task.locked && start < required;
+    // A milestone is a point on its day; successors start the next working day.
+    if (task.duration === 0) return { span: spanOfHalves(start, halfDay(dayOf(start), true)), violation };
+    // In half days: 2.5 days from a morning take five half days and end at midday of the third.
+    return { span: spanOfHalves(start, calendar.addWorkingHalves(start, task.duration * 2 - 1, resource)), violation };
   };
 
   for (const id of Object.keys(state.rows)) compute(id);
   return results;
 }
 
+/** Where a successor of `span` starts with no offset: the working half day after it ends. */
+export function naturalStart(calendar: Calendar, span: Span, resourceId: ResourceId | null): HalfDay {
+  return calendar.nextHalfAfter(spanEnd(span), resourceId);
+}
+
 /**
- * The earliest start the constraints allow on `resourceId`'s calendar: for each scheduled
- * predecessor, `max(natural + offset, floor)`. -Infinity when no constraint applies.
+ * The earliest a successor of `span` may start, however much it overlaps: the working day after the
+ * predecessor's start day — or its natural start, when that's sooner (a half-day predecessor).
+ */
+export function floorStart(calendar: Calendar, span: Span, resourceId: ResourceId | null): HalfDay {
+  return Math.min(halfDay(calendar.nextAfter(span.start, resourceId)), naturalStart(calendar, span, resourceId));
+}
+
+/**
+ * The earliest start (a half day) the constraints allow on `resourceId`'s calendar: for each
+ * scheduled predecessor, `max(natural + offset, floor)`. -Infinity when no constraint applies.
  */
 export function requiredStart(
   calendar: Calendar,
   resourceId: ResourceId | null,
   constraints: readonly { span: Span | null; offset: number }[],
-): number {
+): HalfDay {
   let required = -Infinity;
   for (const { span, offset } of constraints) {
     if (!span) continue;
-    const natural = calendar.nextAfter(span.end, resourceId);
-    const floor = calendar.nextAfter(span.start, resourceId);
-    required = Math.max(required, calendar.addWorkingDays(natural, offset, resourceId), floor);
+    const natural = naturalStart(calendar, span, resourceId);
+    required = Math.max(required, calendar.addWorkingHalves(natural, offset * 2, resourceId), floorStart(calendar, span, resourceId));
   }
   return required;
 }
@@ -120,9 +151,7 @@ function rollUp(spans: (Span | null)[]): Span | null {
   let result: Span | null = null;
   for (const span of spans) {
     if (!span) continue;
-    result = result
-      ? { start: Math.min(result.start, span.start), end: Math.max(result.end, span.end) }
-      : { ...span };
+    result = result ? spanOfHalves(Math.min(spanStart(result), spanStart(span)), Math.max(spanEnd(result), spanEnd(span))) : { ...span };
   }
   return result;
 }

@@ -4,7 +4,7 @@ import { applyCommand, MAX_DATE, MAX_DURATION, MAX_OFFSET, MIN_DATE } from "../s
 import type { ProjectState, TaskRow } from "../src/model";
 import { computeSchedule } from "../src/schedule";
 import { buildTree, childrenOf } from "../src/tree";
-import { calendar, datesOf, project, section, task } from "./fixtures";
+import { calendar, datesOf, halvesOf, project, section, task } from "./fixtures";
 import { run } from "./helpers";
 
 // October 2026: Mon 5 … Fri 9, Mon 12 … Fri 16
@@ -13,6 +13,7 @@ const taskIn = (state: ProjectState, id: string) => state.rows[id] as TaskRow;
 const orderOf = (state: ProjectState, parentId: string | null) =>
   childrenOf(buildTree(state), parentId).map((row) => row.id);
 const datesIn = (state: ProjectState, id: string) => datesOf(computeSchedule(state, cal), id);
+const halvesIn = (state: ProjectState, id: string) => halvesOf(computeSchedule(state, cal), id);
 
 describe("createRow", () => {
   it("creates an unscheduled task after a sibling", () => {
@@ -312,9 +313,9 @@ describe("resizeTask, setDuration, convertMilestone", () => {
     expect(datesIn(state, "a")?.end).toBe("2026-10-07");
   });
 
-  it("never shrinks below one day", () => {
+  it("never shrinks below half a day", () => {
     const state = run(base, cal, { type: "resizeTask", id: "a", edge: "end", date: "2026-10-01" });
-    expect(taskIn(state, "a").duration).toBe(1);
+    expect(taskIn(state, "a").duration).toBe(0.5);
   });
 
   it("sets durations and converts milestones", () => {
@@ -337,14 +338,51 @@ describe("resizeTask, setDuration, convertMilestone", () => {
 describe("half days", () => {
   const base = project(task("a", { userStart: "2026-10-06", duration: 2 }), task("b", { userStart: "2026-10-06", predecessorId: "a" }));
 
-  it("takes durations in half days; a task fills the days it touches and its successor starts the next working day", () => {
+  it("takes durations in half days: a task ends at midday and its successor starts that afternoon", () => {
     const state = run(base, cal, { type: "setDuration", id: "a", duration: 2.5 });
     expect(taskIn(state, "a").duration).toBe(2.5);
-    expect(datesIn(state, "a")).toEqual({ start: "2026-10-06", end: "2026-10-08" }); // Tue–Thu
-    expect(datesIn(state, "b")?.start).toBe("2026-10-09");
+    expect(halvesIn(state, "a")).toEqual({ start: "2026-10-06 am", end: "2026-10-08 am" }); // Tue – Thu midday
+    expect(halvesIn(state, "b")).toEqual({ start: "2026-10-08 pm", end: "2026-10-09 am" });
     const half = run(base, cal, { type: "setDuration", id: "a", duration: 0.5 });
-    expect(datesIn(half, "a")).toEqual({ start: "2026-10-06", end: "2026-10-06" });
-    expect(datesIn(half, "b")?.start).toBe("2026-10-07");
+    expect(halvesIn(half, "a")).toEqual({ start: "2026-10-06 am", end: "2026-10-06 am" });
+    expect(halvesIn(half, "b")).toEqual({ start: "2026-10-06 pm", end: "2026-10-07 am" });
+  });
+
+  it("starts tasks in the afternoon and carries half days over weekends", () => {
+    let state = run(base, cal, { type: "moveTask", id: "a", start: "2026-10-09", half: "afternoon" }); // Fri pm
+    expect(taskIn(state, "a")).toMatchObject({ userStart: "2026-10-09", startsAfternoon: true });
+    expect(halvesIn(state, "a")).toEqual({ start: "2026-10-09 pm", end: "2026-10-13 am" }); // Fri pm, Mon, Tue am: 2 days
+    expect(halvesIn(state, "b")).toEqual({ start: "2026-10-13 pm", end: "2026-10-14 am" });
+    state = run(state, cal, { type: "moveTask", id: "a", start: "2026-10-10", half: "afternoon" }); // Saturday: the next working morning
+    expect(halvesIn(state, "a")).toEqual({ start: "2026-10-12 am", end: "2026-10-13 pm" });
+    state = run(state, cal, { type: "moveTask", id: "a", start: "2026-10-06" }); // no half: the morning
+    expect(taskIn(state, "a").startsAfternoon).toBe(false);
+  });
+
+  it("resizes edges to half days", () => {
+    let state = run(base, cal, { type: "resizeTask", id: "a", edge: "end", date: "2026-10-08", half: "morning" });
+    expect(taskIn(state, "a").duration).toBe(2.5);
+    state = run(state, cal, { type: "resizeTask", id: "a", edge: "start", date: "2026-10-06", half: "afternoon" });
+    expect(taskIn(state, "a")).toMatchObject({ userStart: "2026-10-06", startsAfternoon: true, duration: 2 });
+    expect(halvesIn(state, "a")?.end).toBe("2026-10-08 am");
+  });
+
+  it("overlaps a successor by half days, but never before the day after its predecessor starts", () => {
+    // b is dropped on Wed morning, half a day into a (Tue – Thu midday): a -1.5 day overlap
+    let state = run(base, cal, { type: "setDuration", id: "a", duration: 2.5 }, { type: "moveTask", id: "b", start: "2026-10-07" });
+    expect(taskIn(state, "b")).toMatchObject({ userStart: "2026-10-07", startsAfternoon: false, offset: -1.5 });
+    state = run(state, cal, { type: "moveTask", id: "b", start: "2026-10-06", half: "afternoon" });
+    expect(halvesIn(state, "b")?.start).toBe("2026-10-07 am");
+  });
+
+  it("puts milestones on the morning and starts their successors the next working day", () => {
+    const state = run(project(task("m", { userStart: "2026-10-06", startsAfternoon: true, duration: 1 }), task("n", { predecessorId: "m", userStart: "2026-10-06" })), cal, {
+      type: "convertMilestone",
+      id: "m",
+      milestone: true,
+    });
+    expect(taskIn(state, "m").startsAfternoon).toBe(false);
+    expect(halvesIn(state, "n")?.start).toBe("2026-10-07 am");
   });
 
   it("refuses other fractions and anything under half a day", () => {

@@ -23,9 +23,11 @@ export interface TaskRow extends RowBase {
   kind: "task";
   /** Date the user last placed the task on; null = not scheduled yet. */
   userStart: IsoDate | null;
+  /** Placed on the afternoon of `userStart` rather than its morning. */
+  startsAfternoon: boolean;
   /**
-   * Working days, in half-day steps (0.5, 1, 2.5 …); 0 = milestone. A task fills the days it touches
-   * (2.5 → three days). Ignored for parent tasks (dates roll up from children).
+   * Working days, in half-day steps (0.5, 1, 2.5 …); 0 = milestone. Scheduled in half days: 2.5 days
+   * from a morning end at midday of the third day. Ignored for parent tasks (dates roll up from children).
    */
   duration: number;
   /** Working days the task really took, when recorded — informational only, never moves the schedule. */
@@ -34,7 +36,7 @@ export interface TaskRow extends RowBase {
   color: TaskColor;
   locked: boolean;
   predecessorId: RowId | null;
-  /** Working days relative to the day after the predecessor ends (negative = overlap). */
+  /** Working days (half-day steps) relative to the half day after the predecessor ends (negative = overlap). */
   offset: number;
   description: string;
 }
@@ -47,6 +49,7 @@ export interface ProjectState {
 
 export const TASK_DEFAULTS = {
   userStart: null,
+  startsAfternoon: false,
   duration: 1,
   resourceId: null,
   color: "blue",
