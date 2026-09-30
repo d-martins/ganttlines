@@ -57,7 +57,7 @@ describe("half days and actual work days", () => {
     expect(within(listRow("hooks")).getByRole("button", { name: "Working days of “hooks”" })).toHaveTextContent("2.5");
   });
 
-  it("draws actual work days as a track under the bar: red when over, green when under, grey on plan", async () => {
+  it("draws actual work days on the bar and as a track under it: red when over, green when under, grey on plan", async () => {
     for (const [actual, versusPlan, columns] of [
       [3, "over", 5], // Fri, (Sat, Sun), Mon, Tue: three working days
       [1.5, "under", 4 - 0.5], // Fri, (Sat, Sun), half of Mon
@@ -68,6 +68,13 @@ describe("half days and actual work days", () => {
       const track = within(hooks.parentElement!).getByTestId("actual-track");
       expect(track).toHaveAttribute("data-versus-plan", versusPlan);
       expect(width(track)).toBe(columns * 32);
+      // On the bar itself (planned: 4 columns): the overrun continues it (striped), unused days are dimmed.
+      const over = within(hooks.parentElement!).queryByTestId("actual-over");
+      const under = within(hooks.parentElement!).queryByTestId("actual-under");
+      if (versusPlan === "over") expect(width(over!)).toBe((columns - 4) * 32);
+      else expect(over).toBeNull();
+      if (versusPlan === "under") expect(width(under!)).toBe((4 - columns) * 32);
+      else expect(under).toBeNull();
       unmount();
     }
   });
@@ -81,7 +88,7 @@ describe("half days and actual work days", () => {
 
   it("records actual days in the details panel", async () => {
     const { user } = await board();
-    await user.click(within(listRow("hooks")).getByRole("gridcell", { name: "Row 2" }));
+    await user.dblClick(within(listRow("hooks")).getByRole("gridcell", { name: "Row 2" }));
     const panel = screen.getByRole("complementary", { name: "Details of “hooks”" });
     const field = within(panel).getByRole("spinbutton", { name: "Actual work days" });
     await user.type(field, "4.5{Enter}");

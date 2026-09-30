@@ -150,13 +150,13 @@ describe("editing the task list", () => {
 
   it("shows the server's reason when it refuses an edit, and rolls it back", async () => {
     const { user } = await editableBoard();
-    await user.click(screen.getByRole("button", { name: "Color of “ui”: blue" }));
-    await user.click(screen.getByRole("button", { name: "green" }));
-    expect(screen.getByRole("button", { name: "Color of “ui”: green" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Working days of “ui”" }));
+    await user.keyboard("{Control>}a{/Control}8{Enter}");
+    expect(screen.getByRole("button", { name: "Working days of “ui”" })).toHaveTextContent("8");
     const { commandId } = FakeWebSocket.last.sent.at(-1) as { commandId: string };
     FakeWebSocket.last.deliver({ type: "reject", commandId, error: "conflict", message: "This project is archived" });
     expect(await screen.findByRole("alert")).toHaveTextContent("Change not saved: This project is archived");
-    expect(screen.getByRole("button", { name: "Color of “ui”: blue" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Working days of “ui”" })).toHaveTextContent("5");
   });
 
   it("filters rows by search, keeping their parents", async () => {
@@ -179,7 +179,7 @@ describe("editing the task list", () => {
     const { user } = await editableBoard();
     screen.getByRole("button", { name: "Title “ui”" }).focus();
     const stops: string[] = [];
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 7; i++) {
       await user.tab();
       stops.push(document.activeElement?.getAttribute("aria-label") ?? "");
     }
@@ -189,7 +189,8 @@ describe("editing the task list", () => {
       "Working days of “ui”",
       "Actual work days of “ui”",
       "Predecessor of “ui”",
-      "Color of “ui”: blue",
+      "Show “ui” on the chart",
+      "Open details of “ui”",
     ]);
     screen.getByRole("button", { name: "Title “ui”" }).focus();
     await user.keyboard(" ");

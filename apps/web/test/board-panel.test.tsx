@@ -61,10 +61,10 @@ async function panelBoard(rows: ProjectStateDto["rows"] = ROWS, user = ADMIN, co
 const sentCommands = (): Command[] =>
   FakeWebSocket.last.sent.flatMap((message) => ((message as { type: string }).type === "command" ? [(message as { command: Command }).command] : []));
 const panel = () => screen.getByRole("complementary", { name: /^Details of/ });
-/** Selects a row by clicking its number in the list (which opens the panel). */
+const rowOf = (title: string) => screen.getAllByRole("row").find((candidate) => within(candidate).queryByText(title, { exact: true }))!;
+/** Opens a row: a double-click on its number in the list (selects it, reveals its bar and opens the panel). */
 const selectRow = async (user: ReturnType<typeof import("@testing-library/user-event").default.setup>, title: string) => {
-  const row = screen.getAllByRole("row").find((candidate) => within(candidate).queryByText(title, { exact: true }))!;
-  await user.click(row.querySelector('[aria-label^="Row "]')!);
+  await user.dblClick(rowOf(title).querySelector('[aria-label^="Row "]')!);
 };
 
 describe("details panel", () => {
@@ -149,17 +149,22 @@ describe("details panel", () => {
     expect(panel()).toHaveAccessibleName("Details of “hooks”");
   });
 
-  it("scrolls a row's bar into view (start just inside the left edge) when its already selected row is clicked again", async () => {
+  it("selects on a click; a double-click reveals the bar (start just inside the left edge) and opens the panel", async () => {
     const { user } = await panelBoard();
     const scrollTo = vi.fn();
     const scroller = screen.getByTestId("board-scroller");
     scroller.scrollTo = scrollTo as unknown as typeof scroller.scrollTo;
-    await selectRow(user, "hooks");
+    await user.click(rowOf("hooks").querySelector('[aria-label^="Row "]')!);
+    expect(rowOf("hooks")).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
     expect(scrollTo).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "Working days of “hooks”" })); // opens the cell, doesn't center
+    await user.click(rowOf("hooks").querySelector('[aria-label^="Row "]')!); // clicking again changes nothing
+    expect(scrollTo).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Working days of “hooks”" })); // opens the cell
     await user.keyboard("{Escape}");
     expect(scrollTo).not.toHaveBeenCalled();
     await selectRow(user, "hooks");
+    expect(panel()).toHaveAccessibleName("Details of “hooks”");
     expect(scrollTo).toHaveBeenCalledTimes(1);
     const { left, behavior } = scrollTo.mock.calls[0]![0] as ScrollToOptions;
     // hooks starts Oct 12; the chart starts Mon Aug 31 at 32 px a day: its start lands 24 px inside the left edge
@@ -178,6 +183,23 @@ describe("details panel", () => {
     expect(screen.queryByRole("textbox", { name: "Title" })).not.toBeInTheDocument();
     await user.dblClick(screen.getByRole("button", { name: "Title “hooks”" }));
     expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("hooks");
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+  });
+
+  it("has row buttons to show the bar on the chart and to open the details", async () => {
+    const { user } = await panelBoard();
+    const scrollTo = vi.fn();
+    const scroller = screen.getByTestId("board-scroller");
+    scroller.scrollTo = scrollTo as unknown as typeof scroller.scrollTo;
+    const [show, open] = within(rowOf("hooks")).getAllByRole("button").slice(-2);
+    expect(show).toHaveAccessibleName("Show “hooks” on the chart");
+    expect(open).toHaveAccessibleName("Open details of “hooks”");
+    await user.click(show!);
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+    expect(rowOf("hooks")).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    await user.click(open!);
+    expect(panel()).toHaveAccessibleName("Details of “hooks”");
     expect(scrollTo).toHaveBeenCalledTimes(1);
   });
 

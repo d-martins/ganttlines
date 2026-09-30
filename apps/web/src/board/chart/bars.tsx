@@ -47,6 +47,33 @@ export function ActualTrack({ entry, timeline, style }: { entry: BoardRow; timel
   );
 }
 
+/**
+ * The actual work days drawn on the bar itself: days beyond the plan continue the bar as a striped
+ * red extension; planned days that weren't needed are dimmed with a dashed outline. The two parts
+ * meet square (no rounding at the join). Informational only, never interactive.
+ */
+function ActualOnBar({ from, to, top, height, versusPlan, radius }: { from: number; to: number; top: number; height: number; versusPlan: "over" | "under"; radius: number }) {
+  const common = { left: from, width: to - from, top, height, borderRadius: `0 ${radius}px ${radius}px 0` };
+  if (versusPlan === "over") {
+    return (
+      <div
+        data-testid="actual-over"
+        aria-hidden
+        className="pointer-events-none absolute"
+        style={{ ...common, background: "repeating-linear-gradient(-45deg, var(--awd-over) 0 4px, color-mix(in srgb, var(--awd-over) 55%, transparent) 4px 8px)" }}
+      />
+    );
+  }
+  return (
+    <div
+      data-testid="actual-under"
+      aria-hidden
+      className="pointer-events-none absolute border border-l-0 border-dashed border-[var(--awd-under)]"
+      style={{ ...common, background: "color-mix(in srgb, var(--bg) 70%, transparent)" }}
+    />
+  );
+}
+
 /** Half the drawn height of a row's shape: where dependency arrows leave it (top or bottom edge). */
 export function halfHeight(kind: DrawKind | Ghost["kind"], style: BarStyle): number {
   if (kind === "milestone") return (DIAMOND[style] * Math.SQRT2) / 2; // a rotated square
@@ -127,8 +154,12 @@ export function RowBar({
 }) {
   const { row, kind } = entry;
   const rowHeight = ROW_HEIGHT[style];
-  const { left, right } = extent(kind, span, timeline, style, entry.endTrim);
-  const width = right - left;
+  const { left, right: planRight } = extent(kind, span, timeline, style, entry.endTrim);
+  const width = planRight - left;
+  const actual = kind === "task" && entry.actual && entry.actual.versusPlan !== "even" ? entry.actual : null;
+  const actualRight = actual ? extent("task", actual.span, timeline, style, actual.endTrim).right : planRight;
+  // Titles beside the bar go after the overrun, if any.
+  const right = Math.max(planRight, actualRight);
   const task = row.kind === "task" ? row : null;
   const assignee = task?.resourceId ? resources.get(task.resourceId) : undefined;
   const details =
@@ -175,14 +206,29 @@ export function RowBar({
     );
   }
   const barHeight = BAR_HEIGHT[style];
+  const barTop = (rowHeight - barHeight) / 2;
+  const radius = style === "compact" ? 3 : 4;
+  // Overrun: the bar's right end is square where the extension joins it.
+  const squareEnd = actual?.versusPlan === "over" ? "rounded-r-none!" : "";
+  const onBar = actual ? (
+    <ActualOnBar
+      from={Math.min(planRight, actualRight)}
+      to={Math.max(planRight, actualRight)}
+      top={barTop}
+      height={barHeight}
+      versusPlan={actual.versusPlan as "over" | "under"}
+      radius={radius}
+    />
+  ) : null;
   if (style === "compact") {
     return (
       <>
         <div
           {...shapeAttrs}
-          className={`absolute rounded-[3px] ${entry.violation ? "outline-2 outline-offset-1 outline-[var(--violation)]" : ""} ${shapeClass}`}
-          style={{ left, width, top: (rowHeight - barHeight) / 2, height: barHeight, background: fill }}
+          className={`absolute rounded-[3px] ${squareEnd} ${entry.violation ? "outline-2 outline-offset-1 outline-[var(--violation)]" : ""} ${shapeClass}`}
+          style={{ left, width, top: barTop, height: barHeight, background: fill }}
         />
+        {onBar}
         {outsideTitle}
       </>
     );
@@ -196,8 +242,8 @@ export function RowBar({
         <Tooltip.Trigger asChild>
           <div
             {...shapeAttrs}
-            className={`absolute flex items-center gap-1.5 overflow-hidden rounded-[4px] px-1.5 text-xs font-semibold ${entry.violation ? "outline-2 outline-offset-1 outline-[var(--violation)]" : ""} ${shapeClass}`}
-            style={{ left, width, top: (rowHeight - barHeight) / 2, height: barHeight, background: fill, color: ink }}
+            className={`absolute flex items-center gap-1.5 overflow-hidden rounded-[4px] px-1.5 text-xs font-semibold ${squareEnd} ${entry.violation ? "outline-2 outline-offset-1 outline-[var(--violation)]" : ""} ${shapeClass}`}
+            style={{ left, width, top: barTop, height: barHeight, background: fill, color: ink }}
           >
             {showAvatar ? <Avatar name={assignee!.name} color={assignee!.avatarColor} size={18} /> : null}
             {inside ? (
@@ -215,6 +261,7 @@ export function RowBar({
           </Tooltip.Content>
         </Tooltip.Portal>
       </Tooltip.Root>
+      {onBar}
       {inside ? null : outsideTitle}
     </>
   );

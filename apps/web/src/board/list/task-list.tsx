@@ -1,26 +1,23 @@
-import { TASK_COLORS, type Calendar, type RowId, type TaskColor, type TaskRow } from "@ganttlines/engine";
-import * as Popover from "@radix-ui/react-popover";
-import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, GripVertical, IndentDecrease, IndentIncrease, Plus, Search } from "lucide-react";
+import type { Calendar, RowId } from "@ganttlines/engine";
+import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, GripVertical, LocateFixed, IndentDecrease, IndentIncrease, PanelRightOpen, Plus, Search } from "lucide-react";
 import { computeSchedule, CycleError } from "@ganttlines/engine";
 import { useEffect, useMemo, useRef, useState, type HTMLAttributes, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type Ref } from "react";
 import { Avatar } from "../../ui/avatar";
-import { useFocusReturnOnKeyboardClose } from "../../ui/popover-focus";
 import { IconButton } from "../../ui/button";
 import { AssigneePicker } from "../assignee-picker";
 import { useBoard, useRun } from "../board-context";
 import { PredecessorPicker } from "../predecessor-picker";
 import { setCollapsed } from "../collapse";
 import { formatDays } from "../chart/bars";
-import { taskColors } from "../format";
 import type { BoardRow } from "../model";
 import { useSelection } from "../selection";
 import { addAtEnd, addRowBelow, addSubtask, deleteRow, dropMove, parseDays, setActualDays, setWorkingDays, type DropZone } from "./list-actions";
 
 /**
- * Column template shared by the header and the rows: # · title · assignee · WD · CD · predecessor · color.
+ * Column template shared by the header and the rows: # · title · assignee · WD · AWD · predecessor · row actions (show the bar, open details).
  * Fixed columns + the title's minimum + padding = LIST_WIDTH.min, so no column is ever cut off.
  */
-const COLUMNS = "grid grid-cols-[40px_minmax(96px,1fr)_120px_40px_40px_56px_28px] items-center";
+const COLUMNS = "grid grid-cols-[40px_minmax(96px,1fr)_120px_40px_40px_56px_48px] items-center";
 const INDENT = 16;
 
 export function ListHeader({ query, onQuery }: { query: string; onQuery: (query: string) => void }) {
@@ -283,12 +280,13 @@ export function ListRows({
             aria-level={entry.depth + 1}
             aria-selected={selected}
             aria-expanded={entry.hasChildren ? !entry.collapsed : undefined}
-            onClick={(event) => {
-              // A click on the row that's already selected — or a double-click on the row — brings its bar
-              // into view (its start just inside the chart's left edge). Not a click that opens a cell.
-              const opensCell = (event.target as HTMLElement).closest("[data-cell]") !== null;
-              if (selected && !opensCell) center(row.id);
-              select(row.id);
+            // A click only selects (highlights) the row; a double-click also brings its bar into view (its
+            // start just inside the chart's left edge) and opens the details panel. Not on a cell that edits.
+            onClick={() => select(row.id, false)}
+            onDoubleClick={(event) => {
+              if ((event.target as HTMLElement).closest("[data-cell], [data-row-action], input")) return;
+              center(row.id);
+              select(row.id, true);
             }}
             className={`group ${COLUMNS} absolute right-0 left-0 px-1 text-sm ${selected ? "bg-accent-soft" : "hover:bg-surface"} ${drag?.id === row.id ? "opacity-50" : ""}`}
             style={{ top: (firstRow + index) * rowHeight, height: rowHeight }}
@@ -374,7 +372,7 @@ export function ListRows({
                       type="button"
                       data-cell={`${row.id}:title`}
                       aria-label={`Title “${row.title || "Untitled"}”`}
-                      onFocus={(event) => event.currentTarget.matches(":focus-visible") && select(row.id)}
+                      onFocus={(event) => event.currentTarget.matches(":focus-visible") && select(row.id, false)}
                       onKeyDown={(event) => {
                         if (event.key !== " " && event.key !== "Enter") return;
                         event.preventDefault();
@@ -522,8 +520,8 @@ export function ListRows({
                 </CellButton>
               )}
             </span>
-            <span role="gridcell" className="flex justify-center">
-              {task ? <ColorSwatch task={task} editable={canEdit} onChange={(color) => run({ type: "setColor", id: task.id, color })} /> : null}
+            <span role="gridcell" className={`flex justify-end ${selected ? "" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"}`}>
+              <RowActions id={row.id} title={row.title} />
             </span>
           </div>
         );
@@ -590,34 +588,36 @@ function CellButton({
   );
 }
 
-function ColorSwatch({ task, editable, onChange }: { task: TaskRow; editable: boolean; onChange: (color: TaskColor) => void }) {
-  const focusReturn = useFocusReturnOnKeyboardClose();
-  const swatch = <span className="block h-3.5 w-3.5 rounded-sm" style={{ background: taskColors(task.color).fill }} />;
-  if (!editable) return <span aria-label={`Color ${task.color}`}>{swatch}</span>;
+/** The row's quick actions: bring its bar into view, then open its details. */
+function RowActions({ id, title }: { id: RowId; title: string }) {
+  const { select, center } = useSelection();
+  const name = title || "Untitled";
   return (
-    <Popover.Root>
-      <Popover.Trigger asChild>
-        <button type="button" aria-label={`Color of “${task.title || "Untitled"}”: ${task.color}`} onClick={(event) => event.stopPropagation()} className="rounded p-1 hover:bg-surface-2">
-          {swatch}
-        </button>
-      </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Content {...focusReturn} align="end" sideOffset={4} className="z-50 grid grid-cols-3 gap-1 rounded-md border border-border bg-bg p-2 shadow-lg">
-          {TASK_COLORS.map((color) => (
-            <Popover.Close asChild key={color}>
-              <button
-                type="button"
-                aria-label={color}
-                aria-pressed={task.color === color}
-                onClick={() => color !== task.color && onChange(color)}
-                className={`h-6 w-6 rounded ${task.color === color ? "ring-2 ring-text ring-offset-1 ring-offset-bg" : ""}`}
-                style={{ background: taskColors(color).fill }}
-              />
-            </Popover.Close>
-          ))}
-        </Popover.Content>
-      </Popover.Portal>
-    </Popover.Root>
+    <>
+      <IconButton
+        data-row-action
+        label={`Show “${name}” on the chart`}
+        className="h-6 w-6"
+        onClick={(event) => {
+          event.stopPropagation();
+          select(id, false);
+          center(id);
+        }}
+      >
+        <LocateFixed size={14} />
+      </IconButton>
+      <IconButton
+        data-row-action
+        label={`Open details of “${name}”`}
+        className="h-6 w-6"
+        onClick={(event) => {
+          event.stopPropagation();
+          select(id, true);
+        }}
+      >
+        <PanelRightOpen size={14} />
+      </IconButton>
+    </>
   );
 }
 
@@ -637,7 +637,7 @@ function DropIndicator({ target, depth, rowHeight, valid }: { target: NonNullabl
 }
 
 /**
- * Keys on the task list (when not typing): ↑/↓ select (which opens the details panel), Enter/F2 edit the title, Delete removes,
+ * Keys on the task list (when not typing): ↑/↓ select (an open details panel follows), Enter/F2 edit the title, Delete removes,
  * Alt+Shift+→ / ← indent / outdent, Escape clears the selection. Tab is never taken: it moves focus.
  */
 export function useListKeys(allRows: readonly BoardRow[]) {
@@ -653,7 +653,7 @@ export function useListKeys(allRows: readonly BoardRow[]) {
     const current = allRows[index];
     const move = (to: number) => {
       const next = allRows[Math.min(Math.max(to, 0), allRows.length - 1)];
-      if (next) select(next.row.id);
+      if (next) select(next.row.id, false);
     };
     switch (event.key) {
       case "ArrowRight":
