@@ -10,10 +10,11 @@ import { AssigneePicker } from "../assignee-picker";
 import { useBoard, useRun } from "../board-context";
 import { PredecessorPicker } from "../predecessor-picker";
 import { setCollapsed } from "../collapse";
+import { formatDays } from "../chart/bars";
 import { taskColors } from "../format";
 import type { BoardRow } from "../model";
 import { useSelection } from "../selection";
-import { addAtEnd, addRowBelow, addSubtask, deleteRow, dropMove, setCalendarDays, setWorkingDays, type DropZone } from "./list-actions";
+import { addAtEnd, addRowBelow, addSubtask, deleteRow, dropMove, parseDays, setActualDays, setWorkingDays, type DropZone } from "./list-actions";
 
 /**
  * Column template shared by the header and the rows: # · title · assignee · WD · CD · predecessor · color.
@@ -72,8 +73,8 @@ export function ListHeader({ query, onQuery }: { query: string; onQuery: (query:
         <span title="Working days" className="px-1 text-right">
           WD
         </span>
-        <span title="Calendar days" className="px-1 text-right">
-          CD
+        <span title="Actual work days" className="px-1 text-right">
+          AWD
         </span>
         <span title="Predecessor (row #)" className="px-1 text-right">
           Pred.
@@ -84,16 +85,19 @@ export function ListHeader({ query, onQuery }: { query: string; onQuery: (query:
   );
 }
 
-/** Working days and calendar days a row spans ("–" when it has no dates). */
-export function durations(entry: BoardRow, calendar: Calendar): { working: string; days: string } {
+/** Planned working days (a task's own; parents and sections: working days across their dates) and actual work days. */
+export function durations(entry: BoardRow, calendar: Calendar): { working: string; actual: string } {
   const { row, span } = entry;
-  if (!span) return { working: row.kind === "task" && !entry.isParent ? String(row.duration) : "–", days: "–" };
-  const days = String(span.end - span.start + 1);
-  if (row.kind === "task" && !entry.isParent) return { working: String(row.duration), days };
+  const actual = entry.actualDays === null ? "" : formatDays(entry.actualDays);
+  if (row.kind === "task" && !entry.isParent) return { working: formatDays(row.duration), actual };
+  if (!span) return { working: "–", actual };
   let working = 0;
   for (let day = span.start; day <= span.end; day++) if (calendar.isWorkingDay(day, null)) working++;
-  return { working: String(working), days };
+  return { working: String(working), actual };
 }
+
+/** Actual work days against the plan: red when over, green when under (single tasks). */
+const ACTUAL_TINT = { over: "text-[var(--awd-over)]", under: "text-[var(--awd-under)]", even: "" } as const;
 
 /** "#3": the predecessor's row number */
 export function predecessorText(entry: Pick<BoardRow, "row">, numbers: ReadonlyMap<RowId, number>): string {
@@ -125,7 +129,7 @@ function InlineInput({
    * more is saved from this input). Tab is left alone: it moves focus, which saves.
    */
   onKey?: (event: KeyboardEvent<HTMLInputElement>, value: string) => boolean;
-  inputMode?: "numeric" | "text";
+  inputMode?: "numeric" | "decimal" | "text";
   /** `data-cell` of the control to focus again when editing ends from the keyboard (Enter / Escape) */
   cell: string;
 }) {
@@ -170,7 +174,7 @@ function InlineInput({
   );
 }
 
-type Column = "wd" | "cd" | "pred";
+type Column = "wd" | "awd" | "pred";
 
 /** After a picker closes, carry on from its cell — unless focus already went somewhere else. */
 function refocusCell(cell: string) {
@@ -266,7 +270,7 @@ export function ListRows({
         const { row } = entry;
         const task = row.kind === "task" ? row : null;
         const assignee = task?.resourceId ? resourceMap.get(task.resourceId) : undefined;
-        const { working, days } = durations(entry, calendar);
+        const { working, actual } = durations(entry, calendar);
         const predecessor = predecessorText(entry, numbers);
         const weight = row.kind === "section" ? "font-bold" : entry.isParent ? "font-semibold" : "";
         const selected = selectedId === row.id;
@@ -439,14 +443,15 @@ export function ListRows({
             <span role="gridcell" aria-label={`${working} working days`} className="text-right text-xs tabular-nums">
               {editingCell === "wd" && task ? (
                 <InlineInput
-                  initial={String(task.duration)}
+                  initial={formatDays(task.duration)}
                   label="Working days"
                   cell={`${row.id}:wd`}
-                  inputMode="numeric"
+                  inputMode="decimal"
                   className="w-full text-right text-xs"
                   onCommit={(value) => {
                     setCell(null);
-                    if (value.trim() !== String(task.duration)) setWorkingDays(board, task, Number(value.trim()));
+                    const days = parseDays(value);
+                    if (days !== null && days !== task.duration) setWorkingDays(board, task, days);
                   }}
                   onCancel={() => setCell(null)}
                 />
@@ -462,39 +467,33 @@ export function ListRows({
                 </CellButton>
               )}
             </span>
-            <span role="gridcell" aria-label={`${days} calendar days`} className="text-right text-xs tabular-nums">
-              {editingCell === "cd" && task && entry.span ? (
+            <span
+              role="gridcell"
+              aria-label={actual ? `${actual} actual work days` : "No actual work days"}
+              className={`text-right text-xs tabular-nums ${entry.actual ? ACTUAL_TINT[entry.actual.versusPlan] : ""}`}
+            >
+              {editingCell === "awd" && task ? (
                 <InlineInput
-                  initial={days}
-                  label="Calendar days"
-                  cell={`${row.id}:cd`}
-                  inputMode="numeric"
+                  initial={actual}
+                  label="Actual work days"
+                  cell={`${row.id}:awd`}
+                  inputMode="decimal"
                   className="w-full text-right text-xs"
                   onCommit={(value) => {
                     setCell(null);
-                    if (value.trim() !== days) setCalendarDays(board, task, entry.span!, Number(value.trim()));
+                    if (value.trim() !== actual) setActualDays(board, task, parseDays(value));
                   }}
                   onCancel={() => setCell(null)}
                 />
               ) : (
                 <CellButton
-                  editable={canEdit && !!task && !entry.isParent && task.duration > 0 && entry.span !== null}
-                  hint={
-                    !canEdit
-                      ? undefined
-                      : entry.isParent || !task
-                        ? "Worked out from the tasks inside"
-                        : task.duration === 0
-                          ? "A milestone is a single day"
-                          : entry.span === null
-                            ? "Give it dates first (drag it onto the chart or set a start)"
-                            : undefined
-                  }
-                  label={`Calendar days of “${row.title || "Untitled"}”`}
-                  cell={`${row.id}:cd`}
-                  onEdit={() => setCell({ id: row.id, column: "cd" })}
+                  editable={canEdit && !!task && !entry.isParent && task.duration > 0}
+                  hint={canEdit ? (entry.isParent || !task ? "Added up from the tasks inside" : task.duration === 0 ? "Milestones have no actual work days" : undefined) : undefined}
+                  label={`Actual work days of “${row.title || "Untitled"}”`}
+                  cell={`${row.id}:awd`}
+                  onEdit={() => setCell({ id: row.id, column: "awd" })}
                 >
-                  {days}
+                  {actual}
                 </CellButton>
               )}
             </span>

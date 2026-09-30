@@ -53,14 +53,14 @@ export function signedIn(user: UserDto, projects: ProjectDto[] = []): FakeApi {
 export function renderApp(path: string) {
   const router = createAppRouter(createMemoryHistory({ initialEntries: [path] }));
   const client = createQueryClient({ retry: false });
-  render(
+  const { unmount } = render(
     <QueryClientProvider client={client}>
       <Tooltip.Provider>
         <RouterProvider router={router} />
       </Tooltip.Provider>
     </QueryClientProvider>,
   );
-  return { router, user: userEvent.setup() };
+  return { router, user: userEvent.setup(), unmount };
 }
 
 export { screen };

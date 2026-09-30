@@ -27,6 +27,10 @@
   --parent: #3a4150;
   --section: #8a93a3;
   --baseline: rgba(29, 35, 48, 0.28);
+  /* actual work days track: longer / shorter than planned / on plan */
+  --awd-over: #d32f2f;
+  --awd-under: #1e8449;
+  --awd-even: #8a93a3;
   --skipped: #c3c8d1;
   --task-blue: #1f6fd6;
   --task-purple: #7e3fc4;
@@ -66,6 +70,9 @@
   --parent: #d5d7dc;
   --section: #8b8f99;
   --baseline: rgba(232, 232, 234, 0.3);
+  --awd-over: #ff7b7b;
+  --awd-under: #4cc38a;
+  --awd-even: #8b8f99;
   --skipped: #4a4b52;
   /* Saturated bars (mockup A) with dark titles, which keeps AA contrast on every color. */
   --task-blue: #3ea0e6;

@@ -1,4 +1,4 @@
-import { computeSchedule, CycleError, toDay, type Calendar, type ProjectState, type RowId, type Span } from "@ganttlines/engine";
+import { buildTree, childrenOf, computeSchedule, CycleError, toDay, type Calendar, type ProjectState, type RowId, type Span, type Tree } from "@ganttlines/engine";
 import type { BaselineTaskDto } from "@ganttlines/protocol";
 import { outline, type ListRow } from "./rows";
 
@@ -18,6 +18,29 @@ export interface BoardRow extends ListRow {
   violation: boolean;
   /** the baseline's dates under the live bar (overlay mode) */
   ghost: Ghost | null;
+  /** part of the last day column the bar leaves empty: 0.5 for durations like 2.5 */
+  endTrim: number;
+  /** working days it really took (a task's own; parents and sections add up their subtasks'); null when none recorded */
+  actualDays: number | null;
+  /** single tasks with actual days: the span those days cover from its start, and how they compare with the plan */
+  actual: { span: Span; endTrim: number; versusPlan: "over" | "under" | "even" } | null;
+}
+
+/** Half a column is left empty when a length ends on half a day (2.5 → 0.5). */
+const trimOf = (days: number) => Math.ceil(days) - days;
+
+/** Actual days of a row: a task's own, or the sum over the tasks inside it (null when none recorded). */
+export function actualDaysOf(state: ProjectState, tree: Tree, id: RowId): number | null {
+  const row = state.rows[id];
+  if (!row) return null;
+  const children = childrenOf(tree, id);
+  if (row.kind === "task" && !children.some((child) => child.kind === "task")) return row.actualDuration;
+  let sum: number | null = null;
+  for (const child of children) {
+    const days = actualDaysOf(state, tree, child.id);
+    if (days !== null) sum = (sum ?? 0) + days;
+  }
+  return sum;
 }
 
 export interface BoardModel {
@@ -53,16 +76,35 @@ export function boardModel(
   const switched = baseline?.mode === "switch";
   const sectionSpans = switched ? rollUpSections(state, saved) : null;
 
+  const tree = buildTree(state);
   const rows = visible.map((entry): BoardRow => {
     const { row } = entry;
+    const actualDays = actualDaysOf(state, tree, row.id);
     const liveKind: DrawKind = row.kind === "section" ? "section" : entry.isParent ? "parent" : row.duration === 0 ? "milestone" : "task";
     const computed = schedule?.get(row.id);
     if (switched) {
       const ghost = saved.get(row.id);
       const span = row.kind === "section" ? (sectionSpans!.get(row.id) ?? null) : (ghost?.span ?? null);
-      return { ...entry, span, kind: ghost?.kind ?? liveKind, violation: false, ghost: null };
+      return { ...entry, span, kind: ghost?.kind ?? liveKind, violation: false, ghost: null, endTrim: 0, actualDays, actual: null };
     }
-    return { ...entry, span: computed?.span ?? null, kind: liveKind, violation: computed?.violation ?? false, ghost: saved.get(row.id) ?? null };
+    const span = computed?.span ?? null;
+    const single = row.kind === "task" && liveKind === "task";
+    let actual: BoardRow["actual"] = null;
+    if (single && span && row.actualDuration !== null) {
+      const end = calendar.addWorkingDays(span.start, Math.ceil(row.actualDuration) - 1, row.resourceId);
+      const versusPlan = row.actualDuration > row.duration ? "over" : row.actualDuration < row.duration ? "under" : "even";
+      actual = { span: { start: span.start, end }, endTrim: trimOf(row.actualDuration), versusPlan };
+    }
+    return {
+      ...entry,
+      span,
+      kind: liveKind,
+      violation: computed?.violation ?? false,
+      ghost: saved.get(row.id) ?? null,
+      endTrim: single ? trimOf(row.duration) : 0,
+      actualDays,
+      actual,
+    };
   });
   return { rows, numbers, cycle: schedule === null };
 }

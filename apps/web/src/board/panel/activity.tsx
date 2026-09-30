@@ -39,6 +39,8 @@ export function describeChange(change: RowChange, names: Names): string | null {
       return null; // offsets aren't shown anywhere (dragging a linked task records them)
     case "description":
       return "edited the description";
+    case "actualDuration":
+      return typeof after === "number" ? `recorded ${String(after)} actual work ${after === 1 ? "day" : "days"}` : "cleared its actual work days";
     case "parentId":
     case "position":
       return "moved it in the list";

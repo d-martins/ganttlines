@@ -12,7 +12,9 @@ import { AssigneePicker } from "../assignee-picker";
 import { PredecessorPicker } from "../predecessor-picker";
 import { useBoard, useRun } from "../board-context";
 import { formatDay, taskColors } from "../format";
-import { addSubtask, setWorkingDays } from "../list/list-actions";
+import { formatDays } from "../chart/bars";
+import { addSubtask, parseDays, setActualDays, setWorkingDays } from "../list/list-actions";
+import { actualDaysOf } from "../model";
 import { useSelection } from "../selection";
 import { Activity } from "./activity";
 import { Comments } from "./comments";
@@ -193,6 +195,7 @@ function TaskFields({ task, isParent, schedule, numbers }: { task: TaskRow; isPa
   const span = schedule?.get(task.id)?.span ?? null;
   const assignee = task.resourceId ? resourceMap.get(task.resourceId) : undefined;
   const leaf = !isParent;
+  const actualSum = isParent ? actualDaysOf(state, buildTree(state), task.id) : null;
   const milestone = leaf && task.duration === 0;
   const datesLocked = leaf && task.locked;
   const predecessor = task.predecessorId ? state.rows[task.predecessorId] : undefined;
@@ -245,9 +248,13 @@ function TaskFields({ task, isParent, schedule, numbers }: { task: TaskRow; isPa
             type="number"
             aria-label="Working days"
             min={0}
+            step={0.5}
             value={String(task.duration)}
             disabled={!canEdit || datesLocked}
-            onCommit={(value) => setWorkingDays(board, task, Number(value))}
+            onCommit={(value) => {
+              const days = parseDays(value);
+              if (days !== null) setWorkingDays(board, task, days);
+            }}
           />
         </Field>
       ) : (
@@ -255,6 +262,25 @@ function TaskFields({ task, isParent, schedule, numbers }: { task: TaskRow; isPa
           <span className="text-muted">{span ? `${formatDay(span.start)} – ${formatDay(span.end)} (from its subtasks)` : "From its subtasks (none scheduled)"}</span>
         </Field>
       )}
+      {leaf && !milestone ? (
+        <Field label="Actual work days">
+          <CommitInput
+            type="number"
+            aria-label="Actual work days"
+            min={0.5}
+            step={0.5}
+            placeholder="Not recorded"
+            value={task.actualDuration === null ? "" : String(task.actualDuration)}
+            disabled={!canEdit}
+            onCommit={(value) => setActualDays(board, task, parseDays(value))}
+          />
+        </Field>
+      ) : null}
+      {!leaf && actualSum !== null ? (
+        <Field label="Actual work days">
+          <span className="text-muted">{formatDays(actualSum)} (from its subtasks)</span>
+        </Field>
+      ) : null}
       <Field label="Predecessor">
         {canEdit ? (
           <PredecessorPicker

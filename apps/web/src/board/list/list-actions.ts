@@ -1,4 +1,4 @@
-import { buildTree, childrenOf, fromDay, type ProjectState, type Row, type RowId, type Span, type TaskRow } from "@ganttlines/engine";
+import { buildTree, childrenOf, type ProjectState, type Row, type RowId, type TaskRow } from "@ganttlines/engine";
 import { toast } from "../../ui/toast";
 import { runCommand, type BoardContextValue } from "../board-context";
 import { setCollapsed } from "../collapse";
@@ -67,9 +67,17 @@ export function setPredecessor(board: Board, task: TaskRow, predecessorId: RowId
   }
 }
 
-/** Sets working days from the WD column: 0 makes a milestone. */
+/** "2.5" or "2,5" → 2.5; "" → null; NaN when unreadable. */
+export function parseDays(text: string): number | null {
+  const trimmed = text.trim().replace(",", ".");
+  return trimmed === "" ? null : Number(trimmed);
+}
+
+const isHalfDays = (value: number) => Number.isFinite(value) && Number.isInteger(value * 2);
+
+/** Sets working days from the WD column: whole or half days; 0 makes a milestone. */
 export function setWorkingDays(board: Board, task: TaskRow, value: number): void {
-  if (!Number.isInteger(value) || value < 0) return toast("Working days must be a whole number (0 = milestone)", { tone: "error" });
+  if (!isHalfDays(value) || value < 0) return toast("Working days are whole or half days, like 3 or 2.5 (0 = milestone)", { tone: "error" });
   if (value === task.duration) return;
   if (value === 0) {
     runCommand(board, { type: "convertMilestone", id: task.id, milestone: true });
@@ -79,13 +87,11 @@ export function setWorkingDays(board: Board, task: TaskRow, value: number): void
   if (value !== 1 || task.duration !== 0) runCommand(board, { type: "setDuration", id: task.id, duration: value });
 }
 
-/**
- * Sets calendar days from the CD column: the task keeps its start and ends that many days later
- * (on the last working day by then); its working days follow from the calendar.
- */
-export function setCalendarDays(board: Board, task: TaskRow, span: Span, value: number): void {
-  if (!Number.isInteger(value) || value < 1) return toast("Calendar days must be a whole number from 1", { tone: "error" });
-  runCommand(board, { type: "resizeTask", id: task.id, edge: "end", date: fromDay(span.start + value - 1) });
+/** Records (or, with null, clears) the working days a task really took. */
+export function setActualDays(board: Board, task: TaskRow, value: number | null): void {
+  if (value !== null && (!isHalfDays(value) || value < 0.5)) return toast("Actual work days are whole or half days, like 5 or 2.5", { tone: "error" });
+  if (value === task.actualDuration) return;
+  runCommand(board, { type: "setActualDuration", id: task.id, days: value });
 }
 
 export type DropZone = "before" | "inside" | "after";

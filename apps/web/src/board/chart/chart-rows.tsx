@@ -8,7 +8,7 @@ import type { BoardRow } from "../model";
 import { useSelection } from "../selection";
 import type { BarStyle } from "../view-store";
 import { BarMenu } from "./bar-menu";
-import { BAR_HEIGHT, barDetails, extent, GhostBar, ROW_HEIGHT, RowBar } from "./bars";
+import { ActualTrack, BAR_HEIGHT, barDetails, extent, GhostBar, ROW_HEIGHT, RowBar } from "./bars";
 import { dragCommand, stepDay, useChartDrag, type ChartDrag, type DragKind } from "./drag";
 import type { Timeline } from "./timeline";
 
@@ -109,7 +109,7 @@ export function ChartRows({
       if (kind === "link") {
         const target = shown[Math.floor(y / rowHeight)];
         const targetId = target && target.row.kind === "task" && target.span && target.row.id !== rowId ? target.row.id : null;
-        const from = extent(entry.kind, span, now, style);
+        const from = extent(entry.kind, span, now, style, entry.endTrim);
         current = {
           rowId,
           kind,
@@ -194,7 +194,7 @@ export function ChartRows({
         const task = row.kind === "task" ? row : null;
         const unscheduledLeaf = task && !entry.isParent && !span;
         const editable = canEdit && task !== null && span !== null;
-        const box = span ? extent(kind, span, timeline, style) : null;
+        const box = span ? extent(kind, span, timeline, style, entry.endTrim) : null;
         const center = rowHeight / 2;
         const dragging = drag?.rowId === row.id;
         const resizable = editable && kind === "task" && !task!.locked;
@@ -213,6 +213,7 @@ export function ChartRows({
             }}
           >
             {entry.ghost ? <GhostBar ghost={entry.ghost} timeline={timeline} style={style} /> : null}
+            <ActualTrack entry={entry} timeline={timeline} style={style} />
             {span ? (
               <RowBar
                 entry={entry}
