@@ -3,7 +3,7 @@ import type { CommentDto, ProjectStateDto } from "@ganttlines/protocol";
 import { fireEvent, render, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { describeEntry } from "../src/board/panel/activity";
-import { MarkdownLite } from "../src/board/panel/markdown-lite";
+import { RichTextView } from "../src/ui/rich-text";
 import { ANA, CALENDAR, FakeWebSocket, PROJECT_ID, projectState, section, task } from "./board-fixtures";
 import { ADMIN, project, renderApp, screen, signedIn, VIEWER } from "./utils";
 
@@ -103,6 +103,28 @@ describe("details panel", () => {
     expect(panel()).toHaveAccessibleName("Details of “ui”"); // selecting again reopens it
   });
 
+  it("puts the description first and edits it as formatted text, saved as Markdown", async () => {
+    const { user } = await panelBoard();
+    await selectRow(user, "hooks");
+    const description = within(panel()).getByRole("textbox", { name: "Description" });
+    const assignee = within(panel()).getByRole("button", { name: /^Assignee/ });
+    // right under the title, before the fields
+    expect(description.compareDocumentPosition(assignee) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const box = description.closest(".overflow-y-auto") as HTMLElement;
+    expect(box.style.height).toBe("72px"); // empty: its minimum
+    expect(within(panel()).getByRole("toolbar", { name: "Description formatting" })).toHaveClass("max-h-0");
+    await user.click(description);
+    // focused: opens to half the panel (jsdom has no layout, so the panel's fallback half-height)
+    expect(box.style.height).toBe("240px");
+    expect(box).toHaveClass("transition-[height]");
+    expect(within(panel()).getByRole("toolbar", { name: "Description formatting" })).toHaveClass("max-h-10");
+    await user.click(within(within(panel()).getByRole("toolbar", { name: "Description formatting" })).getByRole("button", { name: "Bold (⌘B)" }));
+    await user.type(description, "Billing");
+    await user.click(within(panel()).getByRole("textbox", { name: "Task title" })); // leaving saves it
+    expect(sentCommands().at(-1)).toEqual({ type: "setDescription", id: "hooks", description: "**Billing**" });
+    expect(box.style.height).toBe("72px");
+  });
+
   it("follows the selection without taking focus from the list", async () => {
     const { user } = await panelBoard();
     await selectRow(user, "ui");
@@ -199,22 +221,22 @@ describe("details panel", () => {
   });
 });
 
-describe("Markdown-lite", () => {
-  it("renders bold, italic, links and mentions, and nothing else", () => {
-    const { container } = render(<MarkdownLite text={"**b** *i* _u_ see https://x.test/a?b=1). @Ana <img src=x onerror=alert(1)>"} />);
+describe("rich text (comments and descriptions)", () => {
+  it("shows Markdown formatted: bold, italic, lists and safe links", () => {
+    const { container } = render(<RichTextView markdown={"**b** *i* see https://x.test/a?b=1 and [docs](https://x.test/docs)\n\n- one\n- two"} />);
     expect(container.querySelector("strong")).toHaveTextContent("b");
-    expect([...container.querySelectorAll("em")].map((em) => em.textContent)).toEqual(["i", "u"]);
-    const link = container.querySelector("a")!;
-    expect(link).toHaveAttribute("href", "https://x.test/a?b=1");
-    expect(link).toHaveAttribute("rel", "noopener noreferrer");
-    expect(container.querySelector("img")).toBeNull();
-    expect(container).toHaveTextContent("<img src=x onerror=alert(1)>");
-    expect(container).toHaveTextContent("@Ana");
+    expect(container.querySelector("em")).toHaveTextContent("i");
+    expect(container.querySelectorAll("li")).toHaveLength(2);
+    const links = [...container.querySelectorAll("a")];
+    expect(links.map((link) => link.getAttribute("href"))).toContain("https://x.test/docs");
+    for (const link of links) expect(link).toHaveAttribute("rel", "noopener noreferrer nofollow");
   });
 
-  it("refuses links that aren't http(s)", () => {
-    const { container } = render(<MarkdownLite text="javascript:alert(1) and data:text/html,x" />);
-    expect(container.querySelector("a")).toBeNull();
+  it("never runs or keeps raw HTML, and refuses javascript: links", () => {
+    const { container } = render(<RichTextView markdown={'<img src=x onerror="window.pwned=1"> <script>window.pwned=1</script> [x](javascript:alert(1)) <a href="javascript:alert(2)">y</a>'} />);
+    expect(container.querySelector("img, script, iframe")).toBeNull();
+    expect(container.querySelector('[onerror], a[href^="javascript"]')).toBeNull();
+    expect((window as unknown as { pwned?: number }).pwned).toBeUndefined();
   });
 });
 

@@ -5,6 +5,8 @@ import { Lock, Plus, UserRound, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type InputHTMLAttributes, type KeyboardEvent, type ReactNode } from "react";
 import { currentUser } from "../../api/queries";
 import { Avatar } from "../../ui/avatar";
+import { RichTextEditor } from "../../ui/rich-text";
+import { toast } from "../../ui/toast";
 import { IconButton } from "../../ui/button";
 import { AssigneePicker } from "../assignee-picker";
 import { PredecessorPicker } from "../predecessor-picker";
@@ -85,6 +87,17 @@ export function DetailsPanel({ numbers }: { numbers: ReadonlyMap<RowId, number> 
     if (open) setLastId(selected.id);
   }, [open, selected?.id]);
   const row = open ? selected : lastId ? state.rows[lastId] : undefined;
+  // Rich text boxes grow up to half the panel's height.
+  const [halfHeight, setHalfHeight] = useState(240);
+  useEffect(() => {
+    const element = panel.current;
+    if (!element) return;
+    const measure = () => setHalfHeight(Math.round(element.clientHeight / 2) || 240);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [row !== undefined]);
   const schedule = useMemo<Schedule | null>(() => {
     try {
       return computeSchedule(state, calendar);
@@ -145,13 +158,9 @@ export function DetailsPanel({ numbers }: { numbers: ReadonlyMap<RowId, number> 
           onCommit={(title) => run({ type: "updateTitle", id: row.id, title: title.trim() })}
           className="border-transparent px-1 text-base font-semibold hover:border-border focus:border-border-strong"
         />
+        {row.kind === "task" ? <Description task={row} maxHeight={halfHeight} /> : null}
         {row.kind === "task" ? <TaskFields task={row} isParent={isParent} schedule={schedule} numbers={numbers} /> : null}
       </div>
-      {row.kind === "task" ? (
-        <Section title="Description">
-          <Description task={row} />
-        </Section>
-      ) : null}
       <Section title={row.kind === "section" ? "Tasks" : "Subtasks"}>
         <ul className="flex flex-col gap-1 text-sm">
           {children.map((child) => (
@@ -167,7 +176,7 @@ export function DetailsPanel({ numbers }: { numbers: ReadonlyMap<RowId, number> 
       </Section>
       {row.kind === "task" ? (
         <Section title="Comments">
-          <Comments projectId={sync.projectId} taskId={row.id} canComment={board.canComment} isAdmin={me.data?.role === "admin"} />
+          <Comments projectId={sync.projectId} taskId={row.id} canComment={board.canComment} isAdmin={me.data?.role === "admin"} maxHeight={halfHeight} />
         </Section>
       ) : null}
       <Section title="History">
@@ -296,34 +305,25 @@ function TaskFields({ task, isParent, schedule, numbers }: { task: TaskRow; isPa
   );
 }
 
-function Description({ task }: { task: TaskRow }) {
+/**
+ * The task's description, as formatted text (stored as Markdown). The box grows with its content up
+ * to half the panel's height, and opens to that height while it's being edited.
+ */
+function Description({ task, maxHeight }: { task: TaskRow; maxHeight: number }) {
   const { canEdit } = useBoard();
   const run = useRun();
-  const [draft, setDraft] = useState<string | null>(null);
-  // Reset when switching tasks.
-  useEffect(() => setDraft(null), [task.id]);
-  const commit = () => {
-    if (draft !== null && draft !== task.description) run({ type: "setDescription", id: task.id, description: draft });
-    setDraft(null);
-  };
   return (
-    <textarea
-      aria-label="Description"
+    <RichTextEditor
+      key={task.id}
+      value={task.description}
+      label="Description"
       placeholder={canEdit ? "Add a description…" : "No description."}
-      rows={4}
-      maxLength={COMMAND_LIMITS.descriptionMax}
-      disabled={!canEdit}
-      value={draft ?? task.description}
-      onChange={(event) => setDraft(event.target.value)}
-      onBlur={commit}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) commit();
-        else if (event.key === "Escape" && draft !== null) {
-          event.stopPropagation();
-          setDraft(null);
-        }
+      editable={canEdit}
+      autoSize={{ min: 72, max: maxHeight, expandOnFocus: true }}
+      onCommit={(description) => {
+        if (description.length > COMMAND_LIMITS.descriptionMax) return toast(`Descriptions are limited to ${COMMAND_LIMITS.descriptionMax} characters`, { tone: "error" });
+        run({ type: "setDescription", id: task.id, description });
       }}
-      className={`${INPUT} resize-y`}
     />
   );
 }

@@ -1,33 +1,54 @@
 import { BOARD_LIMITS, type CommentDto } from "@ganttlines/protocol";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { useState, type KeyboardEvent } from "react";
+import { useState } from "react";
 import { errorMessage } from "../../api/client";
 import { taskComments, useDeleteComment, useEditComment, usePostComment } from "../../api/queries";
 import { Button } from "../../ui/button";
 import { ConfirmButton } from "../../ui/confirm";
 import { ErrorText } from "../../ui/field";
+import { toast } from "../../ui/toast";
 import { fullTime, timeAgo } from "../format";
-import { MarkdownLite } from "./markdown-lite";
+import { RichTextEditor, RichTextView } from "../../ui/rich-text";
 
-const TEXTAREA = "w-full resize-y rounded-md border border-border-strong bg-bg px-2.5 py-1.5 text-sm text-text";
-
-/** Ctrl/Cmd+Enter sends, like most chat boxes; a plain Enter is a new line. */
-const isSend = (event: KeyboardEvent) => event.key === "Enter" && (event.metaKey || event.ctrlKey);
 
 /**
  * A task's comments, newest first: a box to write one (Markdown-lite), then the list with
  * edit/delete on your own (admins may delete any). Live: other people's comments arrive over the
  * WebSocket into the same cache.
  */
-export function Comments({ projectId, taskId, canComment, isAdmin }: { projectId: string; taskId: string; canComment: boolean; isAdmin: boolean }) {
+export function Comments({
+  projectId,
+  taskId,
+  canComment,
+  isAdmin,
+  maxHeight,
+}: {
+  projectId: string;
+  taskId: string;
+  canComment: boolean;
+  isAdmin: boolean;
+  /** the write/edit boxes grow up to this height */
+  maxHeight: number;
+}) {
   const query = useInfiniteQuery(taskComments(projectId, taskId));
   const post = usePostComment(projectId);
   const [draft, setDraft] = useState("");
+  // Bumped after sending, to start a fresh (empty) editor.
+  const [round, setRound] = useState(0);
 
   const send = () => {
     const body = draft.trim();
     if (!body || post.isPending) return;
-    post.mutate({ taskId, body }, { onSuccess: () => setDraft("") });
+    if (body.length > BOARD_LIMITS.commentMax) return toast(`Comments are limited to ${BOARD_LIMITS.commentMax} characters`, { tone: "error" });
+    post.mutate(
+      { taskId, body },
+      {
+        onSuccess: () => {
+          setDraft("");
+          setRound((value) => value + 1);
+        },
+      },
+    );
   };
 
   return (
@@ -40,19 +61,14 @@ export function Comments({ projectId, taskId, canComment, isAdmin }: { projectId
             send();
           }}
         >
-          <textarea
-            aria-label="Write a comment"
-            placeholder="Write a comment… (**bold**, *italic*, links, @names)"
-            rows={3}
-            maxLength={BOARD_LIMITS.commentMax}
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (!isSend(event)) return;
-              event.preventDefault();
-              send();
-            }}
-            className={TEXTAREA}
+          <RichTextEditor
+            key={round}
+            value=""
+            label="Write a comment"
+            placeholder="Write a comment… (⌘/Ctrl+Enter to send)"
+            autoSize={{ min: 56, max: maxHeight }}
+            onChange={setDraft}
+            onSubmit={send}
           />
           <ErrorText>{post.error ? errorMessage(post.error) : null}</ErrorText>
           <Button type="submit" variant="primary" className="self-end text-xs" disabled={!draft.trim() || post.isPending}>
@@ -70,7 +86,7 @@ export function Comments({ projectId, taskId, canComment, isAdmin }: { projectId
             {query.data.pages
               .flatMap((page) => page.comments)
               .map((comment) => (
-                <CommentItem key={comment.id} projectId={projectId} comment={comment} canDelete={comment.mine || isAdmin} />
+                <CommentItem key={comment.id} projectId={projectId} comment={comment} canDelete={comment.mine || isAdmin} maxHeight={maxHeight} />
               ))}
           </ol>
           {query.data.pages[0]?.comments.length === 0 ? <p className="text-sm text-muted">No comments yet.</p> : null}
@@ -85,7 +101,7 @@ export function Comments({ projectId, taskId, canComment, isAdmin }: { projectId
   );
 }
 
-function CommentItem({ projectId, comment, canDelete }: { projectId: string; comment: CommentDto; canDelete: boolean }) {
+function CommentItem({ projectId, comment, canDelete, maxHeight }: { projectId: string; comment: CommentDto; canDelete: boolean; maxHeight: number }) {
   const edit = useEditComment(projectId);
   const remove = useDeleteComment(projectId);
   const [editing, setEditing] = useState<string | null>(null);
@@ -130,21 +146,12 @@ function CommentItem({ projectId, comment, canDelete }: { projectId: string; com
       </div>
       {editing !== null ? (
         <div className="flex flex-col gap-1.5">
-          <textarea
-            aria-label="Edit comment"
-            autoFocus
-            rows={3}
-            maxLength={BOARD_LIMITS.commentMax}
-            value={editing}
-            onChange={(event) => setEditing(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") setEditing(null);
-              else if (isSend(event)) {
-                event.preventDefault();
-                save();
-              }
-            }}
-            className={TEXTAREA}
+          <RichTextEditor
+            value={comment.body}
+            label="Edit comment"
+            autoSize={{ min: 56, max: maxHeight }}
+            onChange={setEditing}
+            onSubmit={save}
           />
           <ErrorText>{edit.error ? errorMessage(edit.error) : null}</ErrorText>
           <div className="flex justify-end gap-2">
@@ -157,7 +164,7 @@ function CommentItem({ projectId, comment, canDelete }: { projectId: string; com
           </div>
         </div>
       ) : (
-        <MarkdownLite text={comment.body} />
+        <RichTextView markdown={comment.body} />
       )}
       {remove.error ? <ErrorText>{errorMessage(remove.error)}</ErrorText> : null}
     </li>
