@@ -1,3 +1,7 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 export interface Config {
   databaseUrl: string;
   /** HMAC key for session tokens; at least 32 characters */
@@ -11,6 +15,8 @@ export interface Config {
    * cannot spoof their address; a hop count (e.g. 1) or an address/CIDR list when behind a reverse proxy.
    */
   trustProxy: boolean | number | string;
+  /** The built web app to serve (apps/web/dist); null when it isn't built (development, tests) */
+  webDir: string | null;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv): Config {
@@ -27,7 +33,14 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     port,
     bind: env["BIND"] ?? "127.0.0.1",
     trustProxy: parseTrustProxy(env["TRUST_PROXY"]),
+    webDir: webDir(env["WEB_DIR"]),
   };
+}
+
+/** WEB_DIR, or apps/web/dist when it has been built. */
+function webDir(value: string | undefined): string | null {
+  const dir = value || fileURLToPath(new URL("../../web/dist", import.meta.url));
+  return existsSync(join(dir, "index.html")) ? dir : null;
 }
 
 function parseTrustProxy(value: string | undefined): boolean | number | string {

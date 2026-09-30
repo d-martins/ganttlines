@@ -13,6 +13,7 @@ export const testConfig: Config = {
   port: 3000,
   bind: "127.0.0.1",
   trustProxy: false,
+  webDir: null,
 };
 
 export interface TestContext {

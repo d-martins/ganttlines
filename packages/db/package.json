@@ -16,12 +16,12 @@
     "@ganttlines/engine": "workspace:^",
     "@prisma/adapter-pg": "7.10.0",
     "@prisma/client": "7.10.0",
-    "pg": "^8"
+    "pg": "^8",
+    "prisma": "7.10.0"
   },
   "devDependencies": {
     "@types/node": "^24",
     "@types/pg": "^8",
-    "prisma": "7.10.0",
     "typescript": "~5.9.3",
     "vite": "^8",
     "vitest": "^5"
