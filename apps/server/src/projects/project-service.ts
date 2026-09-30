@@ -168,6 +168,20 @@ export class ProjectService {
     });
   }
 
+  /**
+   * Deletes an archived project and everything in it (rows, command log, comments, highlights,
+   * baselines and share links cascade in the database). Live projects must be archived first.
+   */
+  remove(projectId: string): Promise<void> {
+    return this.queue.run(projectId, async () => {
+      const stored = await this.get(projectId);
+      if (!stored.meta.archivedAt) throw conflict("Only archived projects can be deleted — archive it first");
+      await this.db.project.delete({ where: { id: projectId } });
+      this.cache.delete(projectId);
+      this.undoStacks.forgetProject(projectId);
+    });
+  }
+
   /** Forgets the cached copy of a project (e.g. when nobody has it open any more). */
   evict(projectId: string): Promise<void> {
     return this.queue.run(projectId, async () => {

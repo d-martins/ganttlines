@@ -8,7 +8,7 @@ import type { RouteContext } from "./context";
 
 /** Viewers and above see every project; guests see none (they get access through share links, plan 2c). */
 export function projectRoutes(app: FastifyInstance, context: RouteContext): void {
-  const { db, projects } = context;
+  const { db, projects, access, hub } = context;
   app.get<{ Querystring: { archived?: string } }>("/api/projects", async (request) => {
     const user = requireUser(request, "guest");
     if (user.role === "guest") return { projects: [] };
@@ -36,6 +36,16 @@ export function projectRoutes(app: FastifyInstance, context: RouteContext): void
       ...(body.archived === undefined ? {} : { archivedAt: body.archived ? new Date() : null }),
     });
     return { project: toProjectDto(project) };
+  });
+
+  /** Archived projects only; everything in them goes too, and open boards are closed. */
+  app.delete<{ Params: { id: string } }>("/api/projects/:id", async (request, reply) => {
+    requireUser(request, "editor");
+    const id = parseId(request.params.id, "Project");
+    await projects.remove(id);
+    access.forgetProject(id);
+    hub.closeProject(id);
+    return reply.status(204).send();
   });
 
   app.get<{ Params: { id: string } }>("/api/projects/:id/state", async (request) => {

@@ -107,6 +107,11 @@ export class UndoStacks {
     this.get(projectId, userId).undo.push(commandId);
   }
 
+  /** Drops every stack of a (deleted) project. */
+  forgetProject(projectId: string): void {
+    for (const key of this.stacks.keys()) if (key.startsWith(`${projectId}:`)) this.stacks.delete(key);
+  }
+
   private get(projectId: string, userId: string) {
     const key = `${projectId}:${userId}`;
     let stack = this.stacks.get(key);

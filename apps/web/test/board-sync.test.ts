@@ -146,10 +146,11 @@ describe("BoardSync", () => {
     expect(sockets).toHaveLength(4);
   });
 
-  it("never reconnects after the server ends the session or closes for flooding", async () => {
+  it("never reconnects after the server ends the session, closes for flooding or deletes the project", async () => {
     for (const [code, reason] of [
       [4001, "signed_out"],
       [1008, "flooding"],
+      [4004, "deleted"],
     ] as const) {
       const { sync, sockets } = await started(3);
       sockets[0]!.drop(code);

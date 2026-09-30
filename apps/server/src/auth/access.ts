@@ -89,6 +89,12 @@ export class AccessService {
     return lookup;
   }
 
+  /** Call after a project is deleted: forget it and its (cascade-deleted) links. */
+  forgetProject(projectId: string): void {
+    this.knownProjects.delete(projectId);
+    this.linksByHash.clear();
+  }
+
   /** Call after a link changes or is revoked. */
   invalidate(_linkId: string): void {
     this.linksByHash.clear();

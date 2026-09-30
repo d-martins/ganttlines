@@ -2,7 +2,10 @@ import { toDbColumns } from "@ganttlines/db";
 import { TASK_DEFAULTS, type Row } from "@ganttlines/engine";
 import { describe, expect, it } from "vitest";
 import { findTreeProblem } from "../src/projects/state";
+import { randomUUID } from "node:crypto";
+import { CLOSE_PROJECT_DELETED } from "../src/realtime/hub";
 import { createUser, setupAdmin, useTestApp } from "./helpers";
+import { connect } from "./ws-client";
 
 const t = useTestApp();
 
@@ -101,5 +104,41 @@ describe("findTreeProblem", () => {
     expect(findTreeProblem([task])).toMatch(/missing parent/);
     expect(findTreeProblem([{ ...section, parentId: task.id }, task])).toMatch(/section .* is inside task|loop/);
     expect(findTreeProblem([{ ...task, parentId: TASK_ID }])).toMatch(/loop/);
+  });
+
+  it("deletes archived projects only — with their rows, history, comments and links — and closes their boards", async () => {
+    const admin = await setupAdmin(t.app);
+    const editor = await createUser(t.app, admin, { email: "ed@example.com", name: "Ed", role: "editor" });
+    const viewer = await createUser(t.app, admin, { email: "v@example.com", name: "Vi", role: "viewer" });
+    const as = (cookie: string) => ({ cookie });
+    const id = (await t.app.inject({ method: "POST", url: "/api/projects", headers: as(editor.cookie), payload: { name: "Old" } })).json().project.id;
+    const taskId = randomUUID();
+    await t.app.inject({
+      method: "POST",
+      url: `/api/projects/${id}/commands`,
+      headers: as(editor.cookie),
+      payload: { commandId: randomUUID(), command: { type: "createRow", id: taskId, kind: "task", parentId: null, afterId: null, title: "T" } },
+    });
+    await t.app.inject({ method: "POST", url: `/api/projects/${id}/comments`, headers: as(editor.cookie), payload: { taskId, body: "hi" } });
+    await t.app.inject({ method: "POST", url: `/api/projects/${id}/share-links`, headers: as(editor.cookie), payload: { access: "anonymous" } });
+
+    const remove = (cookie: string) => t.app.inject({ method: "DELETE", url: `/api/projects/${id}`, headers: as(cookie) });
+    expect((await remove(editor.cookie)).statusCode).toBe(409); // archive first
+    await t.app.inject({ method: "PATCH", url: `/api/projects/${id}`, headers: as(editor.cookie), payload: { archived: true } });
+    expect((await remove(viewer.cookie)).statusCode).toBe(403);
+
+    const board = await connect(t.app, viewer.cookie);
+    board.send({ type: "join", projectId: id, version: 0 });
+    await board.next("joined");
+    expect((await remove(editor.cookie)).statusCode).toBe(204);
+    expect(await board.closed).toBe(CLOSE_PROJECT_DELETED);
+
+    expect((await t.app.inject({ url: `/api/projects/${id}/state`, headers: as(editor.cookie) })).statusCode).toBe(404);
+    expect((await t.app.inject({ url: "/api/projects?archived=true", headers: as(editor.cookie) })).json().projects).toEqual([]);
+    expect(await t.db.row.count()).toBe(0);
+    expect(await t.db.commandLog.count({ where: { projectId: id } })).toBe(0);
+    expect(await t.db.comment.count()).toBe(0);
+    expect(await t.db.shareLink.count()).toBe(0);
+    expect((await remove(editor.cookie)).statusCode).toBe(404);
   });
 });

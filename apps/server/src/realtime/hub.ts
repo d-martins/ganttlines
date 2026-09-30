@@ -4,6 +4,8 @@ import type { Credentials } from "../auth/access";
 
 /** Close code sent when a session ends or access changes; the client should re-authenticate. */
 export const CLOSE_SESSION_ENDED = 4001;
+/** The project was deleted: its boards close for good. */
+export const CLOSE_PROJECT_DELETED = 4004;
 
 export interface Connection {
   socket: WebSocket;
@@ -80,6 +82,13 @@ export class Hub {
   /** Closes every connection that uses a (revoked) share link. */
   closeLink(linkId: string): void {
     this.closeWhere((c) => c.linkId === linkId);
+  }
+
+  /** Closes every connection showing a project (it was deleted). */
+  closeProject(projectId: string): void {
+    for (const connection of [...this.connections]) {
+      if (connection.projectId === projectId) this.close(connection, CLOSE_PROJECT_DELETED, "Project deleted");
+    }
   }
 
   /** Stops the connection immediately (no further messages are handled) and closes the socket. */

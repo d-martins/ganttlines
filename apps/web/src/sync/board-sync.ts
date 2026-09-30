@@ -18,7 +18,7 @@ export interface SocketLike {
  * - `ended`: the server closed it for good (`endReason` says why); nothing reconnects.
  */
 export type ConnectionStatus = "loading" | "live" | "reconnecting" | "ended";
-export type EndReason = "signed_out" | "flooding";
+export type EndReason = "signed_out" | "flooding" | "deleted";
 
 export interface BoardState {
   status: ConnectionStatus;
@@ -73,6 +73,7 @@ export interface BoardSyncOptions {
 }
 
 const CLOSE_SIGNED_OUT = 4001;
+const CLOSE_PROJECT_DELETED = 4004;
 const CLOSE_POLICY_VIOLATION = 1008;
 const OPEN = 1;
 
@@ -213,8 +214,10 @@ export class BoardSync {
     this.held.clear();
     this.history.clear();
     if (this.stopped) return;
-    if (code === CLOSE_SIGNED_OUT || code === CLOSE_POLICY_VIOLATION) {
-      this.store.setState({ status: "ended", endReason: code === CLOSE_SIGNED_OUT ? "signed_out" : "flooding", viewers: [] });
+    const ended: Partial<Record<number, EndReason>> = { [CLOSE_SIGNED_OUT]: "signed_out", [CLOSE_POLICY_VIOLATION]: "flooding", [CLOSE_PROJECT_DELETED]: "deleted" };
+    const endReason = ended[code];
+    if (endReason) {
+      this.store.setState({ status: "ended", endReason, viewers: [] });
       return;
     }
     this.store.setState({ status: "reconnecting", viewers: [] });

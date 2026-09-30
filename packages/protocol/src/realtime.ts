@@ -31,7 +31,8 @@ export interface Viewer {
  * - ignore patches whose version is ≤ the local version (catch-up and live patches can overlap);
  * - before `joined` (or while reloading `/state` after `reload`), hold patches that leave a gap;
  * - after `joined`, a gap means something was missed: join again with the local version.
- * Close code 4001 means the session ended or access changed (sign in again); 1008 means flooding.
+ * Close code 4001 means the session ended or access changed (sign in again); 4004 means the project
+ * was deleted; 1008 means flooding.
  */
 export type ServerMessage =
   | { type: "joined"; projectId: string; version: number; instanceVersion: number; viewers: Viewer[] }
