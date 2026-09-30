@@ -1,6 +1,6 @@
 import type { BoardRow } from "../model";
 import type { BarStyle } from "../view-store";
-import { extent, halfHeight, ROW_HEIGHT } from "./bars";
+import { extent, halfHeight, shapeOf, ROW_HEIGHT } from "./bars";
 import type { Timeline } from "./timeline";
 
 const STUB = 8;
@@ -48,7 +48,7 @@ export function Dependencies({
     const start = extent(predecessor.kind, predecessor.span, timeline, style);
     const end = extent(entry.kind, entry.span, timeline, style);
     const y = (i: number) => i * rowHeight + rowHeight / 2;
-    const d = elbow({ ...start, y: y(from!), half: halfHeight(predecessor.kind, style) }, { left: end.left, y: y(to) }, rowHeight);
+    const d = elbow({ ...start, y: y(from!), half: halfHeight(shapeOf(predecessor), style) }, { left: end.left, y: y(to) }, rowHeight);
     paths.push({ key: row.id, d, violation: entry.violation });
   });
   return (

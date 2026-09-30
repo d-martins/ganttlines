@@ -75,6 +75,14 @@ function ActualOnBar({ from, to, top, height, versusPlan, radius }: { from: numb
   );
 }
 
+/**
+ * The shape a row is drawn as: a collapsed parent task (its subtasks hidden) is drawn like a task
+ * bar, in its own color, instead of the grey bracket.
+ */
+export function shapeOf(entry: Pick<BoardRow, "kind" | "collapsed">): DrawKind {
+  return entry.kind === "parent" && entry.collapsed ? "task" : entry.kind;
+}
+
 /** Half the drawn height of a row's shape: where dependency arrows leave it (top or bottom edge). */
 export function halfHeight(kind: DrawKind | Ghost["kind"], style: BarStyle): number {
   if (kind === "milestone") return (DIAMOND[style] * Math.SQRT2) / 2; // a rotated square
@@ -155,7 +163,8 @@ export function RowBar({
   /** space between the shape and a title drawn beside it (room for the link bullet) */
   titleGap?: number;
 }) {
-  const { row, kind } = entry;
+  const { row } = entry;
+  const kind = shapeOf(entry);
   const rowHeight = ROW_HEIGHT[style];
   const { left, right: planRight } = extent(kind, span, timeline, style);
   const width = planRight - left;

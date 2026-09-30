@@ -2,6 +2,7 @@ import type { Command } from "@ganttlines/engine";
 import type { ProjectStateDto } from "@ganttlines/protocol";
 import { waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { taskColors } from "../src/board/format";
 import { describeChange } from "../src/board/panel/activity";
 import { ANA, CALENDAR, FakeWebSocket, PROJECT_ID, projectState, section, task } from "./board-fixtures";
 import { ADMIN, project, renderApp, screen, signedIn } from "./utils";
@@ -37,6 +38,12 @@ async function board(rows: ProjectStateDto["rows"] = ROWS) {
 const sentCommands = (): Command[] =>
   FakeWebSocket.last.sent.flatMap((message) => ((message as { type: string }).type === "command" ? [(message as { command: Command }).command] : []));
 const listRow = (title: string) => screen.getAllByRole("row").find((row) => within(row).queryByText(title, { exact: true }))!;
+/** A color as the browser reports it in a style attribute. */
+const swatch = (color: string) => {
+  const probe = document.createElement("div");
+  probe.style.background = color;
+  return probe.style.background;
+};
 const width = (element: Element) => parseFloat((element as HTMLElement).style.width);
 
 describe("half days and actual work days", () => {
@@ -102,6 +109,15 @@ describe("half days and actual work days", () => {
     expect(within(ends).getByRole("button", { name: "Ends at midday" })).toHaveAttribute("aria-pressed", "true");
     await user.click(within(ends).getByRole("button", { name: "Ends at the end of the day" }));
     expect(sentCommands().at(-1)).toEqual({ type: "resizeTask", id: "hooks", edge: "end", date: "2026-10-12", half: "afternoon" });
+  });
+
+  it("draws a collapsed parent as a bar in its own color (the bracket is grey)", async () => {
+    const { user } = await board(ROWS.map((row) => (row.id === "parent" && row.kind === "task" ? { ...row, color: "green" as const } : row)));
+    const shape = () => screen.getByRole("button", { name: /^parent,/ });
+    expect(shape().style.background).toBe("");
+    await user.click(within(listRow("parent")).getByRole("button", { name: "Collapse" }));
+    expect(shape().style.background).not.toBe("");
+    expect(shape().style.background).toBe(swatch(taskColors("green").fill));
   });
 
   it("records actual days in the details panel", async () => {
