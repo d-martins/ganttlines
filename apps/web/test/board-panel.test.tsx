@@ -200,7 +200,14 @@ describe("details panel", () => {
     expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
     await user.click(open!);
     expect(panel()).toHaveAccessibleName("Details of “hooks”");
+    expect(open).toHaveAttribute("aria-pressed", "true");
     expect(scrollTo).toHaveBeenCalledTimes(1);
+    // On another row it moves the panel there; again on the same row it closes it.
+    await user.click(within(rowOf("ui")).getByRole("button", { name: "Open details of “ui”" }));
+    expect(panel()).toHaveAccessibleName("Details of “ui”");
+    await user.click(within(rowOf("ui")).getByRole("button", { name: "Open details of “ui”" }));
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    expect(rowOf("ui")).toHaveAttribute("aria-selected", "true");
   });
 
   it("shows, posts and live-updates comments", async () => {

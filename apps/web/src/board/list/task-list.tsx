@@ -588,9 +588,10 @@ function CellButton({
   );
 }
 
-/** The row's quick actions: bring its bar into view, then open its details. */
+/** The row's quick actions: bring its bar into view, then open its details (again: close them). */
 function RowActions({ id, title }: { id: RowId; title: string }) {
-  const { select, center } = useSelection();
+  const { select, center, closePanel } = useSelection();
+  const showing = useSelection((selection) => selection.panelOpen && selection.selectedId === id);
   const name = title || "Untitled";
   return (
     <>
@@ -609,10 +610,13 @@ function RowActions({ id, title }: { id: RowId; title: string }) {
       <IconButton
         data-row-action
         label={`Open details of “${name}”`}
-        className="h-6 w-6"
+        aria-pressed={showing}
+        className={`h-6 w-6 ${showing ? "bg-accent-soft text-text" : ""}`}
         onClick={(event) => {
           event.stopPropagation();
-          select(id, true);
+          // A toggle for this row's details; on another row it just moves the panel there.
+          if (showing) closePanel();
+          else select(id, true);
         }}
       >
         <PanelRightOpen size={14} />
