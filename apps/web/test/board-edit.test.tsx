@@ -134,13 +134,10 @@ describe("editing the task list", () => {
     expect(screen.queryByRole("option", { name: /design/ })).not.toBeInTheDocument(); // sections can't be predecessors
     await user.type(search, "#2{Enter}");
     expect(sentCommands().at(-1)).toEqual({ type: "linkTasks", fromId: "ui", toId: "hooks" });
-    await user.keyboard(" "); // Space on the focused cell opens it again, now with the offset
+    expect(within(listRow("hooks")).getByText("#2")).toBeInTheDocument();
+    await user.keyboard(" "); // Space on the focused cell opens it again: the choice is checked, no offset to edit
     expect(screen.getByRole("option", { selected: true })).toHaveTextContent("#2 ui");
-    const offset = screen.getByRole("spinbutton", { name: "Offset from the predecessor" });
-    await user.clear(offset);
-    await user.type(offset, "1{Enter}");
-    expect(sentCommands().at(-1)).toEqual({ type: "setOffset", id: "hooks", offset: 1 });
-    expect(within(listRow("hooks")).getByText("#2 +1")).toBeInTheDocument();
+    expect(screen.queryByRole("spinbutton", { name: /offset/i })).not.toBeInTheDocument();
   });
 
   it("explains edits the engine refuses and doesn't send them", async () => {

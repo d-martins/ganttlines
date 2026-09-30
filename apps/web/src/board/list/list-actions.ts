@@ -50,42 +50,21 @@ export function deleteRow(board: Board, row: Row): void {
   toast(`Deleted “${row.title || "Untitled"}”`, { action: { label: "Undo", run: () => board.sync.requestHistory("undo") } });
 }
 
-/** "#3", "3", "#3 +2", "#3 -1", "#3 −1" → row number and offset; "" → none; null when unreadable. */
-export function parsePredecessor(text: string): { number: number; offset: number } | "none" | null {
-  const trimmed = text.trim();
-  if (trimmed === "") return "none";
-  const match = /^#?\s*(\d+)\s*(?:([+\-−])\s*(\d+))?$/.exec(trimmed);
-  if (!match) return null;
-  const offset = match[3] ? Number(match[3]) * (match[2] === "+" ? 1 : -1) : 0;
-  return { number: Number(match[1]), offset };
-}
-
 /**
- * Sets a task's predecessor from what was typed in the list. The engine makes the earlier-starting
- * task the predecessor, so linking to a row that starts later reverses the link (explained in a toast).
+ * Sets (or removes, with null) a task's predecessor. The engine makes the earlier-starting task
+ * the predecessor, so picking one that starts later reverses the link (explained in a toast).
+ * Offsets are never shown or typed: dragging a linked task records them.
  */
-export function setPredecessor(board: Board, state: ProjectState, task: TaskRow, text: string, numbers: ReadonlyMap<RowId, number>): void {
-  const parsed = parsePredecessor(text);
-  if (parsed === null) return toast("Type a row number, optionally with an offset: #3, #3 +2 or #3 -1", { tone: "error" });
-  if (parsed === "none") {
-    if (task.predecessorId) runCommand(board, { type: "removePredecessor", id: task.id });
+export function setPredecessor(board: Board, task: TaskRow, predecessorId: RowId | null, numbers: ReadonlyMap<RowId, number>): void {
+  if (predecessorId === task.predecessorId) return;
+  if (predecessorId === null) {
+    runCommand(board, { type: "removePredecessor", id: task.id });
     return;
   }
-  const predecessorId = [...numbers].find(([, number]) => number === parsed.number)?.[0];
-  const predecessor = predecessorId ? state.rows[predecessorId] : undefined;
-  if (!predecessor) return toast(`There is no row #${parsed.number}`, { tone: "error" });
-  if (predecessor.kind !== "task") return toast(`Row #${parsed.number} is a section; only tasks can be predecessors`, { tone: "error" });
-
-  if (task.predecessorId === predecessor.id) {
-    if (parsed.offset !== task.offset) runCommand(board, { type: "setOffset", id: task.id, offset: parsed.offset });
-    return;
+  const linked = runCommand(board, { type: "linkTasks", fromId: predecessorId, toId: task.id });
+  if (linked && (linked.rows[task.id] as TaskRow).predecessorId !== predecessorId) {
+    toast(`Row #${numbers.get(predecessorId)} starts later, so it now follows this task instead`);
   }
-  const linked = runCommand(board, { type: "linkTasks", fromId: predecessor.id, toId: task.id });
-  if (!linked) return;
-  // Linking starts at offset 0; apply the typed offset to whichever task became the successor.
-  const reversed = (linked.rows[task.id] as TaskRow).predecessorId !== predecessor.id;
-  if (reversed) toast(`Row #${parsed.number} starts later, so it now follows this task instead`);
-  if (parsed.offset !== 0) runCommand(board, { type: "setOffset", id: reversed ? predecessor.id : task.id, offset: parsed.offset });
 }
 
 /** Sets working days from the WD column: 0 makes a milestone. */

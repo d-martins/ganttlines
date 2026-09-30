@@ -2,7 +2,7 @@ import { toDay, weekday } from "@ganttlines/engine";
 import { describe, expect, it } from "vitest";
 import { elbow } from "../src/board/chart/dependencies";
 import { chartRange, Timeline } from "../src/board/chart/timeline";
-import { dropMove, parsePredecessor } from "../src/board/list/list-actions";
+import { dropMove } from "../src/board/list/list-actions";
 import { predecessorText } from "../src/board/list/task-list";
 import type { BoardRow } from "../src/board/model";
 import { outline } from "../src/board/rows";
@@ -69,12 +69,11 @@ describe("outline", () => {
 });
 
 describe("list and arrows", () => {
-  it("writes predecessors as row number and offset", () => {
+  it("writes predecessors as their row number only (offsets are never shown)", () => {
     const numbers = new Map([["p", 3]]);
     const entry = (offset: number) => ({ row: task("t", { predecessorId: "p", offset }) }) as BoardRow;
     expect(predecessorText(entry(0), numbers)).toBe("#3");
-    expect(predecessorText(entry(2), numbers)).toBe("#3 +2");
-    expect(predecessorText(entry(-1), numbers)).toBe("#3 −1");
+    expect(predecessorText(entry(-8), numbers)).toBe("#3");
   });
 
   it("routes arrows out of the predecessor's bottom or top into the successor's left side", () => {
@@ -100,15 +99,6 @@ describe("list width", () => {
 });
 
 describe("list edits", () => {
-  it("reads predecessors typed as row numbers with offsets", () => {
-    expect(parsePredecessor(" #3 ")).toEqual({ number: 3, offset: 0 });
-    expect(parsePredecessor("3+2")).toEqual({ number: 3, offset: 2 });
-    expect(parsePredecessor("#3 -1")).toEqual({ number: 3, offset: -1 });
-    expect(parsePredecessor("#3 −1")).toEqual({ number: 3, offset: -1 });
-    expect(parsePredecessor("")).toBe("none");
-    expect(parsePredecessor("three")).toBeNull();
-  });
-
   it("turns drops into moves: before, inside and after a row", () => {
     const state = {
       rows: {

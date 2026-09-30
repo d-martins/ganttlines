@@ -263,17 +263,6 @@ function TaskFields({ task, isParent, schedule, numbers }: { task: TaskRow; isPa
           <span>{predecessorLabel}</span>
         )}
       </Field>
-      {task.predecessorId ? (
-        <Field label="Offset (days)">
-          <CommitInput
-            type="number"
-            aria-label="Offset"
-            value={String(task.offset)}
-            disabled={!canEdit || datesLocked}
-            onCommit={(value) => run({ type: "setOffset", id: task.id, offset: Number(value) })}
-          />
-        </Field>
-      ) : null}
       <Field label="Color">
         <div role="radiogroup" aria-label="Color" className="flex flex-wrap gap-1">
           {TASK_COLORS.map((color) => (

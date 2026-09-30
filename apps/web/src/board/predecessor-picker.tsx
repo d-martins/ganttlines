@@ -1,7 +1,7 @@
 import type { ProjectState, RowId, Schedule, TaskRow } from "@ganttlines/engine";
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { SearchSelect, type SearchOption } from "../ui/search-select";
-import { useBoard, useRun } from "./board-context";
+import { useBoard } from "./board-context";
 import { formatDay } from "./format";
 import { setPredecessor } from "./list/list-actions";
 
@@ -14,7 +14,7 @@ function datesOf(schedule: Schedule | null, id: RowId): string | undefined {
 
 /**
  * Pick a task's predecessor (a task has at most one): search by row number (“3”, “#3”) or title,
- * the current one is checked. Optionally shows an offset field under the list.
+ * the current one is checked.
  */
 export function PredecessorPicker({
   task,
@@ -24,7 +24,6 @@ export function PredecessorPicker({
   trigger,
   open,
   onOpenChange,
-  withOffset = false,
 }: {
   task: TaskRow;
   state: ProjectState;
@@ -33,16 +32,10 @@ export function PredecessorPicker({
   trigger: ReactNode;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
-  withOffset?: boolean;
 }) {
   const board = useBoard();
-  const run = useRun();
   const numberOf = (id: RowId) => numbers.get(id) ?? 0;
-  const pick = (id: RowId | null) => {
-    if (id === task.predecessorId) return;
-    // Same rules as typing it: the earlier-starting task becomes the predecessor (explained if reversed).
-    setPredecessor(board, state, task, id ? `#${numberOf(id)}` : "", numbers);
-  };
+  const pick = (id: RowId | null) => setPredecessor(board, task, id, numbers);
   const options = (query: string): SearchOption[] => {
     const needle = query.replace(/^#/, "").toLocaleLowerCase();
     const tasks = Object.values(state.rows)
@@ -60,10 +53,6 @@ export function PredecessorPicker({
       })),
     ];
   };
-  const footer =
-    withOffset && task.predecessorId ? (
-      <OffsetField value={task.offset} disabled={!board.canEdit} onCommit={(offset) => offset !== task.offset && run({ type: "setOffset", id: task.id, offset })} />
-    ) : undefined;
   return (
     <SearchSelect
       trigger={trigger}
@@ -71,38 +60,8 @@ export function PredecessorPicker({
       searchLabel="Find a predecessor"
       placeholder="Row number or title…"
       empty="No task matches."
-      footer={footer}
       {...(open !== undefined ? { open, onOpenChange: onOpenChange ?? (() => undefined) } : {})}
       align="end"
     />
-  );
-}
-
-function OffsetField({ value, disabled, onCommit }: { value: number; disabled: boolean; onCommit: (offset: number) => void }) {
-  const [draft, setDraft] = useState(String(value));
-  const commit = () => {
-    const offset = Number(draft);
-    if (Number.isInteger(offset)) onCommit(offset);
-    else setDraft(String(value));
-  };
-  return (
-    <label className="flex items-center justify-between gap-2 text-xs text-muted">
-      Offset (working days; negative overlaps)
-      <input
-        type="number"
-        aria-label="Offset from the predecessor"
-        value={draft}
-        disabled={disabled}
-        onChange={(event) => setDraft(event.target.value)}
-        onBlur={commit}
-        onKeyDown={(event) => {
-          if (event.key !== "Enter") return;
-          event.preventDefault();
-          event.stopPropagation();
-          commit();
-        }}
-        className="w-16 rounded border border-border-strong bg-bg px-1.5 py-0.5 text-right text-sm text-text"
-      />
-    </label>
   );
 }

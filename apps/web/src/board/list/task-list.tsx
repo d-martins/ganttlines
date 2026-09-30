@@ -75,7 +75,7 @@ export function ListHeader({ query, onQuery }: { query: string; onQuery: (query:
         <span title="Calendar days" className="px-1 text-right">
           CD
         </span>
-        <span title="Predecessor (row # and offset)" className="px-1 text-right">
+        <span title="Predecessor (row #)" className="px-1 text-right">
           Pred.
         </span>
         <span />
@@ -95,13 +95,13 @@ export function durations(entry: BoardRow, calendar: Calendar): { working: strin
   return { working: String(working), days };
 }
 
-/** "#3", "#3 +2", "#3 −1" */
+/** "#3": the predecessor's row number */
 export function predecessorText(entry: Pick<BoardRow, "row">, numbers: ReadonlyMap<RowId, number>): string {
   const { row } = entry;
   if (row.kind !== "task" || !row.predecessorId) return "";
   const number = numbers.get(row.predecessorId);
   if (number === undefined) return "";
-  return row.offset === 0 ? `#${number}` : `#${number} ${row.offset > 0 ? "+" : "−"}${Math.abs(row.offset)}`;
+  return `#${number}`;
 }
 
 /** A text box that commits once: on Enter or when it loses focus; Escape cancels. */
@@ -506,7 +506,6 @@ export function ListRows({
                   state={state}
                   schedule={schedule}
                   numbers={numbers}
-                  withOffset
                   open={editingCell === "pred"}
                   onOpenChange={(open) => {
                     setCell(open ? { id: row.id, column: "pred" } : null);

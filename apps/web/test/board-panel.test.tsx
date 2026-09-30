@@ -91,6 +91,7 @@ describe("details panel", () => {
     await user.click(within(panel()).getByRole("button", { name: "Predecessor: None" }));
     await user.type(screen.getByRole("combobox", { name: "Find a predecessor" }), "ui{Enter}");
     expect(sentCommands().at(-1)).toEqual({ type: "linkTasks", fromId: "ui", toId: "hooks" });
+    expect(within(panel()).queryByRole("spinbutton", { name: /offset/i })).not.toBeInTheDocument();
     await user.type(within(panel()).getByRole("textbox", { name: "Description" }), "Billing events");
     await user.click(title); // leaving the description saves it
     expect(sentCommands().at(-1)).toEqual({ type: "setDescription", id: "hooks", description: "Billing events" });
@@ -234,5 +235,7 @@ describe("history wording", () => {
     expect(describeEntry(entry("linkTasks", [{ field: "predecessorId", before: null, after: "p" }]), names)).toBe("made it follow “Design”");
     expect(describeEntry(entry("convertMilestone", [{ field: "duration", before: 3, after: 0 }]), names)).toBe("made it a milestone");
     expect(describeEntry(entry("undo", [{ field: "resourceId", before: ANA.id, after: null }]), names)).toBe("undid a change (unassigned it)");
+    // offsets are never shown: a drag that also stored one reads as just the move
+    expect(describeEntry(entry("moveTask", [{ field: "userStart", before: "2026-10-01", after: "2026-10-05" }, { field: "offset", before: 0, after: -2 }]), names)).toMatch(/^scheduled it for/);
   });
 });

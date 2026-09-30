@@ -36,7 +36,7 @@ export function describeChange(change: RowChange, names: Names): string | null {
     case "predecessorId":
       return typeof after === "string" ? `made it follow ${names.state.rows[after] ? quote(names.state.rows[after]!.title) : "a deleted task"}` : "removed its predecessor";
     case "offset":
-      return `set its offset to ${Number(after) > 0 ? "+" : ""}${String(after)} days`;
+      return null; // offsets aren't shown anywhere (dragging a linked task records them)
     case "description":
       return "edited the description";
     case "parentId":

@@ -38,7 +38,7 @@ export function SearchSelect({
   searchLabel: string;
   placeholder: string;
   empty?: string;
-  /** extra controls under the list (e.g. an offset field) */
+  /** extra controls under the list */
   footer?: ReactNode;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
