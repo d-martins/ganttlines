@@ -20,7 +20,7 @@ const halfDays = z
 const half = z.enum(["morning", "afternoon"]).optional();
 const cmd = <T extends string, S extends z.ZodRawShape>(type: T, shape: S) => z.strictObject({ type: z.literal(type), ...shape });
 
-/** Wire schema for every engine row command (spec §5.7), bounding what the engine does not. */
+/** Wire schema for every engine row command, bounding what the engine does not. */
 export const CommandSchema = z.discriminatedUnion("type", [
   cmd("createRow", {
     id,

@@ -13,7 +13,7 @@ import type { RouteContext } from "./context";
 const VISITOR_COOKIE_MAX_AGE_S = 180 * 24 * 60 * 60;
 
 /**
- * Share links (spec §2.4). Editors create, list, change and revoke links for a project; anyone
+ * Share links. Editors create, list, change and revoke links for a project; anyone
  * with a link can look it up and — for anonymous links — pick a display name.
  */
 export function sharingRoutes(app: FastifyInstance, context: RouteContext): void {

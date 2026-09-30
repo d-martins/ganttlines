@@ -13,13 +13,13 @@ function offsetOf(state: ProjectState, id: string): number {
   return (state.rows[id] as TaskRow).offset;
 }
 
-/** The dependency behaviour agreed in the design spec, §4.2 (every day is a working day). */
+/** The dependency rules, step by step (every day is a working day). */
 describe("dependency walkthrough", () => {
   const cal = calendar({ workingWeekdays: EVERY_DAY });
   const endA = (day: number) => ({ type: "resizeTask", id: "a", edge: "end", date: `2026-10-${String(day).padStart(2, "0")}` }) as const;
   const moveB = (day: number) => ({ type: "moveTask", id: "b", start: `2026-10-${String(day).padStart(2, "0")}` }) as const;
 
-  it("follows the eight agreed steps", () => {
+  it("follows the eight steps", () => {
     let state = project(
       task("a", { userStart: "2026-10-04", duration: 7 }),
       task("b", { userStart: "2026-10-11", duration: 2, predecessorId: "a" }),

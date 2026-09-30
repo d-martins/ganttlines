@@ -93,7 +93,7 @@ describe("anonymous links", () => {
 });
 
 describe("scope of a link visitor", () => {
-  it("cannot reach anything beyond the shared board (spec §2.4)", async () => {
+  it("cannot reach anything beyond the shared board", async () => {
     const { projectId, token } = await projectWithLink({ access: "anonymous", collaboration: true });
     const headers = viaLink(token, await visit(token));
     const id = "00000000-0000-4000-8000-000000000000";

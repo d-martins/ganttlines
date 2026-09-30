@@ -13,7 +13,7 @@ export class ApiError extends Error {
 
 let shareToken: string | null = null;
 
-/** In share-link mode every request carries the link's token (plan 3d). */
+/** In share-link mode every request carries the link's token. */
 export function setShareToken(token: string | null): void {
   shareToken = token;
 }

@@ -58,7 +58,7 @@ model Resource {
 model Project {
   id         String    @id @default(uuid()) @db.Uuid
   name       String
-  /// incremented for every applied command (plan 2b)
+  /// incremented for every applied command
   version    Int       @default(0)
   archivedAt DateTime?
   createdAt  DateTime  @default(now())

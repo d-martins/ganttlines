@@ -25,7 +25,7 @@ const isWidth = (value: unknown): value is number => typeof value === "number" &
 /** `min` fits every list column (see COLUMNS in list/task-list.tsx: 420 px of columns + 8 px padding). */
 export const LIST_WIDTH = { min: 448, max: 900, initial: 500 } as const;
 
-/** How this browser likes to look at boards (web spec §2): remembered per browser, not per project. */
+/** How this browser likes to look at boards: remembered per browser, not per project. */
 export const useBoardView = create<BoardView>((set) => ({
   zoom: readPref("zoom", "day", isZoom),
   barStyle: readPref("barStyle", "compact", isBarStyle),

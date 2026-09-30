@@ -10,7 +10,7 @@ export interface Reverted {
 /**
  * Undo (`direction: "undo"`) restores each change's `before` value; redo restores `after`.
  * A field is only restored while it still holds the value this command left behind, so edits
- * made since by anyone are never overwritten (skip-on-conflict, spec §5.4). Whole rows are
+ * made since by anyone are never overwritten (skip-on-conflict). Whole rows are
  * removed only if unchanged and nothing points to them, and re-created only if absent.
  */
 export function revertChanges(state: ProjectState, changes: readonly RowChange[], direction: "undo" | "redo"): Reverted {

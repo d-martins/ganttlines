@@ -31,7 +31,7 @@ export interface ProjectAccess {
 }
 
 /**
- * Decides who may see or edit what (spec §2.4): signed-in viewers and above see every project
+ * Decides who may see or edit what: signed-in viewers and above see every project
  * (editors/admins edit); otherwise a valid, unrevoked share link for that project grants access —
  * authenticated links to any signed-in user (incl. guests), anonymous links to visitors who picked
  * a display name. Collaborative links allow editing.

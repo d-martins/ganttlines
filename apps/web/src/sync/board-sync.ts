@@ -80,7 +80,7 @@ const OPEN = 1;
 type Patch = Extract<ServerMessage, { type: "patch" }>;
 
 /**
- * Keeps one project's rows in step with the server (web spec §4): loads `/state`, joins over the
+ * Keeps one project's rows in step with the server: loads `/state`, joins over the
  * WebSocket, applies patches strictly in version order, holds gaps until caught up, rejoins on a
  * gap afterwards, and reconnects with backoff unless the server ended the session.
  */

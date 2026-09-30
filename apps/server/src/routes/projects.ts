@@ -6,7 +6,7 @@ import { toProjectDto } from "../dto";
 import { parseBody, parseId } from "../validation";
 import type { RouteContext } from "./context";
 
-/** Viewers and above see every project; guests see none (they get access through share links, plan 2c). */
+/** Viewers and above see every project; guests see none (they get access through share links). */
 export function projectRoutes(app: FastifyInstance, context: RouteContext): void {
   const { db, projects, access, hub } = context;
   app.get<{ Querystring: { archived?: string } }>("/api/projects", async (request) => {
