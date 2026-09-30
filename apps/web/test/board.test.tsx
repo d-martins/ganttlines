@@ -70,7 +70,7 @@ describe("board", () => {
     expect(within(listRow("hooks")).getByText("#2")).toBeInTheDocument();
     // ui: 5 working days over 9 calendar days
     expect(within(listRow("ui")).getByText("5")).toBeInTheDocument();
-    expect(within(listRow("ui")).getByText("9")).toBeInTheDocument();
+    expect(within(listRow("ui")).getByRole("gridcell", { name: "No actual work days" })).toBeInTheDocument();
     expect(within(listRow("ui")).getByText("Ana Silva")).toBeInTheDocument();
   });
 

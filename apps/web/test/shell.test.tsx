@@ -1,3 +1,4 @@
+import { useTheme } from "../src/theme";
 import { describe, expect, it } from "vitest";
 import { ADMIN, project, renderApp, screen, signedIn, VIEWER } from "./utils";
 
@@ -58,5 +59,15 @@ describe("sidebar and top bar", () => {
     await user.click(await screen.findByRole("button", { name: "Account menu" }));
     await user.click(await screen.findByRole("menuitemradio", { name: "Dark" }));
     expect(document.documentElement.dataset["theme"]).toBe("dark");
+  });
+
+  it("toggles light and dark with one click from the top bar", async () => {
+    signedIn(ADMIN, [project("p1", "Launch")]);
+    useTheme.getState().setPreference("system"); // the system is light here
+    const { user } = renderApp("/p/p1");
+    await user.click(await screen.findByRole("button", { name: "Switch to dark theme" }));
+    expect(document.documentElement.dataset["theme"]).toBe("dark");
+    await user.click(screen.getByRole("button", { name: "Switch to light theme" }));
+    expect(document.documentElement.dataset["theme"]).toBe("light");
   });
 });

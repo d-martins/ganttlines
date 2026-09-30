@@ -14,12 +14,64 @@ export const BAR_HEIGHT: Record<BarStyle, number> = { compact: 14, roomy: 28 };
 const DIAMOND: Record<BarStyle, number> = { compact: 12, roomy: 16 };
 
 /** Horizontal extent of a drawn row: bars span their days; a milestone is a diamond on its day. */
-export function extent(kind: DrawKind | Ghost["kind"], span: Span, timeline: Timeline, style: BarStyle): { left: number; right: number } {
+export function extent(kind: DrawKind | Ghost["kind"], span: Span, timeline: Timeline, style: BarStyle, endTrim = 0): { left: number; right: number } {
   if (kind === "milestone") {
     const center = timeline.x(span.start) + timeline.dayWidth / 2;
     return { left: center - DIAMOND[style] / 2, right: center + DIAMOND[style] / 2 };
   }
-  return { left: timeline.x(span.start), right: Math.max(timeline.xEnd(span.end), timeline.x(span.start) + 2) };
+  // `endTrim`: a length ending on half a day (2.5) stops halfway through its last column.
+  return { left: timeline.x(span.start), right: Math.max(timeline.xEnd(span.end) - endTrim * timeline.dayWidth, timeline.x(span.start) + 2) };
+}
+
+/** "2.5" — working days in half-day steps. */
+export const formatDays = (days: number) => (Number.isInteger(days) ? String(days) : days.toFixed(1));
+
+const TRACK_COLOR = { over: "var(--awd-over)", under: "var(--awd-under)", even: "var(--awd-even)" } as const;
+
+/**
+ * The working days a task really took, as a thin track just under its bar (from the same start):
+ * red when longer than planned, green when shorter, grey when on plan. Informational only.
+ */
+export function ActualTrack({ entry, timeline, style }: { entry: BoardRow; timeline: Timeline; style: BarStyle }) {
+  if (!entry.actual) return null;
+  const { left, right } = extent("task", entry.actual.span, timeline, style, entry.actual.endTrim);
+  const top = ROW_HEIGHT[style] / 2 + BAR_HEIGHT[style] / 2 + 1;
+  return (
+    <div
+      data-testid="actual-track"
+      data-versus-plan={entry.actual.versusPlan}
+      aria-hidden
+      className="pointer-events-none absolute h-[3px] rounded-full"
+      style={{ left, width: right - left, top, background: TRACK_COLOR[entry.actual.versusPlan] }}
+    />
+  );
+}
+
+/**
+ * The actual work days drawn on the bar itself: days beyond the plan continue the bar as a striped
+ * red extension; planned days that weren't needed are dimmed with a dashed outline. The two parts
+ * meet square (no rounding at the join). Informational only, never interactive.
+ */
+function ActualOnBar({ from, to, top, height, versusPlan, radius }: { from: number; to: number; top: number; height: number; versusPlan: "over" | "under"; radius: number }) {
+  const common = { left: from, width: to - from, top, height, borderRadius: `0 ${radius}px ${radius}px 0` };
+  if (versusPlan === "over") {
+    return (
+      <div
+        data-testid="actual-over"
+        aria-hidden
+        className="pointer-events-none absolute"
+        style={{ ...common, background: "repeating-linear-gradient(-45deg, var(--awd-over) 0 4px, color-mix(in srgb, var(--awd-over) 55%, transparent) 4px 8px)" }}
+      />
+    );
+  }
+  return (
+    <div
+      data-testid="actual-under"
+      aria-hidden
+      className="pointer-events-none absolute border border-l-0 border-dashed border-[var(--awd-under)]"
+      style={{ ...common, background: "color-mix(in srgb, var(--bg) 70%, transparent)" }}
+    />
+  );
 }
 
 /** Half the drawn height of a row's shape: where dependency arrows leave it (top or bottom edge). */
@@ -73,7 +125,8 @@ export function GhostBar({ ghost, timeline, style }: { ghost: Ghost; timeline: T
       />
     );
   }
-  return <div data-testid="baseline-ghost" className="absolute h-1 rounded-sm bg-[var(--baseline)]" style={{ left, width: right - left, top: rowHeight - 5 }} />;
+  // At the very bottom of the row, clear of the actual-days track just under the bar.
+  return <div data-testid="baseline-ghost" className="absolute h-[2px] rounded-sm bg-[var(--baseline)]" style={{ left, width: right - left, top: rowHeight - 2 }} />;
 }
 
 /** Props for the drawn shape when it can be edited (focus, pointer and key handlers). */
@@ -101,11 +154,16 @@ export function RowBar({
 }) {
   const { row, kind } = entry;
   const rowHeight = ROW_HEIGHT[style];
-  const { left, right } = extent(kind, span, timeline, style);
-  const width = right - left;
+  const { left, right: planRight } = extent(kind, span, timeline, style, entry.endTrim);
+  const width = planRight - left;
+  const actual = kind === "task" && entry.actual && entry.actual.versusPlan !== "even" ? entry.actual : null;
+  const actualRight = actual ? extent("task", actual.span, timeline, style, actual.endTrim).right : planRight;
+  // Titles beside the bar go after the overrun, if any.
+  const right = Math.max(planRight, actualRight);
   const task = row.kind === "task" ? row : null;
   const assignee = task?.resourceId ? resources.get(task.resourceId) : undefined;
-  const details = barDetails(span, assignee?.name);
+  const details =
+    barDetails(span, assignee?.name) + (entry.actual && task ? `, took ${formatDays(entry.actualDays!)} of ${formatDays(task.duration)} working days` : "");
   const label = `${row.title || "Untitled"}, ${details}`;
   const locked = task?.locked ? <Lock aria-label="Locked" size={10} className="shrink-0" /> : null;
   const { className: shapeClass = "", ...shapeRest } = shape ?? {};
@@ -148,14 +206,29 @@ export function RowBar({
     );
   }
   const barHeight = BAR_HEIGHT[style];
+  const barTop = (rowHeight - barHeight) / 2;
+  const radius = style === "compact" ? 3 : 4;
+  // Overrun: the bar's right end is square where the extension joins it.
+  const squareEnd = actual?.versusPlan === "over" ? "rounded-r-none!" : "";
+  const onBar = actual ? (
+    <ActualOnBar
+      from={Math.min(planRight, actualRight)}
+      to={Math.max(planRight, actualRight)}
+      top={barTop}
+      height={barHeight}
+      versusPlan={actual.versusPlan as "over" | "under"}
+      radius={radius}
+    />
+  ) : null;
   if (style === "compact") {
     return (
       <>
         <div
           {...shapeAttrs}
-          className={`absolute rounded-[3px] ${entry.violation ? "outline-2 outline-offset-1 outline-[var(--violation)]" : ""} ${shapeClass}`}
-          style={{ left, width, top: (rowHeight - barHeight) / 2, height: barHeight, background: fill }}
+          className={`absolute rounded-[3px] ${squareEnd} ${entry.violation ? "outline-2 outline-offset-1 outline-[var(--violation)]" : ""} ${shapeClass}`}
+          style={{ left, width, top: barTop, height: barHeight, background: fill }}
         />
+        {onBar}
         {outsideTitle}
       </>
     );
@@ -169,8 +242,8 @@ export function RowBar({
         <Tooltip.Trigger asChild>
           <div
             {...shapeAttrs}
-            className={`absolute flex items-center gap-1.5 overflow-hidden rounded-[4px] px-1.5 text-xs font-semibold ${entry.violation ? "outline-2 outline-offset-1 outline-[var(--violation)]" : ""} ${shapeClass}`}
-            style={{ left, width, top: (rowHeight - barHeight) / 2, height: barHeight, background: fill, color: ink }}
+            className={`absolute flex items-center gap-1.5 overflow-hidden rounded-[4px] px-1.5 text-xs font-semibold ${squareEnd} ${entry.violation ? "outline-2 outline-offset-1 outline-[var(--violation)]" : ""} ${shapeClass}`}
+            style={{ left, width, top: barTop, height: barHeight, background: fill, color: ink }}
           >
             {showAvatar ? <Avatar name={assignee!.name} color={assignee!.avatarColor} size={18} /> : null}
             {inside ? (
@@ -188,6 +261,7 @@ export function RowBar({
           </Tooltip.Content>
         </Tooltip.Portal>
       </Tooltip.Root>
+      {onBar}
       {inside ? null : outsideTitle}
     </>
   );

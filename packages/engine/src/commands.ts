@@ -16,6 +16,7 @@ export type Command =
   | { type: "moveTask"; id: RowId; start: IsoDate }
   | { type: "resizeTask"; id: RowId; edge: "start" | "end"; date: IsoDate }
   | { type: "setDuration"; id: RowId; duration: number }
+  | { type: "setActualDuration"; id: RowId; days: number | null }
   | { type: "convertMilestone"; id: RowId; milestone: boolean }
   | { type: "setLocked"; id: RowId; locked: boolean }
   | { type: "linkTasks"; fromId: RowId; toId: RowId }
@@ -102,6 +103,8 @@ class Execution {
         return this.resizeTask(command.id, command.edge, this.day(command.date));
       case "setDuration":
         return this.setDuration(command.id, command.duration);
+      case "setActualDuration":
+        return this.setActualDuration(command.id, command.days);
       case "convertMilestone":
         return this.convertMilestone(command.id, command.milestone);
       case "setLocked":
@@ -185,7 +188,8 @@ class Execution {
     const original = this.task(id);
     if (isParentTask(this.tree, original)) throw new Rejection("invalid", "Only single tasks can be duplicated");
     if (this.rows[newId]) throw new Rejection("invalid", `Row ${newId} already exists`);
-    this.rows[newId] = { ...original, id: newId, position: this.positionAfter(original.parentId, original.id) };
+    // A copy is new work: it hasn't taken any actual days yet.
+    this.rows[newId] = { ...original, id: newId, actualDuration: null, position: this.positionAfter(original.parentId, original.id) };
     return this.result();
   }
 
@@ -256,9 +260,18 @@ class Execution {
     return this.patch(this.editableLeaf(id), { duration: this.validDuration(duration) });
   }
 
+  /** Informational: allowed on locked tasks too, but not on milestones or parents (they add up their subtasks). */
+  private setActualDuration(id: RowId, days: number | null): ProjectState {
+    const task = this.task(id);
+    if (isParentTask(this.tree, task)) throw new Rejection("invalid", "Parent tasks add up their subtasks' actual days");
+    if (task.duration === 0) throw new Rejection("invalid", "Milestones have no actual work days");
+    return this.patch(task, { actualDuration: days === null ? null : this.validDuration(days, "Actual work days") });
+  }
+
   private convertMilestone(id: RowId, milestone: boolean): ProjectState {
     const task = this.editableLeaf(id);
-    return this.patch(task, { duration: milestone ? 0 : task.duration === 0 ? 1 : task.duration });
+    if (milestone) return this.patch(task, { duration: 0, actualDuration: null });
+    return this.patch(task, { duration: task.duration === 0 ? 1 : task.duration });
   }
 
   private setLocked(id: RowId, locked: boolean): ProjectState {
@@ -405,9 +418,10 @@ class Execution {
     }
   }
 
-  private validDuration(duration: number): number {
-    if (!Number.isInteger(duration) || duration < 1 || duration > MAX_DURATION) {
-      throw new Rejection("invalid", `Duration must be a whole number of days from 1 to ${MAX_DURATION}`);
+  /** Whole or half working days, from half a day up to MAX_DURATION. */
+  private validDuration(duration: number, what = "Duration"): number {
+    if (!Number.isInteger(duration * 2) || duration < 0.5 || duration > MAX_DURATION) {
+      throw new Rejection("invalid", `${what} must be in whole or half days, from 0.5 to ${MAX_DURATION}`);
     }
     return duration;
   }

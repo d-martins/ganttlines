@@ -150,13 +150,13 @@ describe("editing the task list", () => {
 
   it("shows the server's reason when it refuses an edit, and rolls it back", async () => {
     const { user } = await editableBoard();
-    await user.click(screen.getByRole("button", { name: "Color of “ui”: blue" }));
-    await user.click(screen.getByRole("button", { name: "green" }));
-    expect(screen.getByRole("button", { name: "Color of “ui”: green" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Working days of “ui”" }));
+    await user.keyboard("{Control>}a{/Control}8{Enter}");
+    expect(screen.getByRole("button", { name: "Working days of “ui”" })).toHaveTextContent("8");
     const { commandId } = FakeWebSocket.last.sent.at(-1) as { commandId: string };
     FakeWebSocket.last.deliver({ type: "reject", commandId, error: "conflict", message: "This project is archived" });
     expect(await screen.findByRole("alert")).toHaveTextContent("Change not saved: This project is archived");
-    expect(screen.getByRole("button", { name: "Color of “ui”: blue" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Working days of “ui”" })).toHaveTextContent("5");
   });
 
   it("filters rows by search, keeping their parents", async () => {
@@ -179,7 +179,7 @@ describe("editing the task list", () => {
     const { user } = await editableBoard();
     screen.getByRole("button", { name: "Title “ui”" }).focus();
     const stops: string[] = [];
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 7; i++) {
       await user.tab();
       stops.push(document.activeElement?.getAttribute("aria-label") ?? "");
     }
@@ -187,9 +187,10 @@ describe("editing the task list", () => {
       "Add a subtask to “ui”",
       "Assignee of “ui”: nobody",
       "Working days of “ui”",
-      "Calendar days of “ui”",
+      "Actual work days of “ui”",
       "Predecessor of “ui”",
-      "Color of “ui”: blue",
+      "Show “ui” on the chart",
+      "Open details of “ui”",
     ]);
     screen.getByRole("button", { name: "Title “ui”" }).focus();
     await user.keyboard(" ");
@@ -205,16 +206,18 @@ describe("editing the task list", () => {
     expect(sentCommands()).toEqual([]);
   });
 
-  it("sets calendar days by moving the end date", async () => {
+  it("records actual work days from their column (Enter on the cell doesn't edit the title)", async () => {
     const { user } = await editableBoard();
     await user.click(within(listRow("ui")).getByText("2")); // a selected row: Enter on the list would edit its title
-    screen.getByRole("button", { name: "Calendar days of “ui”" }).focus();
+    screen.getByRole("button", { name: "Actual work days of “ui”" }).focus();
     await user.keyboard("{Enter}");
-    await user.keyboard("{Control>}a{/Control}3{Enter}");
-    // ui starts Wed 2026-09-30: 3 calendar days end on Fri 2026-10-02
-    expect(sentCommands()).toEqual([{ type: "resizeTask", id: "ui", edge: "end", date: "2026-10-02" }]);
-    expect(within(listRow("ui")).getByRole("button", { name: "Working days of “ui”" })).toHaveTextContent("3");
-    expect(screen.queryByRole("textbox", { name: "Title" })).not.toBeInTheDocument(); // Enter on the cell didn't also edit the title
+    await user.keyboard("7,5{Enter}");
+    expect(sentCommands()).toEqual([{ type: "setActualDuration", id: "ui", days: 7.5 }]);
+    expect(within(listRow("ui")).getByRole("gridcell", { name: "7.5 actual work days" })).toHaveClass("text-[var(--awd-over)]");
+    expect(screen.queryByRole("textbox", { name: "Title" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Actual work days of “ui”" }));
+    await user.keyboard("{Control>}a{/Control}{Backspace}{Enter}"); // empty clears it
+    expect(sentCommands().at(-1)).toEqual({ type: "setActualDuration", id: "ui", days: null });
   });
 
   it("opens the assignee picker on the current assignee", async () => {

@@ -27,6 +27,10 @@
   --parent: #3a4150;
   --section: #8a93a3;
   --baseline: rgba(29, 35, 48, 0.28);
+  /* actual work days track: longer / shorter than planned / on plan */
+  --awd-over: #d32f2f;
+  --awd-under: #1e8449;
+  --awd-even: #8a93a3;
   --skipped: #c3c8d1;
   --task-blue: #1f6fd6;
   --task-purple: #7e3fc4;
@@ -66,6 +70,9 @@
   --parent: #d5d7dc;
   --section: #8b8f99;
   --baseline: rgba(232, 232, 234, 0.3);
+  --awd-over: #ff7b7b;
+  --awd-under: #4cc38a;
+  --awd-even: #8b8f99;
   --skipped: #4a4b52;
   /* Saturated bars (mockup A) with dark titles, which keeps AA contrast on every color. */
   --task-blue: #3ea0e6;
@@ -123,4 +130,75 @@ body {
 
 @theme {
   --animate-panel-in: panel-in 200ms ease-out;
+}
+
+/* Rich text (descriptions and comments): compact, readable, theme-aware. */
+.rich-text {
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+/* The editor's box shows the focus (description, comments); the text area inside it doesn't. */
+.rich-text:focus-visible {
+  outline: none;
+}
+.rich-text > * + * {
+  margin-top: 0.4em;
+}
+.rich-text h1 {
+  font-size: 1.15em;
+  font-weight: 700;
+}
+.rich-text h2 {
+  font-size: 1.05em;
+  font-weight: 700;
+}
+.rich-text h3 {
+  font-weight: 600;
+}
+.rich-text ul {
+  list-style: disc;
+  padding-left: 1.25em;
+}
+.rich-text ol {
+  list-style: decimal;
+  padding-left: 1.4em;
+}
+.rich-text li > p {
+  margin: 0;
+}
+.rich-text a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.rich-text code {
+  border-radius: 3px;
+  background: var(--surface-2);
+  padding: 0 0.25em;
+  font-size: 0.9em;
+}
+.rich-text pre {
+  border-radius: 4px;
+  background: var(--surface-2);
+  padding: 0.5em 0.75em;
+  overflow-x: auto;
+}
+.rich-text pre code {
+  background: none;
+  padding: 0;
+}
+.rich-text blockquote {
+  border-left: 3px solid var(--border-strong);
+  padding-left: 0.75em;
+  color: var(--muted);
+}
+.rich-text hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+.rich-text p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  color: var(--muted);
+  pointer-events: none;
 }

@@ -23,7 +23,7 @@ const isBarStyle = (value: unknown): value is BarStyle => value === "compact" ||
 const isWidth = (value: unknown): value is number => typeof value === "number" && value >= LIST_WIDTH.min && value <= LIST_WIDTH.max;
 
 /** `min` fits every list column (see COLUMNS in list/task-list.tsx: 420 px of columns + 8 px padding). */
-export const LIST_WIDTH = { min: 428, max: 900, initial: 480 } as const;
+export const LIST_WIDTH = { min: 448, max: 900, initial: 500 } as const;
 
 /** How this browser likes to look at boards (web spec §2): remembered per browser, not per project. */
 export const useBoardView = create<BoardView>((set) => ({

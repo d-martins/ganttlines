@@ -65,7 +65,8 @@ export function computeSchedule(state: ProjectState, calendar: Calendar): Schedu
     const required = requiredStart(calendar, resource, predecessors);
     const userStart = toDay(task.userStart);
     const start = calendar.snap(task.locked ? userStart : Math.max(userStart, required), resource);
-    const end = task.duration === 0 ? start : calendar.addWorkingDays(start, task.duration - 1, resource);
+    // A task fills every day it touches: 2.5 working days end on the third.
+    const end = task.duration === 0 ? start : calendar.addWorkingDays(start, Math.ceil(task.duration) - 1, resource);
     return { span: { start, end }, violation: task.locked && start < required };
   };
 

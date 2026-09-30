@@ -9,6 +9,7 @@ import { ApiError, errorMessage, setShareToken } from "../api/client";
 import { currentUser, keys, shareInfo, useVisitorName } from "../api/queries";
 import { useActiveBoard } from "../board/active-board";
 import { BoardScreen } from "../board/board-page";
+import { ThemeToggle } from "../app/theme-toggle";
 import { BoardTools } from "../board/board-tools";
 import { Button } from "../ui/button";
 import { ErrorText, Field } from "../ui/field";
@@ -147,6 +148,7 @@ function LinkHeader({ link, viewer }: { link: ShareInfoDto; viewer: string | nul
         <h1 className="max-w-64 min-w-12 shrink-0 truncate text-sm font-semibold">{name}</h1>
         {shown ? <BoardTools sync={shown} /> : <span className="flex-1" />}
         {viewer ? <span className="shrink-0 text-xs text-muted">{viewer}</span> : null}
+        <ThemeToggle />
       </div>
       <p role="status" className="flex items-center gap-1.5 border-t border-border bg-accent-soft px-4 py-1 text-xs">
         {link.collaboration ? <PencilLine size={13} aria-hidden /> : <Eye size={13} aria-hidden />}

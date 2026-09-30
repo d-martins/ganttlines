@@ -38,3 +38,9 @@ if (typeof window.ResizeObserver === "undefined") {
     disconnect() {}
   } as unknown as typeof ResizeObserver;
 }
+
+// jsdom has no layout; ProseMirror (the rich-text editor) measures selections with these.
+if (typeof document.elementFromPoint !== "function") document.elementFromPoint = () => null;
+const noRects = () => ({ length: 0, item: () => null, [Symbol.iterator]: [][Symbol.iterator] }) as unknown as DOMRectList;
+Range.prototype.getClientRects = noRects;
+Range.prototype.getBoundingClientRect = () => new DOMRect();

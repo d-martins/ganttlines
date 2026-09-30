@@ -10,6 +10,7 @@ import { projectList, useLogout } from "../api/queries";
 import { useTheme, type ThemePreference } from "../theme";
 import { Avatar } from "../ui/avatar";
 import { Menu, MenuItem, MenuLabel, MenuRadio, MenuSeparator } from "../ui/menu";
+import { ThemeToggle } from "./theme-toggle";
 
 /** Stand-in store while no board is open (hooks can't be skipped). */
 const EMPTY = createStore<{ project?: { name: string } } | null>(() => null);
@@ -44,7 +45,8 @@ export function TopBar({ user }: { user: UserDto }) {
     <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border bg-surface px-4">
       <h1 className="max-w-64 min-w-12 shrink-0 truncate text-sm font-semibold">{title}</h1>
       {shownBoard ? <BoardTools sync={shownBoard} /> : null}
-      <div className="ml-auto shrink-0">
+      <div className="ml-auto flex shrink-0 items-center gap-2">
+        <ThemeToggle />
         <Menu
           trigger={
             <button type="button" aria-label="Account menu" className="rounded-full">

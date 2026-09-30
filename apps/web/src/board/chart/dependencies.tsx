@@ -45,8 +45,8 @@ export function Dependencies({
     const from = index.get(row.predecessorId);
     const predecessor = from === undefined ? undefined : rows[from];
     if (!predecessor?.span || Math.max(from!, to) < firstRow || Math.min(from!, to) >= lastRow) return;
-    const start = extent(predecessor.kind, predecessor.span, timeline, style);
-    const end = extent(entry.kind, entry.span, timeline, style);
+    const start = extent(predecessor.kind, predecessor.span, timeline, style, predecessor.endTrim);
+    const end = extent(entry.kind, entry.span, timeline, style, entry.endTrim);
     const y = (i: number) => i * rowHeight + rowHeight / 2;
     const d = elbow({ ...start, y: y(from!), half: halfHeight(predecessor.kind, style) }, { left: end.left, y: y(to) }, rowHeight);
     paths.push({ key: row.id, d, violation: entry.violation });

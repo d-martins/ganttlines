@@ -5,12 +5,16 @@ import { Lock, Plus, UserRound, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type InputHTMLAttributes, type KeyboardEvent, type ReactNode } from "react";
 import { currentUser } from "../../api/queries";
 import { Avatar } from "../../ui/avatar";
+import { RichTextEditor } from "../../ui/rich-text";
+import { toast } from "../../ui/toast";
 import { IconButton } from "../../ui/button";
 import { AssigneePicker } from "../assignee-picker";
 import { PredecessorPicker } from "../predecessor-picker";
 import { useBoard, useRun } from "../board-context";
 import { formatDay, taskColors } from "../format";
-import { addSubtask, setWorkingDays } from "../list/list-actions";
+import { formatDays } from "../chart/bars";
+import { addSubtask, parseDays, setActualDays, setWorkingDays } from "../list/list-actions";
+import { actualDaysOf } from "../model";
 import { useSelection } from "../selection";
 import { Activity } from "./activity";
 import { Comments } from "./comments";
@@ -65,6 +69,60 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
+const CONVERSATION_TABS = [
+  { id: "comments", label: "Comments" },
+  { id: "history", label: "History" },
+] as const;
+type ConversationTab = (typeof CONVERSATION_TABS)[number]["id"];
+
+/** A task's comments and history as two tabs (comments first). ←/→ move between the tabs. */
+function ConversationTabs({ comments, history }: { comments: ReactNode; history: ReactNode }) {
+  const [tab, setTab] = useState<ConversationTab>("comments");
+  const tabs = useRef<Record<ConversationTab, HTMLButtonElement | null>>({ comments: null, history: null });
+  return (
+    <section className="flex flex-col border-t border-border">
+      <div
+        role="tablist"
+        aria-label="Comments and history"
+        className="flex gap-4 border-b border-border px-4"
+        onKeyDown={(event) => {
+          if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+          event.preventDefault();
+          const next = tab === "comments" ? "history" : "comments";
+          setTab(next);
+          tabs.current[next]?.focus();
+        }}
+      >
+        {CONVERSATION_TABS.map(({ id, label }) => (
+          <button
+            key={id}
+            ref={(element) => {
+              tabs.current[id] = element;
+            }}
+            type="button"
+            role="tab"
+            id={`conversation-tab-${id}`}
+            aria-controls={`conversation-panel-${id}`}
+            aria-selected={tab === id}
+            tabIndex={tab === id ? 0 : -1}
+            onClick={() => setTab(id)}
+            className={`-mb-px border-b-2 py-2 text-xs font-semibold tracking-wide uppercase transition-colors ${
+              tab === id ? "border-accent text-text" : "border-transparent text-muted hover:text-text"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {CONVERSATION_TABS.map(({ id }) => (
+        <div key={id} role="tabpanel" id={`conversation-panel-${id}`} aria-labelledby={`conversation-tab-${id}`} hidden={tab !== id} className="px-4 py-3">
+          {id === "comments" ? comments : history}
+        </div>
+      ))}
+    </section>
+  );
+}
+
 /**
  * The details panel: slides over the chart from the right and shows the selected row — its fields
  * (edited through the same checked commands as the list and chart), description, subtasks,
@@ -85,6 +143,17 @@ export function DetailsPanel({ numbers }: { numbers: ReadonlyMap<RowId, number> 
     if (open) setLastId(selected.id);
   }, [open, selected?.id]);
   const row = open ? selected : lastId ? state.rows[lastId] : undefined;
+  // Rich text boxes grow up to half the panel's height.
+  const [halfHeight, setHalfHeight] = useState(240);
+  useEffect(() => {
+    const element = panel.current;
+    if (!element) return;
+    const measure = () => setHalfHeight(Math.round(element.clientHeight / 2) || 240);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [row !== undefined]);
   const schedule = useMemo<Schedule | null>(() => {
     try {
       return computeSchedule(state, calendar);
@@ -143,15 +212,11 @@ export function DetailsPanel({ numbers }: { numbers: ReadonlyMap<RowId, number> 
           maxLength={COMMAND_LIMITS.titleMax}
           disabled={!board.canEdit}
           onCommit={(title) => run({ type: "updateTitle", id: row.id, title: title.trim() })}
-          className="border-transparent px-1 text-base font-semibold hover:border-border focus:border-border-strong"
+          className="-ml-px border-transparent pl-0 text-base font-semibold transition-[padding,border-color] duration-200 ease-out focus:border-border-strong focus:pl-2 motion-reduce:transition-none"
         />
+        {row.kind === "task" ? <Description task={row} maxHeight={halfHeight} /> : null}
         {row.kind === "task" ? <TaskFields task={row} isParent={isParent} schedule={schedule} numbers={numbers} /> : null}
       </div>
-      {row.kind === "task" ? (
-        <Section title="Description">
-          <Description task={row} />
-        </Section>
-      ) : null}
       <Section title={row.kind === "section" ? "Tasks" : "Subtasks"}>
         <ul className="flex flex-col gap-1 text-sm">
           {children.map((child) => (
@@ -166,13 +231,15 @@ export function DetailsPanel({ numbers }: { numbers: ReadonlyMap<RowId, number> 
         ) : null}
       </Section>
       {row.kind === "task" ? (
-        <Section title="Comments">
-          <Comments projectId={sync.projectId} taskId={row.id} canComment={board.canComment} isAdmin={me.data?.role === "admin"} />
+        <ConversationTabs
+          comments={<Comments projectId={sync.projectId} taskId={row.id} canComment={board.canComment} isAdmin={me.data?.role === "admin"} maxHeight={halfHeight} />}
+          history={<Activity projectId={sync.projectId} rowId={row.id} names={{ state, resources: board.resourceMap }} />}
+        />
+      ) : (
+        <Section title="History">
+          <Activity projectId={sync.projectId} rowId={row.id} names={{ state, resources: board.resourceMap }} />
         </Section>
-      ) : null}
-      <Section title="History">
-        <Activity projectId={sync.projectId} rowId={row.id} names={{ state, resources: board.resourceMap }} />
-      </Section>
+      )}
     </aside>
   );
 }
@@ -184,6 +251,7 @@ function TaskFields({ task, isParent, schedule, numbers }: { task: TaskRow; isPa
   const span = schedule?.get(task.id)?.span ?? null;
   const assignee = task.resourceId ? resourceMap.get(task.resourceId) : undefined;
   const leaf = !isParent;
+  const actualSum = isParent ? actualDaysOf(state, buildTree(state), task.id) : null;
   const milestone = leaf && task.duration === 0;
   const datesLocked = leaf && task.locked;
   const predecessor = task.predecessorId ? state.rows[task.predecessorId] : undefined;
@@ -236,9 +304,13 @@ function TaskFields({ task, isParent, schedule, numbers }: { task: TaskRow; isPa
             type="number"
             aria-label="Working days"
             min={0}
+            step={0.5}
             value={String(task.duration)}
             disabled={!canEdit || datesLocked}
-            onCommit={(value) => setWorkingDays(board, task, Number(value))}
+            onCommit={(value) => {
+              const days = parseDays(value);
+              if (days !== null) setWorkingDays(board, task, days);
+            }}
           />
         </Field>
       ) : (
@@ -246,6 +318,25 @@ function TaskFields({ task, isParent, schedule, numbers }: { task: TaskRow; isPa
           <span className="text-muted">{span ? `${formatDay(span.start)} – ${formatDay(span.end)} (from its subtasks)` : "From its subtasks (none scheduled)"}</span>
         </Field>
       )}
+      {leaf && !milestone ? (
+        <Field label="Actual work days">
+          <CommitInput
+            type="number"
+            aria-label="Actual work days"
+            min={0.5}
+            step={0.5}
+            placeholder="Not recorded"
+            value={task.actualDuration === null ? "" : String(task.actualDuration)}
+            disabled={!canEdit}
+            onCommit={(value) => setActualDays(board, task, parseDays(value))}
+          />
+        </Field>
+      ) : null}
+      {!leaf && actualSum !== null ? (
+        <Field label="Actual work days">
+          <span className="text-muted">{formatDays(actualSum)} (from its subtasks)</span>
+        </Field>
+      ) : null}
       <Field label="Predecessor">
         {canEdit ? (
           <PredecessorPicker
@@ -296,34 +387,25 @@ function TaskFields({ task, isParent, schedule, numbers }: { task: TaskRow; isPa
   );
 }
 
-function Description({ task }: { task: TaskRow }) {
+/**
+ * The task's description, as formatted text (stored as Markdown). The box grows with its content up
+ * to half the panel's height, and opens to that height while it's being edited.
+ */
+function Description({ task, maxHeight }: { task: TaskRow; maxHeight: number }) {
   const { canEdit } = useBoard();
   const run = useRun();
-  const [draft, setDraft] = useState<string | null>(null);
-  // Reset when switching tasks.
-  useEffect(() => setDraft(null), [task.id]);
-  const commit = () => {
-    if (draft !== null && draft !== task.description) run({ type: "setDescription", id: task.id, description: draft });
-    setDraft(null);
-  };
   return (
-    <textarea
-      aria-label="Description"
+    <RichTextEditor
+      key={task.id}
+      value={task.description}
+      label="Description"
       placeholder={canEdit ? "Add a description…" : "No description."}
-      rows={4}
-      maxLength={COMMAND_LIMITS.descriptionMax}
-      disabled={!canEdit}
-      value={draft ?? task.description}
-      onChange={(event) => setDraft(event.target.value)}
-      onBlur={commit}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) commit();
-        else if (event.key === "Escape" && draft !== null) {
-          event.stopPropagation();
-          setDraft(null);
-        }
+      editable={canEdit}
+      autoSize={{ min: 72, max: maxHeight, expandOnFocus: true }}
+      onCommit={(description) => {
+        if (description.length > COMMAND_LIMITS.descriptionMax) return toast(`Descriptions are limited to ${COMMAND_LIMITS.descriptionMax} characters`, { tone: "error" });
+        run({ type: "setDescription", id: task.id, description });
       }}
-      className={`${INPUT} resize-y`}
     />
   );
 }

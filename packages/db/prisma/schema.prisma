@@ -82,7 +82,10 @@ model Row {
   collapsed     Boolean @default(false)
   // task-only fields (defaults for sections)
   userStart     String?
-  duration      Int     @default(1)
+  /// working days in half-day steps (0.5, 1, 2.5 …); 0 = milestone
+  duration      Float   @default(1)
+  /// working days the task really took (informational), when recorded
+  actualDuration Float?
   resourceId    String? @db.Uuid
   color         String  @default("blue")
   locked        Boolean @default(false)

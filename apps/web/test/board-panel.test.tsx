@@ -3,7 +3,7 @@ import type { CommentDto, ProjectStateDto } from "@ganttlines/protocol";
 import { fireEvent, render, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { describeEntry } from "../src/board/panel/activity";
-import { MarkdownLite } from "../src/board/panel/markdown-lite";
+import { RichTextView } from "../src/ui/rich-text";
 import { ANA, CALENDAR, FakeWebSocket, PROJECT_ID, projectState, section, task } from "./board-fixtures";
 import { ADMIN, project, renderApp, screen, signedIn, VIEWER } from "./utils";
 
@@ -61,10 +61,10 @@ async function panelBoard(rows: ProjectStateDto["rows"] = ROWS, user = ADMIN, co
 const sentCommands = (): Command[] =>
   FakeWebSocket.last.sent.flatMap((message) => ((message as { type: string }).type === "command" ? [(message as { command: Command }).command] : []));
 const panel = () => screen.getByRole("complementary", { name: /^Details of/ });
-/** Selects a row by clicking its number in the list (which opens the panel). */
+const rowOf = (title: string) => screen.getAllByRole("row").find((candidate) => within(candidate).queryByText(title, { exact: true }))!;
+/** Opens a row: a double-click on its number in the list (selects it, reveals its bar and opens the panel). */
 const selectRow = async (user: ReturnType<typeof import("@testing-library/user-event").default.setup>, title: string) => {
-  const row = screen.getAllByRole("row").find((candidate) => within(candidate).queryByText(title, { exact: true }))!;
-  await user.click(row.querySelector('[aria-label^="Row "]')!);
+  await user.dblClick(rowOf(title).querySelector('[aria-label^="Row "]')!);
 };
 
 describe("details panel", () => {
@@ -103,6 +103,28 @@ describe("details panel", () => {
     expect(panel()).toHaveAccessibleName("Details of “ui”"); // selecting again reopens it
   });
 
+  it("puts the description first and edits it as formatted text, saved as Markdown", async () => {
+    const { user } = await panelBoard();
+    await selectRow(user, "hooks");
+    const description = within(panel()).getByRole("textbox", { name: "Description" });
+    const assignee = within(panel()).getByRole("button", { name: /^Assignee/ });
+    // right under the title, before the fields
+    expect(description.compareDocumentPosition(assignee) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const box = description.closest(".overflow-y-auto") as HTMLElement;
+    expect(box.style.height).toBe("72px"); // empty: its minimum
+    expect(within(panel()).getByRole("toolbar", { name: "Description formatting" })).toHaveClass("max-h-0");
+    await user.click(description);
+    // focused: opens to half the panel (jsdom has no layout, so the panel's fallback half-height)
+    expect(box.style.height).toBe("240px");
+    expect(box).toHaveClass("transition-[height]");
+    expect(within(panel()).getByRole("toolbar", { name: "Description formatting" })).toHaveClass("max-h-10");
+    await user.click(within(within(panel()).getByRole("toolbar", { name: "Description formatting" })).getByRole("button", { name: "Bold (⌘B)" }));
+    await user.type(description, "Billing");
+    await user.click(within(panel()).getByRole("textbox", { name: "Task title" })); // leaving saves it
+    expect(sentCommands().at(-1)).toEqual({ type: "setDescription", id: "hooks", description: "**Billing**" });
+    expect(box.style.height).toBe("72px");
+  });
+
   it("follows the selection without taking focus from the list", async () => {
     const { user } = await panelBoard();
     await selectRow(user, "ui");
@@ -127,17 +149,22 @@ describe("details panel", () => {
     expect(panel()).toHaveAccessibleName("Details of “hooks”");
   });
 
-  it("scrolls a row's bar into view (start just inside the left edge) when its already selected row is clicked again", async () => {
+  it("selects on a click; a double-click reveals the bar (start just inside the left edge) and opens the panel", async () => {
     const { user } = await panelBoard();
     const scrollTo = vi.fn();
     const scroller = screen.getByTestId("board-scroller");
     scroller.scrollTo = scrollTo as unknown as typeof scroller.scrollTo;
-    await selectRow(user, "hooks");
+    await user.click(rowOf("hooks").querySelector('[aria-label^="Row "]')!);
+    expect(rowOf("hooks")).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
     expect(scrollTo).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "Working days of “hooks”" })); // opens the cell, doesn't center
+    await user.click(rowOf("hooks").querySelector('[aria-label^="Row "]')!); // clicking again changes nothing
+    expect(scrollTo).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Working days of “hooks”" })); // opens the cell
     await user.keyboard("{Escape}");
     expect(scrollTo).not.toHaveBeenCalled();
     await selectRow(user, "hooks");
+    expect(panel()).toHaveAccessibleName("Details of “hooks”");
     expect(scrollTo).toHaveBeenCalledTimes(1);
     const { left, behavior } = scrollTo.mock.calls[0]![0] as ScrollToOptions;
     // hooks starts Oct 12; the chart starts Mon Aug 31 at 32 px a day: its start lands 24 px inside the left edge
@@ -159,6 +186,30 @@ describe("details panel", () => {
     expect(scrollTo).toHaveBeenCalledTimes(1);
   });
 
+  it("has row buttons to show the bar on the chart and to open the details", async () => {
+    const { user } = await panelBoard();
+    const scrollTo = vi.fn();
+    const scroller = screen.getByTestId("board-scroller");
+    scroller.scrollTo = scrollTo as unknown as typeof scroller.scrollTo;
+    const [show, open] = within(rowOf("hooks")).getAllByRole("button").slice(-2);
+    expect(show).toHaveAccessibleName("Show “hooks” on the chart");
+    expect(open).toHaveAccessibleName("Open details of “hooks”");
+    await user.click(show!);
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+    expect(rowOf("hooks")).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    await user.click(open!);
+    expect(panel()).toHaveAccessibleName("Details of “hooks”");
+    expect(open).toHaveAttribute("aria-pressed", "true");
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+    // On another row it moves the panel there; again on the same row it closes it.
+    await user.click(within(rowOf("ui")).getByRole("button", { name: "Open details of “ui”" }));
+    expect(panel()).toHaveAccessibleName("Details of “ui”");
+    await user.click(within(rowOf("ui")).getByRole("button", { name: "Open details of “ui”" }));
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    expect(rowOf("ui")).toHaveAttribute("aria-selected", "true");
+  });
+
   it("shows, posts and live-updates comments", async () => {
     const { api, user } = await panelBoard(ROWS, ADMIN, [comment("c2", { body: "**first** idea" }), comment("c1", { deleted: true, body: "" })]);
     const posted: unknown[] = [];
@@ -169,6 +220,11 @@ describe("details panel", () => {
     await selectRow(user, "hooks");
     const list = await within(panel()).findByText("first");
     expect(list.tagName).toBe("STRONG");
+    // Each comment is its own card, led by the author's avatar and name.
+    const card = list.closest("li")!;
+    expect(card).toHaveClass("border");
+    expect(within(card).getByText("R", { selector: "[aria-hidden]" })).toBeInTheDocument();
+    expect(within(card).getByText("Rui")).toBeInTheDocument();
     expect(within(panel()).getByText("Comment deleted.")).toBeInTheDocument();
     expect(within(panel()).queryByRole("button", { name: "Edit" })).not.toBeInTheDocument(); // not mine
     expect(within(panel()).getAllByRole("button", { name: "Delete" })).toHaveLength(1); // admins may delete any
@@ -185,7 +241,18 @@ describe("details panel", () => {
   it("shows the task's history, with share-link actors marked", async () => {
     const { user } = await panelBoard();
     await selectRow(user, "hooks");
-    expect(await within(panel()).findByText(/assigned it to Ana Silva/)).toBeInTheDocument();
+    // Comments and history are tabs; comments come first and are shown by default.
+    const tabs = within(panel()).getAllByRole("tab");
+    expect(tabs.map((tab) => tab.textContent)).toEqual(["Comments", "History"]);
+    expect(tabs[0]).toHaveAttribute("aria-selected", "true");
+    expect(within(panel()).getByRole("tabpanel", { name: "Comments" })).toBeVisible();
+    expect(within(panel()).queryByText(/assigned it to Ana Silva/)).not.toBeVisible();
+    tabs[0]!.focus();
+    await user.keyboard("{ArrowRight}");
+    expect(tabs[1]).toHaveAttribute("aria-selected", "true");
+    expect(tabs[1]).toHaveFocus();
+    expect(within(panel()).getByRole("tabpanel", { name: "History" })).toBeVisible();
+    expect(await within(panel()).findByText(/assigned it to Ana Silva/)).toBeVisible();
     expect(within(panel()).getByText("via share link")).toBeInTheDocument();
   });
 
@@ -199,22 +266,22 @@ describe("details panel", () => {
   });
 });
 
-describe("Markdown-lite", () => {
-  it("renders bold, italic, links and mentions, and nothing else", () => {
-    const { container } = render(<MarkdownLite text={"**b** *i* _u_ see https://x.test/a?b=1). @Ana <img src=x onerror=alert(1)>"} />);
+describe("rich text (comments and descriptions)", () => {
+  it("shows Markdown formatted: bold, italic, lists and safe links", () => {
+    const { container } = render(<RichTextView markdown={"**b** *i* see https://x.test/a?b=1 and [docs](https://x.test/docs)\n\n- one\n- two"} />);
     expect(container.querySelector("strong")).toHaveTextContent("b");
-    expect([...container.querySelectorAll("em")].map((em) => em.textContent)).toEqual(["i", "u"]);
-    const link = container.querySelector("a")!;
-    expect(link).toHaveAttribute("href", "https://x.test/a?b=1");
-    expect(link).toHaveAttribute("rel", "noopener noreferrer");
-    expect(container.querySelector("img")).toBeNull();
-    expect(container).toHaveTextContent("<img src=x onerror=alert(1)>");
-    expect(container).toHaveTextContent("@Ana");
+    expect(container.querySelector("em")).toHaveTextContent("i");
+    expect(container.querySelectorAll("li")).toHaveLength(2);
+    const links = [...container.querySelectorAll("a")];
+    expect(links.map((link) => link.getAttribute("href"))).toContain("https://x.test/docs");
+    for (const link of links) expect(link).toHaveAttribute("rel", "noopener noreferrer nofollow");
   });
 
-  it("refuses links that aren't http(s)", () => {
-    const { container } = render(<MarkdownLite text="javascript:alert(1) and data:text/html,x" />);
-    expect(container.querySelector("a")).toBeNull();
+  it("never runs or keeps raw HTML, and refuses javascript: links", () => {
+    const { container } = render(<RichTextView markdown={'<img src=x onerror="window.pwned=1"> <script>window.pwned=1</script> [x](javascript:alert(1)) <a href="javascript:alert(2)">y</a>'} />);
+    expect(container.querySelector("img, script, iframe")).toBeNull();
+    expect(container.querySelector('[onerror], a[href^="javascript"]')).toBeNull();
+    expect((window as unknown as { pwned?: number }).pwned).toBeUndefined();
   });
 });
 

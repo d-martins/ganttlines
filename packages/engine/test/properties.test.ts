@@ -48,7 +48,7 @@ const projectArb = fc
     fc.record({
       section: fc.integer({ min: 0, max: 99 }).map((n) => n < 20),
       userStart: fc.option(dayArb, { freq: 6 }),
-      duration: fc.integer({ min: 0, max: 5 }),
+      duration: fc.integer({ min: 0, max: 10 }).map((halves) => halves / 2),
       resource: fc.constantFrom(...RESOURCES),
       locked: fc.integer({ min: 0, max: 99 }).map((n) => n < 15),
       predecessor: fc.option(fc.nat(), { freq: 2 }),
@@ -94,7 +94,8 @@ const commandArb = (existing: string[]): fc.Arbitrary<Command> => {
     fc.record({ type: fc.constant("deleteRows" as const), ids: fc.uniqueArray(id, { maxLength: 2 }) }),
     fc.record({ type: fc.constant("moveRow" as const), id, parentId, afterId: parentId }),
     fc.record({ type: fc.constant("duplicateTask" as const), id, newId: freshId }),
-    fc.record({ type: fc.constant("setDuration" as const), id, duration: fc.integer({ min: 0, max: 6 }) }),
+    fc.record({ type: fc.constant("setDuration" as const), id, duration: fc.integer({ min: 0, max: 12 }).map((halves) => halves / 2) }),
+    fc.record({ type: fc.constant("setActualDuration" as const), id, days: fc.option(fc.integer({ min: 0, max: 12 }).map((halves) => halves / 2)) }),
     fc.record({ type: fc.constant("convertMilestone" as const), id, milestone: fc.boolean() }),
     fc.record({ type: fc.constant("moveTask" as const), id, start: dayArb }),
     fc.record({ type: fc.constant("resizeTask" as const), id, edge: fc.constantFrom("start" as const, "end" as const), date: dayArb }),
@@ -144,7 +145,7 @@ function assertScheduleInvariants(state: ProjectState, calendar: Calendar): void
     const resource = row.resourceId;
     expect(calendar.isWorkingDay(span.start, resource)).toBe(true);
     if (row.duration === 0) expect(span.end).toBe(span.start);
-    else expect(calendar.workingDaysBetween(span.start, span.end, resource) + 1).toBe(row.duration);
+    else expect(calendar.workingDaysBetween(span.start, span.end, resource) + 1).toBe(Math.ceil(row.duration));
     if (row.locked) continue;
     expect(span.start).toBeGreaterThanOrEqual(calendar.snap(toDay(row.userStart), resource));
     for (const { predecessorId, offset } of constraintsFor(state, row)) {

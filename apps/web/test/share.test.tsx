@@ -81,7 +81,7 @@ describe("share links", () => {
     await joined();
     expect(screen.getByText("Editing via a shared link — changes are saved for everyone.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add task" })).toBeInTheDocument();
-    await user.click(within(screen.getAllByRole("row")[1]!).getByText("2"));
+    await user.dblClick(within(screen.getAllByRole("row")[1]!).getByText("2"));
     expect(screen.getByRole("textbox", { name: "Write a comment" })).toBeInTheDocument();
     fireEvent.contextMenu(document.querySelector("[data-chart-body]")!, { clientX: 100, clientY: 5 });
     expect(await screen.findByRole("menuitem", { name: "Highlight this day…" })).toBeInTheDocument();
