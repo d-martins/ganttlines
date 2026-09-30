@@ -24,6 +24,7 @@ import { realtimeRoutes } from "./routes/realtime";
 import { setupRoutes } from "./routes/setup";
 import { sharingRoutes } from "./routes/sharing";
 import { userRoutes } from "./routes/users";
+import { webRoutes } from "./web";
 
 export interface AppOptions {
   db: Db;
@@ -124,5 +125,6 @@ export async function buildApp({ db, config, now, logger = false }: AppOptions):
   highlightRoutes(app, context);
   baselineRoutes(app, context);
   activityRoutes(app, context);
+  if (config.webDir) await webRoutes(app, config.webDir);
   return app;
 }

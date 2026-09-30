@@ -5,7 +5,7 @@ const SECRET = "x".repeat(32);
 
 describe("loadConfig", () => {
   it("reads required values and applies defaults", () => {
-    const config = loadConfig({ DATABASE_URL: "postgresql://db/gp", SESSION_SECRET: SECRET });
+    const { webDir: _webDir, ...config } = loadConfig({ DATABASE_URL: "postgresql://db/gp", SESSION_SECRET: SECRET }); // apps/web/dist when built
     expect(config).toEqual({
       databaseUrl: "postgresql://db/gp",
       sessionSecret: SECRET,
@@ -14,6 +14,11 @@ describe("loadConfig", () => {
       bind: "127.0.0.1",
       trustProxy: false,
     });
+  });
+
+  it("serves the web app from WEB_DIR only when it holds a build", () => {
+    const base = { DATABASE_URL: "postgresql://db/gp", SESSION_SECRET: SECRET };
+    expect(loadConfig({ ...base, WEB_DIR: "/nowhere" }).webDir).toBeNull();
   });
 
   it("reads optional overrides", () => {
