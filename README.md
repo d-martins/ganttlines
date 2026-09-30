@@ -106,3 +106,7 @@ docker compose down -v   # stops it and deletes the database and backup volumes
 
 Yarn 4 + Turborepo monorepo (TypeScript). `yarn install`, then from the repo root:
 `yarn test`, `yarn type-check`. See `CLAUDE.md` and `docs/superpowers/`.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
