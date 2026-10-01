@@ -129,7 +129,7 @@ const refreshProjects = (client: QueryClient) => client.invalidateQueries({ quer
 const refreshCalendar = (client: QueryClient) => Promise.all([client.invalidateQueries({ queryKey: keys.calendar }), client.invalidateQueries({ queryKey: keys.resources })]);
 
 export const useSetup = () =>
-  useApiMutation((body: { email: string; name: string; password: string }) => api<{ user: UserDto }>("POST", "/api/setup", body), startSession);
+  useApiMutation((body: { email: string; name: string; password: string; setupCode: string }) => api<{ user: UserDto }>("POST", "/api/setup", body), startSession);
 export const useLogin = () => useApiMutation((body: { email: string; password: string }) => api<{ user: UserDto }>("POST", "/api/auth/login", body), startSession);
 export const useLogout = () => {
   const client = useQueryClient();

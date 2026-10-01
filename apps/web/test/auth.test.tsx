@@ -18,9 +18,10 @@ describe("getting in", () => {
     await user.type(screen.getByLabelText("Your name"), "Ada Admin");
     await user.type(screen.getByLabelText("Email"), "admin@example.com");
     await user.type(screen.getByLabelText("Password (8+ characters)"), "long enough");
+    await user.type(screen.getByLabelText("Setup code (from the server's log)"), "Q82FC-3CKAP");
     await user.click(screen.getByRole("button", { name: "Create admin account" }));
     expect(await screen.findByText("No projects yet.", { selector: "p.text-text" })).toBeInTheDocument();
-    expect(api.calls.find((c) => c.key === "POST /api/setup")?.body).toEqual({ name: "Ada Admin", email: "admin@example.com", password: "long enough" });
+    expect(api.calls.find((c) => c.key === "POST /api/setup")?.body).toEqual({ name: "Ada Admin", email: "admin@example.com", password: "long enough", setupCode: "Q82FC-3CKAP" });
   });
 
   it("asks signed-out people to sign in and shows wrong-password errors", async () => {

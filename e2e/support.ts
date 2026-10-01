@@ -7,6 +7,9 @@ export const BASE_URL = `http://localhost:${PORT}`;
 
 export const ADMIN = { email: "admin@example.test", name: "Ada Admin", password: "admin-password-1" };
 
+/** The setup code the server printed when it started (see global-setup.ts). */
+export const setupCode = () => process.env["E2E_SETUP_CODE"] ?? "";
+
 /** Empties every table, so each test starts from a brand-new install (first-run setup pending). */
 export async function resetDatabase(): Promise<void> {
   const client = new pg.Client({ connectionString: process.env["E2E_DATABASE_URL"] });
@@ -28,7 +31,7 @@ async function ok<T>(response: Awaited<ReturnType<APIRequestContext["post"]>>): 
 
 /** Completes first-run setup; the context (its pages too) is then signed in as the admin. */
 export async function setupAdmin(request: APIRequestContext): Promise<void> {
-  await ok(await request.post("/api/setup", { data: ADMIN }));
+  await ok(await request.post("/api/setup", { data: { ...ADMIN, setupCode: setupCode() } }));
 }
 
 /**

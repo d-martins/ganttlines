@@ -3,8 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDb } from "@ganttlines/db";
 import { afterAll, describe, expect, inject, it } from "vitest";
-import { buildApp } from "../src/app";
-import { testConfig } from "./helpers";
+import { testApp, testConfig } from "./helpers";
 
 describe("serving the web app", async () => {
   const webDir = mkdtempSync(join(tmpdir(), "gp-web-"));
@@ -12,7 +11,7 @@ describe("serving the web app", async () => {
   writeFileSync(join(webDir, "index.html"), "<!doctype html><title>GanttLines</title>");
   writeFileSync(join(webDir, "assets", "index-abc123.js"), "console.log(1)");
   const db = createDb(inject("databaseUrl"));
-  const app = await buildApp({ db, config: { ...testConfig, webDir } });
+  const app = await testApp({ db, config: { ...testConfig, webDir } });
   afterAll(async () => {
     await app.close();
     await db.$disconnect();

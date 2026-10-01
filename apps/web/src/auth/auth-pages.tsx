@@ -36,14 +36,18 @@ export function SetupPage() {
   const navigate = useNavigate();
   const status = useQuery(setupStatus);
   const setup = useSetup();
-  const [values, setValues] = useState({ name: "", email: "", password: "" });
+  const [values, setValues] = useState({ name: "", email: "", password: "", setupCode: "" });
   if (status.data && !status.data.needsSetup && !setup.isSuccess) return <Navigate to="/" />;
   return (
     <Card title="Welcome to GanttLines" subtitle="Create the admin account to get started.">
+      <p className="text-sm text-muted">
+        To prove you run this server, enter the setup code it printed in its log (e.g. <code className="text-text">docker compose logs app</code>).
+      </p>
       <Form onSubmit={() => setup.mutate(values, { onSuccess: () => navigate({ to: "/" }) })}>
         <Field label="Your name" value={values.name} onChange={(e) => setValues({ ...values, name: e.target.value })} required autoFocus />
         <Field label="Email" type="email" value={values.email} onChange={(e) => setValues({ ...values, email: e.target.value })} required />
         <Field label="Password (8+ characters)" type="password" value={values.password} onChange={(e) => setValues({ ...values, password: e.target.value })} minLength={8} required />
+        <Field label="Setup code (from the server's log)" value={values.setupCode} onChange={(e) => setValues({ ...values, setupCode: e.target.value })} autoComplete="off" spellCheck={false} required />
         <ErrorText>{setup.error ? errorMessage(setup.error) : null}</ErrorText>
         <Button type="submit" variant="primary" disabled={setup.isPending}>
           Create admin account

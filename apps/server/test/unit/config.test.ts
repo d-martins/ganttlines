@@ -14,6 +14,7 @@ describe("loadConfig", () => {
       bind: "127.0.0.1",
       trustProxy: false,
       version: "dev",
+      initialAdmin: null,
     });
   });
 
@@ -21,6 +22,17 @@ describe("loadConfig", () => {
     const base = { DATABASE_URL: "postgresql://db/gp", SESSION_SECRET: SECRET };
     expect(loadConfig({ ...base, WEB_DIR: "/nowhere" }).webDir).toBeNull();
     expect(loadConfig({ ...base, APP_VERSION: "1.4.0" }).version).toBe("1.4.0");
+  });
+
+  it("reads the first admin from ADMIN_*, checked like the setup form", () => {
+    const base = { DATABASE_URL: "postgresql://db/gp", SESSION_SECRET: SECRET };
+    expect(loadConfig({ ...base, ADMIN_EMAIL: "Boss@Example.com", ADMIN_PASSWORD: "long enough" }).initialAdmin).toEqual({
+      email: "boss@example.com",
+      name: "Admin",
+      password: "long enough",
+    });
+    expect(() => loadConfig({ ...base, ADMIN_EMAIL: "boss@example.com" })).toThrow("Set both ADMIN_EMAIL and ADMIN_PASSWORD");
+    expect(() => loadConfig({ ...base, ADMIN_EMAIL: "boss@example.com", ADMIN_PASSWORD: "short" })).toThrow("Invalid ADMIN_* settings");
   });
 
   it("reads optional overrides", () => {

@@ -39,6 +39,10 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
 
   try {
     await waitUntilUp(server);
+    // A brand-new install prints a one-time setup code for creating the admin in the browser.
+    const code = /setup code: ([A-Z0-9]{5}-[A-Z0-9]{5})/.exec(output)?.[1];
+    if (!code) throw new Error("The server didn't print a setup code");
+    process.env["E2E_SETUP_CODE"] = code;
   } catch (error) {
     server.kill();
     await database.stop();

@@ -11,11 +11,17 @@ the server; the app image comes from `ghcr.io/d-martins/ganttlines`.
 
 ```sh
 cp .env.example .env
-# edit .env: set POSTGRES_PASSWORD and SESSION_SECRET (e.g. openssl rand -hex 24 / openssl rand -hex 32)
+# edit .env: set POSTGRES_PASSWORD, SESSION_SECRET (e.g. openssl rand -hex 24 / openssl rand -hex 32)
+# and the first admin: ADMIN_EMAIL, ADMIN_NAME, ADMIN_PASSWORD
 docker compose up -d
 ```
 
-Open <http://localhost:3000> and create the first (admin) account.
+Open <http://localhost:3000> and sign in as that admin. (You can then remove `ADMIN_PASSWORD` from
+`.env`; it's only used to create the account on the first start.)
+
+Left the `ADMIN_*` settings empty? Then the first visitor creates the admin in the browser — but
+only with the one-time **setup code** the server prints in its log
+(`docker compose logs app | grep "setup code"`), so nobody else can claim a fresh install.
 
 | Task | Command |
 | --- | --- |
@@ -31,6 +37,7 @@ Open <http://localhost:3000> and create the first (admin) account.
 | `POSTGRES_PASSWORD` | Password of the bundled database (letters and digits). |
 | `DATABASE_URL` | Your own PostgreSQL instead, e.g. `postgresql://user:pass@host:5432/ganttlines?sslmode=require`. |
 | `SESSION_SECRET` | Required, 32+ characters. Changing it signs everyone out. |
+| `ADMIN_EMAIL`, `ADMIN_NAME`, `ADMIN_PASSWORD` | The first admin, created on the first start (8+ character password). Ignored once anyone has an account. |
 | `PUBLIC_URL` | The address people open, e.g. `https://plan.example.com`. |
 | `HOST_BIND`, `HOST_PORT` | Where it listens on this machine (default `127.0.0.1:3000`, this computer only). |
 | `TRUST_PROXY` | Behind a reverse proxy: how many proxies to trust (e.g. `1`). |

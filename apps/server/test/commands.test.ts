@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { buildApp } from "../src/app";
-import { createUser, setupAdmin, testConfig, useTestApp } from "./helpers";
+import { createUser, setupAdmin, testApp, testConfig, useTestApp } from "./helpers";
 
 const t = useTestApp();
 
@@ -39,7 +38,7 @@ describe("project commands", () => {
     expect(state.rows).toEqual([expect.objectContaining({ id, title: "Design", userStart: "2026-10-05" })]);
 
     // A fresh server (empty cache) reads the same state back from the database.
-    const restarted = await buildApp({ db: t.db, config: testConfig });
+    const restarted = await testApp({ db: t.db, config: testConfig });
     const reloaded = (await restarted.inject({ url: `/api/projects/${projectId}/state`, headers: { cookie: editor } })).json();
     await restarted.close();
     expect(reloaded).toEqual(state);
@@ -54,7 +53,7 @@ describe("project commands", () => {
     expect((await send(editor, projectId, { type: "setDuration", id, duration: 1.25 })).statusCode).toBe(400);
 
     // A fresh server (empty cache) reads them back from the database.
-    const restarted = await buildApp({ db: t.db, config: testConfig });
+    const restarted = await testApp({ db: t.db, config: testConfig });
     const reloaded = (await restarted.inject({ url: `/api/projects/${projectId}/state`, headers: { cookie: editor } })).json();
     await restarted.close();
     expect(reloaded.rows).toEqual([expect.objectContaining({ id, duration: 2.5, actualDuration: 3.5 })]);
@@ -69,7 +68,7 @@ describe("project commands", () => {
     expect((await send(editor, projectId, { type: "linkTasks", fromId: a, toId: b })).statusCode).toBe(200);
     expect((await send(editor, projectId, { type: "setOffset", id: b, offset: 0.5 })).statusCode).toBe(200);
 
-    const restarted = await buildApp({ db: t.db, config: testConfig });
+    const restarted = await testApp({ db: t.db, config: testConfig });
     const reloaded = (await restarted.inject({ url: `/api/projects/${projectId}/state`, headers: { cookie: editor } })).json();
     await restarted.close();
     expect(reloaded.rows).toEqual(
@@ -241,7 +240,7 @@ describe("catching up", () => {
   it("asks clients that are too far behind to reload", async () => {
     const { editor, projectId } = await editorWithProject();
     await t.db.project.update({ where: { id: projectId }, data: { version: 600 } });
-    const fresh = await buildApp({ db: t.db, config: testConfig });
+    const fresh = await testApp({ db: t.db, config: testConfig });
     const response = (await fresh.inject({ url: `/api/projects/${projectId}/changes?since=10`, headers: { cookie: editor } })).json();
     await fresh.close();
     expect(response).toEqual({ version: 600, reload: true });
