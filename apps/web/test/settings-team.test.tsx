@@ -20,6 +20,22 @@ describe("settings", () => {
     expect(api.calls.find((c) => c.key === "POST /api/users")?.body).toEqual({ name: "Rudy", email: "rudy@example.com", role: "editor", createResource: true });
   });
 
+  it("invites new users by email when it's set up, and can send a test email", async () => {
+    const api = signedIn(ADMIN);
+    api.on("GET /api/users", () => ({ body: { users: [ADMIN] } }));
+    api.on("GET /api/calendar", () => ({ body: CALENDAR }));
+    api.on("GET /api/about", () => ({ body: { version: "1.2.0", updates: { enabled: false, latest: null, available: false }, mail: { configured: true } } }));
+    api.on("POST /api/users", (body) => ({ status: 201, body: { user: { ...ADMIN, id: "u2", ...(body as object) }, invited: true } }));
+    api.on("POST /api/settings/test-email", () => ({ body: { sentTo: ADMIN.email } }));
+    const { user } = renderApp("/settings");
+    await user.type(await screen.findByLabelText("Name"), "Rudy");
+    await user.type(screen.getByLabelText("Email", { selector: "input" }), "rudy@example.com");
+    await user.click(screen.getByRole("button", { name: "Add user" }));
+    expect(await screen.findByText("Invitation sent to rudy@example.com: they'll choose their own password.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Send me a test email" }));
+    expect(await screen.findByText(`Sent to ${ADMIN.email} — check your inbox.`)).toBeInTheDocument();
+  });
+
   it("saves working weekdays", async () => {
     const api = signedIn(ADMIN);
     api.on("GET /api/users", () => ({ body: { users: [ADMIN] } }));

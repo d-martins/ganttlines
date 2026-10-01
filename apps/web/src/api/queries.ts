@@ -132,12 +132,19 @@ const refreshCalendar = (client: QueryClient) => Promise.all([client.invalidateQ
 /** Sign-in options besides email and password (single sign-on), for the sign-in page. */
 export const signInProviders = queryOptions({
   queryKey: keys.providers,
-  queryFn: () => api<{ oidc: { name: string } | null }>("GET", "/api/auth/providers"),
+  queryFn: () => api<{ oidc: { name: string } | null; passwordReset: boolean }>("GET", "/api/auth/providers"),
   staleTime: Infinity,
 });
 
 export const useSetup = () =>
   useApiMutation((body: { email: string; name: string; password: string; setupCode: string }) => api<{ user: UserDto }>("POST", "/api/setup", body), startSession);
+/** "Forgot your password?" — emails a one-time link. */
+export const useRequestPasswordReset = () => useApiMutation((email: string) => api<void>("POST", "/api/auth/forgot", { email }), () => undefined);
+/** Choosing a password from an emailed link (invitation or reset); signs in. */
+export const useChoosePassword = () =>
+  useApiMutation((body: { token: string; password: string }) => api<{ user: UserDto }>("POST", "/api/auth/reset", body), startSession);
+export const useSendTestEmail = () => useApiMutation(() => api<{ sentTo: string }>("POST", "/api/settings/test-email"), () => undefined);
+
 export const useLogin = () => useApiMutation((body: { email: string; password: string }) => api<{ user: UserDto }>("POST", "/api/auth/login", body), startSession);
 export const useLogout = () => {
   const client = useQueryClient();
@@ -157,7 +164,11 @@ const refreshUsers = (client: QueryClient) =>
     client.invalidateQueries({ queryKey: keys.me }),
   ]);
 export const useCreateUser = () =>
-  useApiMutation((body: CreateUserBody) => api<{ user: UserDto; temporaryPassword: string }>("POST", "/api/users", body), refreshUsers);
+  useApiMutation(
+    // With email set up the person is invited (no password shown); otherwise — or if sending failed — a temporary password.
+    (body: CreateUserBody) => api<{ user: UserDto; invited?: true; temporaryPassword?: string; inviteFailed?: true }>("POST", "/api/users", body),
+    refreshUsers,
+  );
 export const useUpdateUser = () =>
   useApiMutation(({ id, ...body }: UpdateUserBody & { id: string }) => api<{ user: UserDto }>("PATCH", `/api/users/${id}`, body), refreshUsers);
 export const useResetPassword = () =>

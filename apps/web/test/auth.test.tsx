@@ -61,6 +61,43 @@ describe("getting in", () => {
     expect(screen.getByLabelText("Password")).toBeInTheDocument(); // passwords still work
   });
 
+  it("emails a reset link when asked, and a link lets you choose a password and go straight in", async () => {
+    let signedIn = false;
+    const api = fakeApi({
+      "GET /api/setup": () => ({ body: { needsSetup: false } }),
+      "GET /api/auth/me": () => (signedIn ? { body: { user: ADMIN } } : { status: 401, body: { error: "unauthorized", message: "Please sign in" } }),
+      "GET /api/auth/providers": () => ({ body: { oidc: null, passwordReset: true } }),
+      "POST /api/auth/forgot": () => ({ status: 204 }),
+      "POST /api/auth/reset": (body) => {
+        if ((body as { token: string }).token === "used-up-token") return { status: 400, body: { error: "invalid_token", message: "This link has expired or was already used — ask for a new one" } };
+        signedIn = true;
+        return { body: { user: ADMIN } };
+      },
+      "GET /api/projects": () => ({ body: { projects: [] } }),
+    });
+    const { user, router } = renderApp("/login");
+    await user.click(await screen.findByRole("link", { name: "Forgot your password?" }));
+    await user.type(screen.getByLabelText("Email"), "admin@example.com");
+    await user.click(screen.getByRole("button", { name: "Email me a link" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("If admin@example.com has an account here, a link is on its way");
+    expect(api.calls.find((c) => c.key === "POST /api/auth/forgot")?.body).toEqual({ email: "admin@example.com" });
+
+    await router.navigate({ to: "/reset-password", search: { token: "used-up-token" } });
+    await user.type(await screen.findByLabelText("New password (8+ characters)"), "a new password");
+    await user.click(screen.getByRole("button", { name: "Save and sign in" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("This link has expired or was already used");
+    expect(screen.getByRole("link", { name: "Get a new link" })).toBeInTheDocument();
+
+    await router.navigate({ to: "/reset-password", search: { token: "fresh-token-123" } });
+    await user.type(await screen.findByLabelText("New password (8+ characters)"), "a new password");
+    await user.click(screen.getByRole("button", { name: "Save and sign in" }));
+    expect(await screen.findByText("No projects yet.", { selector: "p.text-text" })).toBeInTheDocument();
+    expect(api.calls.find((c) => c.key === "POST /api/auth/reset" && (c.body as { token: string }).token === "fresh-token-123")?.body).toEqual({
+      token: "fresh-token-123",
+      password: "a new password",
+    });
+  });
+
   it("makes people with a temporary password choose a new one first", async () => {
     fakeApi({
       "GET /api/setup": () => ({ body: { needsSetup: false } }),

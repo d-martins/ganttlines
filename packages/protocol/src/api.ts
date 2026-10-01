@@ -32,6 +32,10 @@ export const CreateUserBody = z.strictObject({
   /** create a matching team member (resource) linked to the user */
   createResource: z.boolean().default(true),
 });
+/** "Forgot your password?": always answered the same way, whether or not the email has an account. */
+export const ForgotPasswordBody = z.strictObject({ email });
+/** Choosing a password from an emailed link (invitation or reset). */
+export const ResetPasswordBody = z.strictObject({ token: z.string().min(10).max(200), password });
 export const UpdateUserBody = z.strictObject({ name: personName.optional(), role: z.enum(ROLES).optional() });
 export const CreateProjectBody = z.strictObject({ name: projectName });
 export const UpdateProjectBody = z.strictObject({ name: projectName.optional(), archived: z.boolean().optional() });

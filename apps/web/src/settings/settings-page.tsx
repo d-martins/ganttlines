@@ -10,6 +10,7 @@ import {
   useDeleteUser,
   useResetPassword,
   userList,
+  useSendTestEmail,
   useSetUpdateCheck,
   useSetWorkingWeekdays,
   useUpdateUser,
@@ -36,6 +37,7 @@ export function SettingsPage() {
         <>
           <UsersSection me={me.data} />
           <WorkingWeekdaysSection />
+          <EmailSection />
         </>
       ) : null}
       <AboutSection />
@@ -76,7 +78,7 @@ function UsersSection({ me }: { me: UserDto }) {
   const failure = create.error ?? update.error ?? reset.error ?? remove.error;
 
   return (
-    <Section title="Users" description="People who can sign in. New users get a temporary password and must change it on first sign-in.">
+    <Section title="Users" description="People who can sign in. New users get an email to choose their password (or, without email set up, a temporary password to pass on).">
       <table className="mb-4 w-full table-fixed text-sm">
         <thead className="text-left text-xs text-muted">
           <tr>
@@ -139,8 +141,12 @@ function UsersSection({ me }: { me: UserDto }) {
         onSubmit={(event) => {
           event.preventDefault();
           create.mutate(form, {
-            onSuccess: ({ user, temporaryPassword }) => {
-              setNotice(`Created ${user.name}. Temporary password: ${temporaryPassword}`);
+            onSuccess: ({ user, invited, temporaryPassword, inviteFailed }) => {
+              setNotice(
+                invited
+                  ? `Invitation sent to ${user.email}: they'll choose their own password.`
+                  : `Created ${user.name}.${inviteFailed ? " The invitation email couldn't be sent." : ""} Temporary password: ${temporaryPassword}`,
+              );
               setForm({ name: "", email: "", role: "editor", createResource: true });
             },
           });
@@ -172,6 +178,34 @@ function UsersSection({ me }: { me: UserDto }) {
         </p>
       ) : null}
       <ErrorText>{failure ? errorMessage(failure) : null}</ErrorText>
+    </Section>
+  );
+}
+
+/** Whether outgoing email is set up (it's configured on the server), and a test to check it works. */
+function EmailSection() {
+  const info = useQuery(about);
+  const test = useSendTestEmail();
+  const configured = info.data?.mail?.configured;
+  if (configured === undefined) return null;
+  return (
+    <Section
+      title="Email"
+      description={
+        configured
+          ? "Used for invitations and password resets."
+          : "Not set up: new users get a temporary password to pass on, and there's no “Forgot your password?”. Add the SMTP_* settings on the server to turn it on."
+      }
+    >
+      {configured ? (
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <Button disabled={test.isPending} onClick={() => test.mutate()}>
+            Send me a test email
+          </Button>
+          {test.isSuccess ? <span role="status">Sent to {test.data.sentTo} — check your inbox.</span> : null}
+          <ErrorText>{test.error ? errorMessage(test.error) : null}</ErrorText>
+        </div>
+      ) : null}
     </Section>
   );
 }

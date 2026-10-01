@@ -1,8 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
-import { Navigate, useNavigate, useSearch } from "@tanstack/react-router";
+import { Link, Navigate, useNavigate, useSearch } from "@tanstack/react-router";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { errorMessage } from "../api/client";
-import { currentUser, setupStatus, signInProviders, useChangePassword, useLogin, useSetup } from "../api/queries";
+import { currentUser, setupStatus, signInProviders, useChangePassword, useChoosePassword, useLogin, useRequestPasswordReset, useSetup } from "../api/queries";
 import { Button } from "../ui/button";
 import { ErrorText, Field } from "../ui/field";
 
@@ -103,6 +103,11 @@ export function LoginPage() {
           Sign in
         </Button>
       </Form>
+      {providers.data?.passwordReset ? (
+        <Link to="/forgot-password" className="text-sm text-accent hover:underline">
+          Forgot your password?
+        </Link>
+      ) : null}
     </Card>
   );
 }
@@ -134,6 +139,62 @@ export function ChangePasswordForm({ onDone }: { onDone?: () => void }) {
         Change password
       </Button>
     </Form>
+  );
+}
+
+/** "Forgot your password?": asks for the email and says what happens next (the same whether or not it has an account). */
+export function ForgotPasswordPage() {
+  const request = useRequestPasswordReset();
+  const [email, setEmail] = useState("");
+  return (
+    <Card title="Forgot your password?" subtitle="We'll email you a link to choose a new one.">
+      {request.isSuccess ? (
+        <p role="status" className="text-sm">
+          If <strong>{email}</strong> has an account here, a link is on its way. It works once, for an hour.
+        </p>
+      ) : (
+        <Form onSubmit={() => request.mutate(email)}>
+          <Field label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
+          <ErrorText>{request.error ? errorMessage(request.error) : null}</ErrorText>
+          <Button type="submit" variant="primary" disabled={request.isPending}>
+            Email me a link
+          </Button>
+        </Form>
+      )}
+      <Link to="/login" className="text-sm text-accent hover:underline">
+        Back to sign in
+      </Link>
+    </Card>
+  );
+}
+
+/** From an emailed invitation or reset link: choose a password, then go straight in. */
+export function ChoosePasswordPage() {
+  const { token } = useSearch({ from: "/reset-password" });
+  if (!token) return <Navigate to="/forgot-password" />;
+  // A fresh form for each link.
+  return <ChoosePasswordForm key={token} token={token} />;
+}
+
+function ChoosePasswordForm({ token }: { token: string }) {
+  const navigate = useNavigate();
+  const choose = useChoosePassword();
+  const [password, setPassword] = useState("");
+  return (
+    <Card title="Choose your password" subtitle="You'll use it with your email to sign in.">
+      <Form onSubmit={() => choose.mutate({ token, password }, { onSuccess: () => navigate({ to: "/" }) })}>
+        <Field label="New password (8+ characters)" type="password" value={password} onChange={(e) => setPassword(e.target.value)} minLength={8} required autoFocus />
+        <ErrorText>{choose.error ? errorMessage(choose.error) : null}</ErrorText>
+        <Button type="submit" variant="primary" disabled={choose.isPending}>
+          Save and sign in
+        </Button>
+      </Form>
+      {choose.error ? (
+        <Link to="/forgot-password" className="text-sm text-accent hover:underline">
+          Get a new link
+        </Link>
+      ) : null}
+    </Card>
   );
 }
 

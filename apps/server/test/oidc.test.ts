@@ -38,10 +38,10 @@ async function signIn(app: FastifyInstance, identity: FakeIdentity, redirect = "
 
 describe("single sign-on (OIDC)", () => {
   it("is offered on the sign-in page only when configured", async () => {
-    expect((await t.app.inject({ url: "/api/auth/providers" })).json()).toEqual({ oidc: null });
+    expect((await t.app.inject({ url: "/api/auth/providers" })).json()).toEqual({ oidc: null, passwordReset: false });
     expect((await t.app.inject({ url: "/api/auth/oidc/start" })).statusCode).toBe(404);
     const app = await testApp({ db: t.db, config: { ...testConfig, oidc: settings() } });
-    expect((await app.inject({ url: "/api/auth/providers" })).json()).toEqual({ oidc: { name: "Test IdP" } });
+    expect((await app.inject({ url: "/api/auth/providers" })).json()).toEqual({ oidc: { name: "Test IdP" }, passwordReset: false });
     await app.close();
   });
 

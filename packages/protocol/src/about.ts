@@ -11,6 +11,8 @@ export interface AboutDto {
     /** `latest` is newer than the running version */
     available: boolean;
   };
+  /** admins: whether outgoing email (SMTP) is set up */
+  mail?: { configured: boolean };
 }
 
 /** PUT /api/settings/update-check */

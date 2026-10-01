@@ -1,16 +1,17 @@
-import { ChangePasswordBody, LoginBody } from "@ganttlines/protocol";
+import { ChangePasswordBody, ForgotPasswordBody, LoginBody, ResetPasswordBody } from "@ganttlines/protocol";
 import type { FastifyInstance } from "fastify";
 import { requireUser } from "../auth/guard";
 import { randomBytes } from "node:crypto";
 import { hashPassword, verifyPassword } from "../auth/passwords";
 import { toUserDto } from "../dto";
+import { passwordReset } from "../mail/messages";
 import { HttpError } from "../errors";
 import { parseBody } from "../validation";
 import { clearSessionCookie, setSessionCookie, type RouteContext } from "./context";
 
 const invalidCredentials = () => new HttpError(401, "invalid_credentials", "Wrong email or password");
 
-export function authRoutes(app: FastifyInstance, { db, config, sessions, loginLimiter, hub }: RouteContext): void {
+export function authRoutes(app: FastifyInstance, { db, config, sessions, loginLimiter, hub, mailer, passwordTokens }: RouteContext): void {
   // Unknown emails are checked against this hash so they take as long as real accounts (no account probing).
   const dummyHash = hashPassword(randomBytes(16).toString("hex"));
 
@@ -27,6 +28,37 @@ export function authRoutes(app: FastifyInstance, { db, config, sessions, loginLi
       throw invalidCredentials();
     }
     loginLimiter.reset(keys);
+    const session = await sessions.create(user.id);
+    setSessionCookie(reply, config, session.token, session.expiresAt);
+    return { user: toUserDto(user) };
+  });
+
+  /**
+   * "Forgot your password?": emails a one-time link when the address has an account. The answer is
+   * the same either way (and so is the timing, roughly), so nobody can probe which emails exist.
+   */
+  app.post("/api/auth/forgot", async (request, reply) => {
+    const { email } = parseBody(ForgotPasswordBody, request.body);
+    const keys = [`forgot-ip:${request.ip}`, `forgot:${email}`];
+    if (!mailer) throw new HttpError(503, "mail_not_configured", "Email isn't set up on this server — ask an admin to reset your password");
+    if (loginLimiter.isBlocked(keys)) throw new HttpError(429, "too_many_attempts", "Too many requests, try again in a few minutes");
+    loginLimiter.recordFailure(keys); // every request counts: it sends an email
+    const user = await db.user.findUnique({ where: { email } });
+    if (user) {
+      const link = new URL(`/reset-password?token=${await passwordTokens.issue(user.id, "reset")}`, config.publicUrl).toString();
+      mailer.send(passwordReset(user.email, user.name, link)).catch((error: unknown) => request.log.error(error, "couldn't send a password reset email"));
+    }
+    return reply.status(204).send();
+  });
+
+  /** Choosing a password from an emailed link: signs in, and signs out everywhere else. */
+  app.post("/api/auth/reset", async (request, reply) => {
+    const { token, password } = parseBody(ResetPasswordBody, request.body);
+    const userId = await passwordTokens.redeem(token);
+    if (!userId) throw new HttpError(400, "invalid_token", "This link has expired or was already used — ask for a new one");
+    const user = await db.user.update({ where: { id: userId }, data: { passwordHash: await hashPassword(password), mustChangePassword: false } });
+    await sessions.revokeAllForUser(user.id);
+    hub.closeUser(user.id);
     const session = await sessions.create(user.id);
     setSessionCookie(reply, config, session.token, session.expiresAt);
     return { user: toUserDto(user) };

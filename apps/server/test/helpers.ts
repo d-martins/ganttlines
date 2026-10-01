@@ -17,6 +17,7 @@ export const testConfig: Config = {
   version: "1.2.0",
   initialAdmin: null,
   oidc: null,
+  smtp: null,
 };
 
 /** The first-run setup code the test apps use. */

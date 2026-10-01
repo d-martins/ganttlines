@@ -27,11 +27,26 @@ model User {
   oidcSubject        String?   @unique
   createdAt          DateTime  @default(now())
   sessions           Session[]
+  passwordTokens     PasswordToken[]
   resource           Resource?
   commands           CommandLog[]
   shareLinks         ShareLink[]
   comments           Comment[]
   baselines          Baseline[]
+}
+
+/// One-time "choose your password" links (invitations, forgot password); only a hash is stored.
+model PasswordToken {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// "reset" | "invite"
+  purpose   String
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
 }
 
 model Session {
