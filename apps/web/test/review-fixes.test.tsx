@@ -5,7 +5,7 @@ import { ADMIN, fakeApi, GUEST, project, renderApp, screen, signedIn } from "./u
 
 const CALENDAR: CalendarDto = { instanceVersion: 1, workingWeekdays: [1, 2, 3, 4, 5], holidays: [], timeOff: [] };
 const ANA: ResourceDto = { id: "r-ana", name: "Ana", avatarColor: "#4f8cff", inactive: false, userId: null };
-const RUDY: UserDto = { id: "u-rudy", email: "rudy@example.com", name: "Rudy", role: "editor", mustChangePassword: false };
+const RUDY: UserDto = { id: "u-rudy", email: "rudy@example.com", name: "Rudy", role: "editor", mustChangePassword: false, twoFactor: false };
 const unauthorized = { status: 401, body: { error: "unauthorized", message: "Please sign in" } };
 
 /** A server whose session can expire and where different people can sign in. */

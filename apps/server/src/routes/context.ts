@@ -1,3 +1,4 @@
+import type { TwoFactor } from "../auth/two-factor";
 import type { PasswordTokens } from "../auth/password-tokens";
 import type { Mailer } from "../mail/mailer";
 import type { FirstRun } from "../auth/first-run";
@@ -32,6 +33,8 @@ export interface RouteContext {
   mailer: Mailer | null;
   /** one-time "choose your password" links */
   passwordTokens: PasswordTokens;
+  /** authenticator-app codes for two-factor sign-in */
+  twoFactor: TwoFactor;
 }
 
 export function setSessionCookie(reply: FastifyReply, config: Config, token: string, expires: Date): void {

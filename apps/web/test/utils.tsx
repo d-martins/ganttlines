@@ -32,9 +32,9 @@ export function fakeApi(handlers: Record<string, Handler> = {}): FakeApi {
   return { calls, on: (key, handler) => routes.set(key, handler) };
 }
 
-export const ADMIN: UserDto = { id: "u-admin", email: "admin@example.com", name: "Ada Admin", role: "admin", mustChangePassword: false };
-export const GUEST: UserDto = { id: "u-guest", email: "client@example.com", name: "Client", role: "guest", mustChangePassword: false };
-export const VIEWER: UserDto = { id: "u-viewer", email: "vi@example.com", name: "Vi Viewer", role: "viewer", mustChangePassword: false };
+export const ADMIN: UserDto = { id: "u-admin", email: "admin@example.com", name: "Ada Admin", role: "admin", mustChangePassword: false, twoFactor: false };
+export const GUEST: UserDto = { id: "u-guest", email: "client@example.com", name: "Client", role: "guest", mustChangePassword: false, twoFactor: false };
+export const VIEWER: UserDto = { id: "u-viewer", email: "vi@example.com", name: "Vi Viewer", role: "viewer", mustChangePassword: false, twoFactor: false };
 
 export function project(id: string, name: string, archived = false): ProjectDto {
   return { id, name, version: 0, archived };

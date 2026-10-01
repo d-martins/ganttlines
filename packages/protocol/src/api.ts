@@ -32,6 +32,14 @@ export const CreateUserBody = z.strictObject({
   /** create a matching team member (resource) linked to the user */
   createResource: z.boolean().default(true),
 });
+/** A code from an authenticator app (6 digits) or a recovery code. */
+const twoFactorCode = z.string().trim().min(6).max(20);
+/** Turning two-factor on: the first code from the app, proving it's set up. */
+export const EnableTwoFactorBody = z.strictObject({ code: twoFactorCode });
+/** The second sign-in step. */
+export const TwoFactorLoginBody = z.strictObject({ challenge: z.string().min(10).max(500), code: twoFactorCode });
+/** Turning two-factor off yourself: needs your password. */
+export const DisableTwoFactorBody = z.strictObject({ password: z.string().min(1).max(LIMITS.passwordMax) });
 /** "Forgot your password?": always answered the same way, whether or not the email has an account. */
 export const ForgotPasswordBody = z.strictObject({ email });
 /** Choosing a password from an emailed link (invitation or reset). */
@@ -54,6 +62,8 @@ export interface UserDto {
   name: string;
   role: Role;
   mustChangePassword: boolean;
+  /** signs in with a code from an authenticator app too */
+  twoFactor: boolean;
 }
 
 export interface ProjectDto {

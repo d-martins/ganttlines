@@ -98,6 +98,37 @@ describe("getting in", () => {
     });
   });
 
+  it("asks for the authenticator code after the password when two-factor is on", async () => {
+    let signedIn = false;
+    const api = fakeApi({
+      "GET /api/setup": () => ({ body: { needsSetup: false } }),
+      "GET /api/auth/me": () => (signedIn ? { body: { user: ADMIN } } : { status: 401, body: { error: "unauthorized", message: "Please sign in" } }),
+      "POST /api/auth/login": () => ({ body: { twoFactor: { challenge: "proof-of-password" } } }),
+      "POST /api/auth/login/2fa": (body) => {
+        if ((body as { code: string }).code !== "123456") return { status: 401, body: { error: "wrong_code", message: "That code isn't right (or was already used)" } };
+        signedIn = true;
+        return { body: { user: ADMIN } };
+      },
+      "GET /api/projects": () => ({ body: { projects: [] } }),
+    });
+    const { user } = renderApp("/login");
+    await user.type(await screen.findByLabelText("Email"), "admin@example.com");
+    await user.type(screen.getByLabelText("Password"), "right password");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(await screen.findByRole("heading", { name: "Two-factor sign-in" })).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Code"), "000000");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("That code isn't right");
+    await user.clear(screen.getByLabelText("Code"));
+    await user.type(screen.getByLabelText("Code"), "123456");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(await screen.findByText("No projects yet.", { selector: "p.text-text" })).toBeInTheDocument();
+    expect(api.calls.filter((c) => c.key === "POST /api/auth/login/2fa").map((c) => c.body)).toEqual([
+      { challenge: "proof-of-password", code: "000000" },
+      { challenge: "proof-of-password", code: "123456" },
+    ]);
+  });
+
   it("makes people with a temporary password choose a new one first", async () => {
     fakeApi({
       "GET /api/setup": () => ({ body: { needsSetup: false } }),

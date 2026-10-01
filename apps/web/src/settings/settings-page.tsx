@@ -10,7 +10,11 @@ import {
   useDeleteUser,
   useResetPassword,
   userList,
+  useAdminDisableTwoFactor,
+  useDisableTwoFactor,
+  useEnableTwoFactor,
   useSendTestEmail,
+  useTwoFactorSetup,
   useSetUpdateCheck,
   useSetWorkingWeekdays,
   useUpdateUser,
@@ -32,6 +36,7 @@ export function SettingsPage() {
           <ChangePasswordForm onDone={() => {}} />
           <ThemeChoice />
         </div>
+        <TwoFactorSettings me={me.data} />
       </Section>
       {me.data.role === "admin" ? (
         <>
@@ -73,9 +78,10 @@ function UsersSection({ me }: { me: UserDto }) {
   const update = useUpdateUser();
   const reset = useResetPassword();
   const remove = useDeleteUser();
+  const disableTwoFactor = useAdminDisableTwoFactor();
   const [form, setForm] = useState({ name: "", email: "", role: "editor" as Role, createResource: true });
   const [notice, setNotice] = useState<string | null>(null);
-  const failure = create.error ?? update.error ?? reset.error ?? remove.error;
+  const failure = create.error ?? update.error ?? reset.error ?? remove.error ?? disableTwoFactor.error;
 
   return (
     <Section title="Users" description="People who can sign in. New users get an email to choose their password (or, without email set up, a temporary password to pass on).">
@@ -112,6 +118,15 @@ function UsersSection({ me }: { me: UserDto }) {
               </td>
               <td className="whitespace-nowrap py-2 text-right">
                 {/* Your own password is changed above; resetting it here would sign you out everywhere. */}
+                {user.id !== me.id && user.twoFactor ? (
+                  <ConfirmButton
+                    label="Turn off two-factor"
+                    title={`Turn off two-factor sign-in for ${user.name}?`}
+                    message="For someone who lost their authenticator app and recovery codes: they'll sign in with just their password, and can turn it on again."
+                    confirmLabel="Turn off"
+                    onConfirm={() => disableTwoFactor.mutate(user.id, { onSuccess: () => setNotice(`Two-factor sign-in is off for ${user.name}.`) })}
+                  />
+                ) : null}
                 {user.id !== me.id ? (
                   <ConfirmButton
                     label="Reset password"
@@ -179,6 +194,100 @@ function UsersSection({ me }: { me: UserDto }) {
       ) : null}
       <ErrorText>{failure ? errorMessage(failure) : null}</ErrorText>
     </Section>
+  );
+}
+
+/**
+ * Two-factor sign-in for your own account: turn it on (scan the QR code, confirm a code, save the
+ * recovery codes) or off (with your password).
+ */
+function TwoFactorSettings({ me }: { me: UserDto }) {
+  const setup = useTwoFactorSetup();
+  const enable = useEnableTwoFactor();
+  const disable = useDisableTwoFactor();
+  const [code, setCode] = useState("");
+  const [password, setPassword] = useState("");
+  const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
+
+  let body: React.ReactNode;
+  if (recoveryCodes) {
+    body = (
+      <div className="flex flex-col gap-2">
+        <p role="status">
+          Two-factor sign-in is on. Keep these recovery codes somewhere safe — each one signs you in once if you lose your phone. They won't be shown again.
+        </p>
+        <ul aria-label="Recovery codes" className="grid grid-cols-2 gap-1 rounded-md bg-surface-2 p-3 font-mono text-sm sm:grid-cols-5">
+          {recoveryCodes.map((recovery) => (
+            <li key={recovery}>{recovery}</li>
+          ))}
+        </ul>
+        <Button className="self-start" onClick={() => setRecoveryCodes(null)}>
+          I've saved them
+        </Button>
+      </div>
+    );
+  } else if (me.twoFactor) {
+    body = (
+      <form
+        className="flex flex-wrap items-end gap-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          disable.mutate(password, { onSuccess: () => setPassword("") });
+        }}
+      >
+        <p className="w-full">On: signing in with your password also asks for a code from your authenticator app.</p>
+        <Field label="Your password (to turn it off)" type="password" value={password} onChange={(event) => setPassword(event.target.value)} required />
+        <Button type="submit" disabled={disable.isPending}>
+          Turn off
+        </Button>
+        <ErrorText>{disable.error ? errorMessage(disable.error) : null}</ErrorText>
+      </form>
+    );
+  } else if (setup.data) {
+    body = (
+      <form
+        className="flex flex-col gap-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          enable.mutate(code, { onSuccess: ({ recoveryCodes: codes }) => (setRecoveryCodes(codes), setCode(""), setup.reset()) });
+        }}
+      >
+        <p>Scan this with an authenticator app (Google Authenticator, 1Password, Authy …), then enter the code it shows.</p>
+        <div className="flex flex-wrap items-center gap-4">
+          {/* The QR code is drawn by our own server from the otpauth link. */}
+          <div aria-label="QR code for your authenticator app" role="img" className="h-40 w-40 rounded bg-white p-1 [&_svg]:h-full [&_svg]:w-full" dangerouslySetInnerHTML={{ __html: setup.data.qrSvg }} />
+          <div className="flex flex-col gap-1 text-xs text-muted">
+            Can't scan it? Enter this key:
+            <code aria-label="Setup key" className="break-all rounded bg-surface-2 px-2 py-1 font-mono text-sm text-text">
+              {setup.data.secret}
+            </code>
+          </div>
+        </div>
+        <div className="flex items-end gap-2">
+          <Field label="Code from the app" value={code} onChange={(event) => setCode(event.target.value)} inputMode="numeric" autoComplete="one-time-code" required />
+          <Button type="submit" variant="primary" disabled={enable.isPending}>
+            Turn on
+          </Button>
+        </div>
+        <ErrorText>{enable.error ? errorMessage(enable.error) : null}</ErrorText>
+      </form>
+    );
+  } else {
+    body = (
+      <div className="flex flex-wrap items-center gap-3">
+        <p>Off. Add a code from an authenticator app to your password, so a stolen password isn't enough.</p>
+        <Button disabled={setup.isPending} onClick={() => setup.mutate()}>
+          Turn on two-factor
+        </Button>
+        <ErrorText>{setup.error ? errorMessage(setup.error) : null}</ErrorText>
+      </div>
+    );
+  }
+  return (
+    <div className="mt-5 flex flex-col gap-2 border-t border-border pt-4 text-sm">
+      <h3 className="font-medium">Two-factor sign-in</h3>
+      {body}
+    </div>
   );
 }
 

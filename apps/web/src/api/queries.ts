@@ -142,10 +142,18 @@ export const useSetup = () =>
 export const useRequestPasswordReset = () => useApiMutation((email: string) => api<void>("POST", "/api/auth/forgot", { email }), () => undefined);
 /** Choosing a password from an emailed link (invitation or reset); signs in. */
 export const useChoosePassword = () =>
-  useApiMutation((body: { token: string; password: string }) => api<{ user: UserDto }>("POST", "/api/auth/reset", body), startSession);
+  useApiMutation((body: { token: string; password: string }) => api<SignInResult>("POST", "/api/auth/reset", body), startSession);
 export const useSendTestEmail = () => useApiMutation(() => api<{ sentTo: string }>("POST", "/api/settings/test-email"), () => undefined);
 
-export const useLogin = () => useApiMutation((body: { email: string; password: string }) => api<{ user: UserDto }>("POST", "/api/auth/login", body), startSession);
+/** Signed in — or, with two-factor on, the proof for the code step. */
+export type SignInResult = { user: UserDto; twoFactor?: undefined } | { twoFactor: { challenge: string }; user?: undefined };
+export const useLogin = () => useApiMutation((body: { email: string; password: string }) => api<SignInResult>("POST", "/api/auth/login", body), startSession);
+/** The two-factor step: a code from the app, or a recovery code. */
+export const useLoginCode = () => useApiMutation((body: { challenge: string; code: string }) => api<{ user: UserDto }>("POST", "/api/auth/login/2fa", body), startSession);
+const refreshMe = (client: QueryClient) => client.invalidateQueries({ queryKey: keys.me });
+export const useTwoFactorSetup = () => useApiMutation(() => api<{ secret: string; otpauthUrl: string; qrSvg: string }>("POST", "/api/auth/2fa/setup"), () => undefined);
+export const useEnableTwoFactor = () => useApiMutation((code: string) => api<{ recoveryCodes: string[] }>("POST", "/api/auth/2fa/enable", { code }), refreshMe);
+export const useDisableTwoFactor = () => useApiMutation((password: string) => api<{ user: UserDto }>("POST", "/api/auth/2fa/disable", { password }), refreshMe);
 export const useLogout = () => {
   const client = useQueryClient();
   return useMutation({ mutationFn: () => api<void>("POST", "/api/auth/logout"), onSuccess: () => client.clear() });
@@ -169,6 +177,8 @@ export const useCreateUser = () =>
     (body: CreateUserBody) => api<{ user: UserDto; invited?: true; temporaryPassword?: string; inviteFailed?: true }>("POST", "/api/users", body),
     refreshUsers,
   );
+/** For someone who lost their authenticator: turns their two-factor off. */
+export const useAdminDisableTwoFactor = () => useApiMutation((id: string) => api<{ user: UserDto }>("POST", `/api/users/${id}/disable-2fa`), refreshUsers);
 export const useUpdateUser = () =>
   useApiMutation(({ id, ...body }: UpdateUserBody & { id: string }) => api<{ user: UserDto }>("PATCH", `/api/users/${id}`, body), refreshUsers);
 export const useResetPassword = () =>

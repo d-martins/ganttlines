@@ -93,6 +93,16 @@ usual way is to add people under Settings → Users first; their temporary passw
 once they've used single sign-on. With `OIDC_AUTO_CREATE=true`, anyone the provider vouches for
 (within `OIDC_ALLOWED_DOMAINS`) gets an account with `OIDC_DEFAULT_ROLE` (default `viewer`).
 
+## Two-factor sign-in
+
+Anyone with a password can add a code from an authenticator app (Google Authenticator,
+1Password, Authy …): Settings → Your account → **Turn on two-factor**. They get ten single-use
+recovery codes for when they lose their phone; an admin can also turn it off for them (Settings →
+Users). People signing in through single sign-on use their provider's two-factor instead.
+
+The app secrets are stored encrypted with a key derived from `SESSION_SECRET` — changing that
+secret means everyone with two-factor turns it on again (an admin can turn it off for them).
+
 ## Where the data lives
 
 - **Database:** the `pgdata` volume (bundled database) or your own server.

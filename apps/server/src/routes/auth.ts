@@ -11,7 +11,7 @@ import { clearSessionCookie, setSessionCookie, type RouteContext } from "./conte
 
 const invalidCredentials = () => new HttpError(401, "invalid_credentials", "Wrong email or password");
 
-export function authRoutes(app: FastifyInstance, { db, config, sessions, loginLimiter, hub, mailer, passwordTokens }: RouteContext): void {
+export function authRoutes(app: FastifyInstance, { db, config, sessions, loginLimiter, hub, mailer, passwordTokens, twoFactor }: RouteContext): void {
   // Unknown emails are checked against this hash so they take as long as real accounts (no account probing).
   const dummyHash = hashPassword(randomBytes(16).toString("hex"));
 
@@ -28,6 +28,8 @@ export function authRoutes(app: FastifyInstance, { db, config, sessions, loginLi
       throw invalidCredentials();
     }
     loginLimiter.reset(keys);
+    // Two-factor: no session yet — the code comes next, with this proof that the password was right.
+    if (user.totpEnabled) return { twoFactor: { challenge: twoFactor.challenge(user.id) } };
     const session = await sessions.create(user.id);
     setSessionCookie(reply, config, session.token, session.expiresAt);
     return { user: toUserDto(user) };
@@ -51,7 +53,7 @@ export function authRoutes(app: FastifyInstance, { db, config, sessions, loginLi
     return reply.status(204).send();
   });
 
-  /** Choosing a password from an emailed link: signs in, and signs out everywhere else. */
+  /** Choosing a password from an emailed link: signs in (after the two-factor step, if on), and out everywhere else. */
   app.post("/api/auth/reset", async (request, reply) => {
     const { token, password } = parseBody(ResetPasswordBody, request.body);
     const userId = await passwordTokens.redeem(token);
@@ -59,6 +61,8 @@ export function authRoutes(app: FastifyInstance, { db, config, sessions, loginLi
     const user = await db.user.update({ where: { id: userId }, data: { passwordHash: await hashPassword(password), mustChangePassword: false } });
     await sessions.revokeAllForUser(user.id);
     hub.closeUser(user.id);
+    // An emailed link alone doesn't get past two-factor: the code step still follows.
+    if (user.totpEnabled) return { twoFactor: { challenge: twoFactor.challenge(user.id) } };
     const session = await sessions.create(user.id);
     setSessionCookie(reply, config, session.token, session.expiresAt);
     return { user: toUserDto(user) };
