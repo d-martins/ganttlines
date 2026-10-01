@@ -1,6 +1,6 @@
 import type { Db, Prisma } from "@ganttlines/db";
 import { Calendar, type CalendarData } from "@ganttlines/engine";
-import type { CalendarDto, ResourceDto, TimeOffDto } from "@ganttlines/protocol";
+import type { CalendarDto, HolidayDto, LocationDto, ResourceDto, TimeOffDto } from "@ganttlines/protocol";
 import { randomUUID } from "node:crypto";
 import type { Actor } from "../actor";
 import { badRequest } from "../errors";
@@ -121,25 +121,38 @@ export async function insertResource(tx: Tx, input: ResourceInput): Promise<Reso
   return toResourceDto(await tx.resource.create({ data: { name: input.name, avatarColor, userId: input.userId ?? null } }));
 }
 
-export function toResourceDto(resource: { id: string; name: string; avatarColor: string; inactive: boolean; userId: string | null }): ResourceDto {
-  return { id: resource.id, name: resource.name, avatarColor: resource.avatarColor, inactive: resource.inactive, userId: resource.userId };
+export function toResourceDto(resource: { id: string; name: string; avatarColor: string; inactive: boolean; userId: string | null; locationId: string | null }): ResourceDto {
+  return { id: resource.id, name: resource.name, avatarColor: resource.avatarColor, inactive: resource.inactive, userId: resource.userId, locationId: resource.locationId };
+}
+
+export function toLocationDto(location: { id: string; name: string; country: string | null; region: string | null }): LocationDto {
+  return { id: location.id, name: location.name, country: location.country, region: location.region };
 }
 
 async function readCalendar(db: Db | Tx): Promise<Omit<CalendarDto, "instanceVersion">> {
-  const [settings, holidays, timeOff] = await Promise.all([
+  const [settings, holidays, timeOff, locations, members] = await Promise.all([
     db.settings.findUnique({ where: { id: 1 } }),
     db.holiday.findMany({ orderBy: [{ startDate: "asc" }, { id: "asc" }] }),
     db.timeOff.findMany({ orderBy: [{ startDate: "asc" }, { id: "asc" }] }),
+    db.location.findMany({ orderBy: [{ name: "asc" }, { id: "asc" }] }),
+    db.resource.findMany({ where: { locationId: { not: null } }, select: { id: true, locationId: true } }),
   ]);
+  // Who is in each location right now: a location holiday applies to them (moving someone moves their holidays).
+  const inLocation = new Map<string, string[]>();
+  for (const { id, locationId } of members) inLocation.set(locationId!, [...(inLocation.get(locationId!) ?? []), id]);
   return {
     workingWeekdays: settings?.workingWeekdays ?? [1, 2, 3, 4, 5],
-    holidays: holidays.map((h) => ({
-      id: h.id,
-      name: h.name,
-      startDate: h.startDate,
-      endDate: h.endDate,
-      appliesTo: h.appliesToAll ? "all" : h.resourceIds,
-    })),
+    holidays: holidays.map(
+      (h): HolidayDto => ({
+        id: h.id,
+        name: h.name,
+        startDate: h.startDate,
+        endDate: h.endDate,
+        appliesTo: h.appliesToAll ? "all" : [...new Set([...h.resourceIds, ...h.locationIds.flatMap((id) => inLocation.get(id) ?? [])])],
+        target: { all: h.appliesToAll, resourceIds: h.resourceIds, locationIds: h.locationIds },
+      }),
+    ),
+    locations: locations.map(toLocationDto),
     timeOff: timeOff.map(
       (t): TimeOffDto => ({ id: t.id, resourceId: t.resourceId, startDate: t.startDate, endDate: t.endDate, note: t.note }),
     ),

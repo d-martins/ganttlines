@@ -8,14 +8,18 @@ import {
   WorkingWeekdaysBody,
 } from "@ganttlines/protocol";
 import type { FastifyInstance } from "fastify";
+import type { z } from "zod";
+import type { HolidayDto } from "@ganttlines/protocol";
 import { actorOf } from "../actor";
 import { requireUser } from "../auth/guard";
 import { requireInstanceRead } from "../auth/request-access";
+import { toResourceDto } from "../calendar/instance-service";
 import { badRequest, conflict, notFound } from "../errors";
 import { parseBody, parseId } from "../validation";
 import type { RouteContext } from "./context";
 
 type Tx = Prisma.TransactionClient;
+type ParsedHoliday = z.output<typeof HolidayBody>;
 
 /**
  * Team members and the team calendar. Editors manage people, holidays and time off; only admins
@@ -47,16 +51,18 @@ export function calendarRoutes(app: FastifyInstance, context: RouteContext): voi
     const body = parseBody(UpdateResourceBody, request.body);
     const resource = await instance.mutate(actorOf(user), "updateResource", { id, ...body }, async (tx) => {
       await mustExist(tx.resource.findUnique({ where: { id } }), "Team member");
+      if (body.locationId) await assertLocationsExist(tx, [body.locationId]);
       return tx.resource.update({
         where: { id },
         data: {
           ...(body.name ? { name: body.name } : {}),
           ...(body.avatarColor ? { avatarColor: body.avatarColor } : {}),
           ...(body.inactive === undefined ? {} : { inactive: body.inactive }),
+          ...(body.locationId === undefined ? {} : { locationId: body.locationId }),
         },
       });
     });
-    return { resource: { id: resource.id, name: resource.name, avatarColor: resource.avatarColor, inactive: resource.inactive, userId: resource.userId } };
+    return { resource: toResourceDto(resource) };
   });
 
   app.put("/api/calendar/working-weekdays", async (request) => {
@@ -78,9 +84,10 @@ export function calendarRoutes(app: FastifyInstance, context: RouteContext): voi
     const holiday = await instance.mutate(actorOf(user), "createHoliday", body, async (tx) => {
       if ((await tx.holiday.count()) >= CALENDAR_LIMITS.holidays) throw conflict(`At most ${CALENDAR_LIMITS.holidays} holidays`);
       await assertResourcesExist(tx, body.appliesTo);
+      await assertLocationsExist(tx, body.locationIds);
       return tx.holiday.create({ data: holidayColumns(body) });
     });
-    return reply.status(201).send({ holiday: holidayDto(holiday.id, body) });
+    return reply.status(201).send({ holiday: await holidayDto(context, holiday.id) });
   });
 
   app.put<{ Params: { id: string } }>("/api/holidays/:id", async (request) => {
@@ -90,9 +97,10 @@ export function calendarRoutes(app: FastifyInstance, context: RouteContext): voi
     await instance.mutate(actorOf(user), "updateHoliday", { id, ...body }, async (tx) => {
       await mustExist(tx.holiday.findUnique({ where: { id } }), "Holiday");
       await assertResourcesExist(tx, body.appliesTo);
+      await assertLocationsExist(tx, body.locationIds);
       await tx.holiday.update({ where: { id }, data: holidayColumns(body) });
     });
-    return { holiday: holidayDto(id, body) };
+    return { holiday: await holidayDto(context, id) };
   });
 
   app.delete<{ Params: { id: string } }>("/api/holidays/:id", async (request, reply) => {
@@ -139,11 +147,12 @@ export function calendarRoutes(app: FastifyInstance, context: RouteContext): voi
   });
 }
 
-function holidayDto(id: string, body: HolidayBody) {
-  return { id, ...body, appliesTo: body.appliesTo === "all" ? "all" : [...new Set(body.appliesTo)] };
+/** The holiday as the calendar now has it (with its location members resolved). */
+async function holidayDto(context: RouteContext, id: string): Promise<HolidayDto> {
+  return (await context.instance.current()).dto.holidays.find((holiday) => holiday.id === id)!;
 }
 
-function holidayColumns(body: HolidayBody) {
+function holidayColumns(body: ParsedHoliday) {
   const appliesToAll = body.appliesTo === "all";
   return {
     name: body.name,
@@ -151,7 +160,13 @@ function holidayColumns(body: HolidayBody) {
     endDate: body.endDate,
     appliesToAll,
     resourceIds: appliesToAll ? [] : [...new Set(body.appliesTo)],
+    locationIds: appliesToAll ? [] : [...new Set(body.locationIds)],
   };
+}
+
+async function assertLocationsExist(tx: Tx, ids: string[]): Promise<void> {
+  const unique = [...new Set(ids)];
+  if ((await tx.location.count({ where: { id: { in: unique } } })) !== unique.length) throw badRequest("Unknown location");
 }
 
 async function assertResourcesExist(tx: Tx, ids: "all" | string[]): Promise<void> {

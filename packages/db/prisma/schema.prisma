@@ -75,8 +75,23 @@ model Resource {
   inactive    Boolean  @default(false)
   userId      String?  @unique @db.Uuid
   user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  /// where they work: holidays for that location apply to them
+  locationId  String?   @db.Uuid
+  location    Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
   createdAt   DateTime @default(now())
   timeOff     TimeOff[]
+}
+
+/// An office or country that team members belong to; holidays can target it.
+model Location {
+  id        String     @id @default(uuid()) @db.Uuid
+  name      String
+  /// ISO 3166-1 country code (for public holidays), e.g. "PT"
+  country   String?
+  /// region within the country, for regional holidays (e.g. "BY" in Germany)
+  region    String?
+  createdAt DateTime   @default(now())
+  resources Resource[]
 }
 
 model Project {
@@ -137,9 +152,10 @@ model Holiday {
   name         String
   startDate    String
   endDate      String
-  /// true = applies to everyone; otherwise only to `resourceIds`
+  /// true = applies to everyone; otherwise to `resourceIds` and everyone in `locationIds`
   appliesToAll Boolean
   resourceIds  String[] @db.Uuid
+  locationIds  String[] @default([]) @db.Uuid
   createdAt    DateTime @default(now())
 }
 

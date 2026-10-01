@@ -18,7 +18,7 @@ export async function resetDatabase(): Promise<void> {
   await client.connect();
   try {
     await client.query(
-      `TRUNCATE "Comment", "Highlight", "Baseline", "ShareLink", "CommandLog", "TimeOff", "Holiday", "Settings", "Row", "Project", "Session", "Resource", "User" CASCADE`,
+      `TRUNCATE "Comment", "Highlight", "Baseline", "ShareLink", "CommandLog", "TimeOff", "Holiday", "Settings", "Row", "Project", "Session", "Resource", "Location", "User" CASCADE`,
     );
   } finally {
     await client.end();

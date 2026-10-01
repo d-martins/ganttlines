@@ -81,8 +81,22 @@ describe("team calendar", () => {
     });
     let calendar = (await t.app.inject({ url: "/api/calendar", headers: { cookie: editor } })).json();
     expect(calendar.holidays).toEqual([
-      { id: all.json().holiday.id, name: "Republic Day", startDate: "2026-10-05", endDate: "2026-10-05", appliesTo: "all" },
-      { id: local.id, name: "Local fair", startDate: "2026-10-08", endDate: "2026-10-09", appliesTo: [ana.id] },
+      {
+        id: all.json().holiday.id,
+        name: "Republic Day",
+        startDate: "2026-10-05",
+        endDate: "2026-10-05",
+        appliesTo: "all",
+        target: { all: true, resourceIds: [], locationIds: [] },
+      },
+      {
+        id: local.id,
+        name: "Local fair",
+        startDate: "2026-10-08",
+        endDate: "2026-10-09",
+        appliesTo: [ana.id],
+        target: { all: false, resourceIds: [ana.id], locationIds: [] },
+      },
     ]);
     await t.app.inject({ method: "DELETE", url: `/api/holidays/${local.id}`, headers: { cookie: editor } });
     calendar = (await t.app.inject({ url: "/api/calendar", headers: { cookie: editor } })).json();
