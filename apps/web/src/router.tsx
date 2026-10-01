@@ -16,7 +16,11 @@ const loginRoute = createRoute({
   path: "/login",
   component: LoginPage,
   // Where to return after signing in (only same-app paths are honoured).
-  validateSearch: (search: Record<string, unknown>): { redirect?: string } => (isAppPath(search["redirect"]) ? { redirect: search["redirect"] } : {}),
+  validateSearch: (search: Record<string, unknown>): { redirect?: string; error?: string } => ({
+    ...(isAppPath(search["redirect"]) ? { redirect: search["redirect"] } : {}),
+    // why a single sign-on attempt came back here
+    ...(typeof search["error"] === "string" ? { error: search["error"] } : {}),
+  }),
 });
 const changePasswordRoute = createRoute({ getParentRoute: () => rootRoute, path: "/change-password", component: ChangePasswordPage });
 const appRoute = createRoute({ getParentRoute: () => rootRoute, id: "app", component: AppLayout });

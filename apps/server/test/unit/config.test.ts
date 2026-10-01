@@ -15,6 +15,7 @@ describe("loadConfig", () => {
       trustProxy: false,
       version: "dev",
       initialAdmin: null,
+      oidc: null,
     });
   });
 
@@ -22,6 +23,23 @@ describe("loadConfig", () => {
     const base = { DATABASE_URL: "postgresql://db/gp", SESSION_SECRET: SECRET };
     expect(loadConfig({ ...base, WEB_DIR: "/nowhere" }).webDir).toBeNull();
     expect(loadConfig({ ...base, APP_VERSION: "1.4.0" }).version).toBe("1.4.0");
+  });
+
+  it("turns single sign-on on with OIDC_ISSUER, OIDC_CLIENT_ID and OIDC_CLIENT_SECRET together", () => {
+    const base = { DATABASE_URL: "postgresql://db/gp", SESSION_SECRET: SECRET };
+    const oidc = { OIDC_ISSUER: "https://accounts.google.com", OIDC_CLIENT_ID: "id", OIDC_CLIENT_SECRET: "secret" };
+    expect(loadConfig({ ...base, ...oidc, OIDC_NAME: "Google", OIDC_ALLOWED_DOMAINS: " Example.com, @team.org ", OIDC_AUTO_CREATE: "true" }).oidc).toEqual({
+      issuer: new URL("https://accounts.google.com"),
+      clientId: "id",
+      clientSecret: "secret",
+      name: "Google",
+      scopes: "openid email profile",
+      allowedDomains: ["example.com", "team.org"],
+      autoCreate: true,
+      defaultRole: "viewer",
+    });
+    expect(() => loadConfig({ ...base, OIDC_ISSUER: "https://accounts.google.com" })).toThrow("Set OIDC_ISSUER, OIDC_CLIENT_ID and OIDC_CLIENT_SECRET together");
+    expect(() => loadConfig({ ...base, ...oidc, OIDC_DEFAULT_ROLE: "owner" })).toThrow("Invalid OIDC_DEFAULT_ROLE");
   });
 
   it("reads the first admin from ADMIN_*, checked like the setup form", () => {

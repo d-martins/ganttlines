@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { InitialAdminSettings } from "@ganttlines/protocol";
 import type { InitialAdmin } from "./auth/first-run";
+import { oidcSettings, type OidcSettings } from "./auth/oidc";
 
 export interface Config {
   databaseUrl: string;
@@ -17,6 +18,8 @@ export interface Config {
    * cannot spoof their address; a hop count (e.g. 1) or an address/CIDR list when behind a reverse proxy.
    */
   trustProxy: boolean | number | string;
+  /** Single sign-on (OIDC_*), when configured */
+  oidc: OidcSettings | null;
   /** The admin to create on first start (ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_NAME) */
   initialAdmin: InitialAdmin | null;
   /** The running version (the image's APP_VERSION; "dev" otherwise) */
@@ -42,6 +45,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     webDir: webDir(env["WEB_DIR"]),
     version: env["APP_VERSION"] || "dev",
     initialAdmin: initialAdmin(env),
+    oidc: oidcSettings(env),
   };
 }
 

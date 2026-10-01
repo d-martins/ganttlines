@@ -2,16 +2,18 @@ import { useQuery } from "@tanstack/react-query";
 import { Navigate, useNavigate, useSearch } from "@tanstack/react-router";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { errorMessage } from "../api/client";
-import { currentUser, setupStatus, useChangePassword, useLogin, useSetup } from "../api/queries";
+import { currentUser, setupStatus, signInProviders, useChangePassword, useLogin, useSetup } from "../api/queries";
 import { Button } from "../ui/button";
 import { ErrorText, Field } from "../ui/field";
 
-function Card({ title, subtitle, children }: { title: string; subtitle: string; children: ReactNode }) {
+function Card({ title, subtitle, children }: { title: string; subtitle?: string | undefined; children: ReactNode }) {
   return (
     <main className="flex min-h-full items-center justify-center bg-surface p-6">
-      <div className="w-full max-w-sm rounded-lg border border-border bg-bg p-6 shadow-sm">
-        <h1 className="text-lg font-semibold">{title}</h1>
-        <p className="mb-4 text-sm text-muted">{subtitle}</p>
+      <div className="flex w-full max-w-sm flex-col gap-3 rounded-lg border border-border bg-bg p-6 shadow-sm">
+        <div>
+          <h1 className="text-lg font-semibold">{title}</h1>
+          {subtitle ? <p className="text-sm text-muted">{subtitle}</p> : null}
+        </div>
         {children}
       </div>
     </main>
@@ -57,16 +59,42 @@ export function SetupPage() {
   );
 }
 
+/** Why a single sign-on attempt failed (the server sends people back with ?error=…). */
+const SSO_ERRORS: Record<string, string> = {
+  sso_no_account: "There's no account for you here yet — ask an admin to add you, then try again.",
+  sso_domain: "Accounts from that email domain can't sign in here.",
+  sso_unverified: "Your sign-in provider didn't confirm your email address.",
+  sso_failed: "Signing in didn't work. Please try again.",
+};
+
 export function LoginPage() {
   const navigate = useNavigate();
-  const { redirect } = useSearch({ from: "/login" });
+  const { redirect, error } = useSearch({ from: "/login" });
   const me = useQuery(currentUser);
+  const providers = useQuery(signInProviders);
   const login = useLogin();
   const [values, setValues] = useState({ email: "", password: "" });
   // Already signed in (e.g. a second tab): go straight back.
   if (me.data && !login.isPending) return <Navigate to={redirect ?? "/"} />;
+  const sso = providers.data?.oidc;
   return (
-    <Card title="Sign in" subtitle="Use the email and password your admin gave you.">
+    <Card title="Sign in" subtitle={sso ? undefined : "Use the email and password your admin gave you."}>
+      {error ? (
+        <p role="alert" className="text-sm text-danger">
+          {SSO_ERRORS[error] ?? SSO_ERRORS["sso_failed"]}
+        </p>
+      ) : null}
+      {sso ? (
+        <>
+          <a
+            href={`/api/auth/oidc/start${redirect ? `?redirect=${encodeURIComponent(redirect)}` : ""}`}
+            className="flex justify-center rounded-md bg-accent px-3 py-2 text-sm font-medium text-accent-text hover:opacity-90"
+          >
+            Sign in with {sso.name}
+          </a>
+          <p className="flex items-center gap-2 text-xs text-muted before:h-px before:flex-1 before:bg-border after:h-px after:flex-1 after:bg-border">or with a password</p>
+        </>
+      ) : null}
       <Form onSubmit={() => login.mutate(values, { onSuccess: () => navigate({ to: redirect ?? "/" }) })}>
         <Field label="Email" type="email" value={values.email} onChange={(e) => setValues({ ...values, email: e.target.value })} required autoFocus />
         <Field label="Password" type="password" value={values.password} onChange={(e) => setValues({ ...values, password: e.target.value })} required />

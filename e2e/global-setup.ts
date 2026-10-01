@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
-import { BASE_URL, PORT } from "./support";
+import { BASE_URL, OIDC_PORT, PORT } from "./support";
 
 const ROOT = join(__dirname, "..");
 const WEB_DIR = join(ROOT, "apps/web/dist");
@@ -15,6 +15,14 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   const database = await new PostgreSqlContainer("postgres:17").start();
   const databaseUrl = database.getConnectionUri();
   process.env["E2E_DATABASE_URL"] = databaseUrl; // for the tests' database resets
+
+  // A test OpenID provider, so single sign-on can be tried end to end.
+  const provider = spawn(process.execPath, ["--import", "tsx", "apps/server/test/fake-oidc-cli.ts", String(OIDC_PORT)], { cwd: ROOT, stdio: ["ignore", "pipe", "inherit"] });
+  const providerLine = await new Promise<string>((resolve, reject) => {
+    provider.stdout?.on("data", (chunk: Buffer) => chunk.toString().includes("fake-oidc listening") && resolve(chunk.toString()));
+    provider.once("exit", (code) => reject(new Error(`The test OpenID provider exited (code ${code})`)));
+  });
+  const [, issuer, clientId, clientSecret] = /listening: (\S+) client=(\S+) secret=(\S+)/.exec(providerLine) ?? [];
 
   const server: ChildProcess = spawn(process.execPath, ["--import", "tsx", "apps/server/src/cli.ts", "start"], {
     cwd: ROOT,
@@ -30,6 +38,10 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       BACKUP_DIR: mkdtempSync(join(tmpdir(), "gp-e2e-backups-")),
       APP_VERSION: "e2e",
       PRISMA_HIDE_UPDATE_MESSAGE: "1",
+      OIDC_ISSUER: issuer,
+      OIDC_CLIENT_ID: clientId,
+      OIDC_CLIENT_SECRET: clientSecret,
+      OIDC_NAME: "Test IdP",
     },
   });
   let output = "";
@@ -45,6 +57,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     process.env["E2E_SETUP_CODE"] = code;
   } catch (error) {
     server.kill();
+    provider.kill();
     await database.stop();
     throw new Error(`${(error as Error).message}\n--- server output ---\n${output}`);
   }
@@ -52,6 +65,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   return async () => {
     server.kill("SIGTERM");
     await new Promise((resolve) => (server.exitCode !== null ? resolve(null) : server.once("exit", resolve)));
+    provider.kill();
     await database.stop();
   };
 }

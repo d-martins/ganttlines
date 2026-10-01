@@ -23,6 +23,8 @@ model User {
   passwordHash       String
   role               Role
   mustChangePassword Boolean   @default(false)
+  /// single sign-on account ("<issuer>#<subject>"), once linked
+  oidcSubject        String?   @unique
   createdAt          DateTime  @default(now())
   sessions           Session[]
   resource           Resource?

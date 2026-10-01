@@ -4,6 +4,7 @@ import { Prisma, type Db } from "@ganttlines/db";
 import Fastify, { type FastifyInstance } from "fastify";
 import { AccessService } from "./auth/access";
 import { FirstRun } from "./auth/first-run";
+import { OidcSignIn } from "./auth/oidc";
 import { LoginLimiter } from "./auth/login-limiter";
 import { SESSION_COOKIE, SessionStore } from "./auth/sessions";
 import { InstanceService } from "./calendar/instance-service";
@@ -14,6 +15,7 @@ import { KeyedQueue } from "./queue";
 import { Hub } from "./realtime/hub";
 import { aboutRoutes } from "./routes/about";
 import { activityRoutes } from "./routes/activity";
+import { oidcRoutes } from "./routes/oidc";
 import { authRoutes } from "./routes/auth";
 import { baselineRoutes } from "./routes/baselines";
 import { calendarRoutes } from "./routes/calendar";
@@ -137,6 +139,7 @@ export async function buildApp({ db, config, now, logger = false, updates = new 
   baselineRoutes(app, context);
   activityRoutes(app, context);
   aboutRoutes(app, context, updates);
+  oidcRoutes(app, context, config.oidc ? new OidcSignIn(config.oidc, new URL("/api/auth/oidc/callback", config.publicUrl).toString(), config.sessionSecret) : null);
   if (config.webDir) await webRoutes(app, config.webDir);
   return app;
 }

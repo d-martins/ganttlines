@@ -4,6 +4,8 @@ import pg from "pg";
 
 export const PORT = 3210;
 export const BASE_URL = `http://localhost:${PORT}`;
+/** The test OpenID provider (single sign-on) */
+export const OIDC_PORT = 3299;
 
 export const ADMIN = { email: "admin@example.test", name: "Ada Admin", password: "admin-password-1" };
 

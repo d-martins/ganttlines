@@ -49,6 +49,18 @@ describe("getting in", () => {
     expect(router.state.location.pathname).toBe("/p/p1");
   });
 
+  it("offers single sign-on when it's set up, keeping where to go back to, and explains failed attempts", async () => {
+    fakeApi({
+      "GET /api/setup": () => ({ body: { needsSetup: false } }),
+      "GET /api/auth/me": () => ({ status: 401, body: { error: "unauthorized", message: "Please sign in" } }),
+      "GET /api/auth/providers": () => ({ body: { oidc: { name: "Google" } } }),
+    });
+    renderApp("/login?redirect=%2Fp%2Fp1&error=sso_no_account");
+    expect(await screen.findByRole("link", { name: "Sign in with Google" })).toHaveAttribute("href", "/api/auth/oidc/start?redirect=%2Fp%2Fp1");
+    expect(screen.getByRole("alert")).toHaveTextContent("There's no account for you here yet — ask an admin to add you");
+    expect(screen.getByLabelText("Password")).toBeInTheDocument(); // passwords still work
+  });
+
   it("makes people with a temporary password choose a new one first", async () => {
     fakeApi({
       "GET /api/setup": () => ({ body: { needsSetup: false } }),
