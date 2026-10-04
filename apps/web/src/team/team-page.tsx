@@ -19,12 +19,14 @@ import {
   useSaveTimeOff,
   useUpdateResource,
 } from "../api/queries";
+import { ChevronDown, MapPin } from "lucide-react";
 import { Avatar } from "../ui/avatar";
 import { ColorInput } from "../ui/color-input";
 import { QueryState } from "../ui/query-state";
 import { Button } from "../ui/button";
 import { ConfirmButton } from "../ui/confirm";
 import { ErrorText, Field } from "../ui/field";
+import { SearchSelect, type SearchOption } from "../ui/search-select";
 import { Section } from "../ui/section";
 
 const canEdit = (user: UserDto | null | undefined) => user?.role === "editor" || user?.role === "admin";
@@ -203,39 +205,61 @@ function Locations({ locations, people, holidays, editable }: { locations: Locat
   );
 }
 
-/** A location's country, and region when the country has regional holidays. */
+const PICKER = "inline-flex max-w-48 items-center gap-1 rounded border border-border-strong bg-bg px-1.5 py-0.5 text-left";
+
+/** A location's country, and region when the country has regional holidays — searchable lists. */
 function CountryPicker({ location, onChange }: { location: LocationDto; onChange: (country: string | null, region: string | null) => void }) {
   const countries = useQuery(holidayCountries);
   const regions = useQuery({ ...holidayRegions(location.country ?? ""), enabled: Boolean(location.country) });
+  const countryName = countries.data?.countries.find((country) => country.code === location.country)?.name ?? location.country;
+  const regionName = regions.data?.regions.find((region) => region.code === location.region)?.name ?? location.region;
+  const matching = <T extends { code: string; name: string }>(list: T[], query: string) => {
+    const needle = query.toLocaleLowerCase();
+    return list.filter((item) => item.name.toLocaleLowerCase().includes(needle) || item.code.toLocaleLowerCase() === needle);
+  };
   return (
     <>
-      <select
-        aria-label={`Country of ${location.name}`}
-        value={location.country ?? ""}
-        onChange={(event) => onChange(event.target.value || null, null)}
-        className="max-w-44 rounded border border-border-strong bg-bg px-1 py-0.5"
-      >
-        <option value="">No country</option>
-        {countries.data?.countries.map((country) => (
-          <option key={country.code} value={country.code}>
-            {country.name}
-          </option>
-        ))}
-      </select>
+      <SearchSelect
+        trigger={
+          <button type="button" aria-label={`Country of ${location.name}: ${countryName ?? "none"}`} className={PICKER}>
+            <span className="truncate">{countryName ?? "No country"}</span>
+            <ChevronDown aria-hidden size={14} className="shrink-0 text-muted" />
+          </button>
+        }
+        options={(query) => [
+          ...(query ? [] : [{ key: "none", label: "No country", current: !location.country, onChoose: () => location.country && onChange(null, null) }]),
+          ...matching(countries.data?.countries ?? [], query).map((country) => ({
+            key: country.code,
+            label: country.name,
+            current: country.code === location.country,
+            onChoose: () => country.code !== location.country && onChange(country.code, null),
+          })),
+        ]}
+        searchLabel="Find a country"
+        placeholder="Find a country…"
+        empty="No country matches."
+      />
       {location.country && regions.data && regions.data.regions.length > 0 ? (
-        <select
-          aria-label={`Region of ${location.name}`}
-          value={location.region ?? ""}
-          onChange={(event) => onChange(location.country, event.target.value || null)}
-          className="max-w-44 rounded border border-border-strong bg-bg px-1 py-0.5"
-        >
-          <option value="">Whole country</option>
-          {regions.data.regions.map((region) => (
-            <option key={region.code} value={region.code}>
-              {region.name}
-            </option>
-          ))}
-        </select>
+        <SearchSelect
+          trigger={
+            <button type="button" aria-label={`Region of ${location.name}: ${regionName ?? "whole country"}`} className={PICKER}>
+              <span className="truncate">{regionName ?? "Whole country"}</span>
+              <ChevronDown aria-hidden size={14} className="shrink-0 text-muted" />
+            </button>
+          }
+          options={(query) => [
+            ...(query ? [] : [{ key: "none", label: "Whole country", current: !location.region, onChoose: () => location.region && onChange(location.country, null) }]),
+            ...matching(regions.data!.regions, query).map((region) => ({
+              key: region.code,
+              label: region.name,
+              current: region.code === location.region,
+              onChoose: () => region.code !== location.region && onChange(location.country, region.code),
+            })),
+          ]}
+          searchLabel="Find a region"
+          placeholder="Find a region…"
+          empty="No region matches."
+        />
       ) : null}
     </>
   );
@@ -319,15 +343,117 @@ function audience(holiday: HolidayDto, people: ResourceDto[], locations: Locatio
   return names.join(", ");
 }
 
+/** Whose holidays to list: all of them, the company-wide ones, or the ones a location or person gets. */
+type HolidayAudience = { kind: "all" } | { kind: "everyone" } | { kind: "location"; id: string } | { kind: "person"; id: string };
+
+/** Whether `holiday` is a day off for `audience` (company-wide holidays count for every location and person). */
+function holidayFor(holiday: HolidayDto, audience: HolidayAudience, people: ResourceDto[]): boolean {
+  const { target } = holiday;
+  switch (audience.kind) {
+    case "all":
+      return true;
+    case "everyone":
+      return target.all;
+    case "location":
+      return target.all || target.locationIds.includes(audience.id);
+    case "person": {
+      const locationId = people.find((person) => person.id === audience.id)?.locationId;
+      return target.all || target.resourceIds.includes(audience.id) || (locationId != null && target.locationIds.includes(locationId));
+    }
+  }
+}
+
+/** Narrows the holiday list: by name or date (e.g. "2027"), and to a location or a person. */
+function HolidayFilter({
+  text,
+  onText,
+  audience,
+  onAudience,
+  people,
+  locations,
+}: {
+  text: string;
+  onText: (text: string) => void;
+  audience: HolidayAudience;
+  onAudience: (audience: HolidayAudience) => void;
+  people: ResourceDto[];
+  locations: LocationDto[];
+}) {
+  const same = (other: HolidayAudience) => other.kind === audience.kind && ("id" in other ? "id" in audience && other.id === audience.id : true);
+  const label =
+    audience.kind === "all"
+      ? "Anyone"
+      : audience.kind === "everyone"
+        ? "Everyone (company-wide)"
+        : audience.kind === "location"
+          ? (locations.find((location) => location.id === audience.id)?.name ?? "Unknown location")
+          : (people.find((person) => person.id === audience.id)?.name ?? "Unknown");
+  const options = (query: string): SearchOption[] => {
+    const needle = query.toLocaleLowerCase();
+    const option = (key: string, text: string, value: HolidayAudience, extra: Partial<SearchOption> = {}): SearchOption => ({
+      key,
+      label: text,
+      current: same(value),
+      onChoose: () => onAudience(value),
+      ...extra,
+    });
+    const fixed = [option("all", "Anyone", { kind: "all" }), option("everyone", "Everyone (company-wide)", { kind: "everyone" })];
+    return [
+      ...fixed.filter((item) => item.label.toLocaleLowerCase().includes(needle)),
+      ...locations
+        .filter((location) => location.name.toLocaleLowerCase().includes(needle))
+        .map((location) => option(`l:${location.id}`, location.name, { kind: "location", id: location.id }, { leading: <MapPin aria-hidden size={16} className="text-muted" />, detail: "location" })),
+      ...people
+        .filter((person) => person.name.toLocaleLowerCase().includes(needle))
+        .map((person) => option(`p:${person.id}`, person.name, { kind: "person", id: person.id }, { leading: <Avatar name={person.name} color={person.avatarColor} size={20} /> })),
+    ];
+  };
+  return (
+    <div className="mb-2 flex flex-wrap items-center gap-2 text-sm">
+      <input
+        type="search"
+        aria-label="Find a holiday"
+        placeholder="Find a holiday or year…"
+        value={text}
+        onChange={(event) => onText(event.target.value)}
+        className="min-w-40 flex-1 rounded border border-border-strong bg-bg px-2 py-1"
+      />
+      <span className="text-muted">for</span>
+      <SearchSelect
+        align="end"
+        trigger={
+          <button type="button" aria-label={`Holidays for: ${label}`} className={`${PICKER} py-1`}>
+            <span className="truncate">{label}</span>
+            <ChevronDown aria-hidden size={14} className="shrink-0 text-muted" />
+          </button>
+        }
+        options={options}
+        searchLabel="Find a location or person"
+        placeholder="Find a location or person…"
+        empty="Nothing matches."
+      />
+    </div>
+  );
+}
+
 function Holidays({ holidays, people, locations, editable }: { holidays: HolidayDto[]; people: ResourceDto[]; locations: LocationDto[]; editable: boolean }) {
   const save = useSaveHoliday();
   const remove = useDeleteHoliday();
+  const [text, setText] = useState("");
+  const [showFor, setShowFor] = useState<HolidayAudience>({ kind: "all" });
+  const needle = text.trim().toLocaleLowerCase();
+  const shown = holidays.filter(
+    (holiday) =>
+      holidayFor(holiday, showFor, people) &&
+      (!needle || holiday.name.toLocaleLowerCase().includes(needle) || holiday.startDate.includes(needle) || holiday.endDate.includes(needle)),
+  );
   const [editing, setEditing] = useState<(HolidayBody & { id?: string; locationIds: string[] }) | null>(null);
   const toggle = (list: string[], id: string) => (list.includes(id) ? list.filter((other) => other !== id) : [...list, id]);
   return (
     <Section title="Holidays" description="Days off for everyone, or only for some locations or people (for example a local holiday).">
-      <ul className="mb-3 divide-y divide-border">
-        {holidays.map((holiday) => (
+      {holidays.length > 0 ? <HolidayFilter text={text} onText={setText} audience={showFor} onAudience={setShowFor} people={people} locations={locations} /> : null}
+      <ul aria-label="Holidays" className="mb-3 divide-y divide-border">
+        {shown.map((holiday) => (
           <li key={holiday.id} className="flex items-center gap-3 py-2 text-sm">
             <span className="flex-1">
               <strong>{holiday.name}</strong> <span className="text-muted">· {range(holiday.startDate, holiday.endDate)}</span>
@@ -362,6 +488,7 @@ function Holidays({ holidays, people, locations, editable }: { holidays: Holiday
           </li>
         ))}
         {holidays.length === 0 ? <li className="py-2 text-sm text-muted">No holidays yet.</li> : null}
+        {holidays.length > 0 && shown.length === 0 ? <li className="py-2 text-sm text-muted">No holidays match.</li> : null}
       </ul>
       {editable && !editing ? (
         <Button onClick={() => setEditing({ name: "", startDate: "", endDate: "", appliesTo: "all", locationIds: [] })}>Add holiday</Button>

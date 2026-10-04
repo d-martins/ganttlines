@@ -222,6 +222,67 @@ describe("team & calendar", () => {
     });
   });
 
+  it("narrows the holiday list by name or year, and to a location or person", async () => {
+    const LISBON = { id: "l-lisbon", name: "Lisbon office", country: "PT", region: null };
+    const MUNICH = { id: "l-munich", name: "Munich office", country: "DE", region: null };
+    const BEA: ResourceDto = { ...ANA, id: "r-bea", name: "Bea", locationId: "l-munich" };
+    const holiday = (id: string, name: string, startDate: string, target: Partial<CalendarDto["holidays"][number]["target"]>) => ({
+      id,
+      name,
+      startDate,
+      endDate: startDate,
+      appliesTo: "all" as const,
+      target: { all: false, resourceIds: [], locationIds: [], ...target },
+    });
+    const api = signedIn(ADMIN);
+    api.on("GET /api/resources", () => ({ body: { resources: [{ ...ANA, locationId: "l-lisbon" }, BEA] } }));
+    api.on("GET /api/calendar", () => ({
+      body: {
+        ...CALENDAR,
+        locations: [LISBON, MUNICH],
+        holidays: [
+          holiday("h1", "Company retreat", "2026-06-01", { all: true }),
+          holiday("h2", "Freedom Day", "2026-04-25", { locationIds: ["l-lisbon"] }),
+          holiday("h3", "Oktoberfest day", "2026-10-02", { locationIds: ["l-munich"] }),
+          holiday("h4", "Bea's birthday", "2027-03-01", { resourceIds: ["r-bea"] }),
+        ],
+      },
+    }));
+    const { user } = renderApp("/team");
+    const shown = () => within(screen.getByRole("list", { name: "Holidays" })).getAllByRole("listitem").map((item) => item.querySelector("strong")?.textContent ?? item.textContent);
+    await screen.findByRole("list", { name: "Holidays" });
+    expect(shown()).toEqual(["Company retreat", "Freedom Day", "Oktoberfest day", "Bea's birthday"]);
+
+    await user.click(screen.getByRole("button", { name: "Holidays for: Anyone" }));
+    await user.type(screen.getByRole("combobox", { name: "Find a location or person" }), "bea{Enter}");
+    expect(shown()).toEqual(["Company retreat", "Oktoberfest day", "Bea's birthday"]); // company-wide, her location's, hers
+
+    await user.click(screen.getByRole("button", { name: "Holidays for: Bea" }));
+    await user.type(screen.getByRole("combobox", { name: "Find a location or person" }), "lisbon{Enter}");
+    expect(shown()).toEqual(["Company retreat", "Freedom Day"]);
+
+    await user.click(screen.getByRole("button", { name: "Holidays for: Lisbon office" }));
+    await user.click(screen.getByRole("option", { name: "Anyone" }));
+    await user.type(screen.getByLabelText("Find a holiday"), "2027");
+    expect(shown()).toEqual(["Bea's birthday"]);
+    await user.clear(screen.getByLabelText("Find a holiday"));
+    await user.type(screen.getByLabelText("Find a holiday"), "nothing like this");
+    expect(shown()).toEqual(["No holidays match."]);
+  });
+
+  it("picks a location's country from a searchable list", async () => {
+    const LISBON = { id: "l-lisbon", name: "Lisbon office", country: null, region: null };
+    const api = signedIn(ADMIN);
+    api.on("GET /api/resources", () => ({ body: { resources: [ANA] } }));
+    api.on("GET /api/calendar", () => ({ body: { ...CALENDAR, locations: [LISBON] } }));
+    api.on("GET /api/public-holidays/countries", () => ({ body: { countries: [{ code: "DE", name: "Germany" }, { code: "PT", name: "Portugal" }] } }));
+    api.on("PUT /api/locations/l-lisbon", (body) => ({ body: { location: { ...LISBON, ...(body as object) } } }));
+    const { user } = renderApp("/team");
+    await user.click(await screen.findByRole("button", { name: "Country of Lisbon office: none" }));
+    await user.type(screen.getByRole("combobox", { name: "Find a country" }), "portu{Enter}");
+    expect(api.calls.find((c) => c.key === "PUT /api/locations/l-lisbon")?.body).toMatchObject({ country: "PT", region: null });
+  });
+
   it("is read-only for viewers", async () => {
     teamApi(VIEWER);
     renderApp("/team");
