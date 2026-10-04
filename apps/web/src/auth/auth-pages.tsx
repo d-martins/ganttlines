@@ -50,10 +50,21 @@ export function SetupPage() {
   const navigate = useNavigate();
   const status = useQuery(setupStatus);
   const setup = useSetup();
+  const providers = useQuery(signInProviders);
   const [values, setValues] = useState({ name: "", email: "", password: "", setupCode: "" });
   if (status.data && !status.data.needsSetup && !setup.isSuccess) return <Navigate to="/" />;
+  const sso = providers.data?.oidc?.firstAdmin ? providers.data.oidc : null;
   return (
     <Card title="Welcome to GanttLines" subtitle="Create the admin account to get started.">
+      {sso ? (
+        <>
+          <a href="/api/auth/oidc/start" className="flex justify-center rounded-md bg-accent px-3 py-2 text-sm font-medium text-accent-text hover:opacity-90">
+            Sign in with {sso.name} to become the admin
+          </a>
+          <p className="text-xs text-muted">Only the account this server was set up for (ADMIN_EMAIL, or the allowed email domains) can.</p>
+          <p className="flex items-center gap-2 text-xs text-muted before:h-px before:flex-1 before:bg-border after:h-px after:flex-1 after:bg-border">or with a password</p>
+        </>
+      ) : null}
       <p className="text-sm text-muted">
         To prove you run this server, enter the setup code it printed in its log (e.g. <code className="text-text">docker compose logs app</code>).
       </p>
@@ -74,6 +85,7 @@ export function SetupPage() {
 /** Why a single sign-on attempt failed (the server sends people back with ?error=…). */
 const SSO_ERRORS: Record<string, string> = {
   sso_no_account: "There's no account for you here yet — ask an admin to add you, then try again.",
+  sso_setup_pending: "This server has no admin yet. Its admin signs in first (or creates the account with the setup code from the server's log).",
   sso_domain: "Accounts from that email domain can't sign in here.",
   sso_unverified: "Your sign-in provider didn't confirm your email address.",
   sso_failed: "Signing in didn't work. Please try again.",

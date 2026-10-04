@@ -1,4 +1,4 @@
-import { randomInt, timingSafeEqual } from "node:crypto";
+import { randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import type { Db, User } from "@ganttlines/db";
 import { actorOf } from "../actor";
 import { insertResource, type InstanceService } from "../calendar/instance-service";
@@ -19,7 +19,9 @@ const newCode = () => Array.from({ length: 11 }, (_, i) => (i === 5 ? "-" : ALPH
 /**
  * Who may create the first admin. With ADMIN_* configured, the server creates it on start. Without,
  * the web setup page also asks for a one-time setup code printed in the server's log — so a fresh
- * install on the internet can't be claimed by whoever happens to open it first.
+ * install on the internet can't be claimed by whoever happens to open it first. With single sign-on,
+ * the first admin can also be whoever signs in as ADMIN_EMAIL (or, without it, from one of
+ * OIDC_ALLOWED_DOMAINS); see the single sign-on routes.
  */
 export class FirstRun {
   private code: string | null;
@@ -65,13 +67,24 @@ export class FirstRun {
 
   /** Creates the first admin (and their team member) — only while there are no accounts at all. */
   async createAdmin({ email, name, password }: InitialAdmin): Promise<User> {
-    const passwordHash = await hashPassword(password);
+    return this.create({ email, name, passwordHash: await hashPassword(password) });
+  }
+
+  /**
+   * The first admin, signing in with single sign-on: their account is tied to the provider and has
+   * a password nobody knows (they can set one with "Forgot your password?").
+   */
+  async createAdminFromSso({ email, name, subject }: { email: string; name: string; subject: string }): Promise<User> {
+    return this.create({ email, name, passwordHash: await hashPassword(randomBytes(32).toString("base64url")), oidcSubject: subject });
+  }
+
+  private create(data: { email: string; name: string; passwordHash: string; oidcSubject?: string }): Promise<User> {
     // The admin and their team member are created together (one instance mutation).
-    return this.instance.mutate(actorOf, "setup", { email }, async (tx) => {
+    return this.instance.mutate(actorOf, "setup", { email: data.email }, async (tx) => {
       // Serialise concurrent setup attempts; only the first may create the admin.
       await tx.$executeRaw`LOCK TABLE "User" IN EXCLUSIVE MODE`;
       if ((await tx.user.count()) > 0) throw conflict("Setup has already been completed");
-      const created = await tx.user.create({ data: { email, name, passwordHash, role: "admin" } });
+      const created = await tx.user.create({ data: { ...data, role: "admin" } });
       await insertResource(tx, { name: created.name, userId: created.id });
       return created;
     });
