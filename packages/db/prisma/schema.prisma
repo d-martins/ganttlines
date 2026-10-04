@@ -35,6 +35,7 @@ model User {
   createdAt          DateTime  @default(now())
   sessions           Session[]
   passwordTokens     PasswordToken[]
+  mcpConnections     McpConnection[]
   resource           Resource?
   commands           CommandLog[]
   shareLinks         ShareLink[]
@@ -149,6 +150,10 @@ model Settings {
   updateCheck     Boolean @default(true)
   /// who must use two-factor to sign in with a password
   requireTwoFactor TwoFactorRequirement @default(off)
+  /// AI apps may connect over MCP (admins switch it on)
+  mcpEnabled      Boolean  @default(false)
+  /// the tool groups (OAuth scopes) the server allows AI apps
+  mcpScopes       String[] @default(["plans:read", "plans:write", "comments", "team:read"])
 }
 
 enum TwoFactorRequirement {
@@ -272,4 +277,73 @@ model Baseline {
   snapshot        Json
 
   @@index([projectId])
+}
+
+/// An AI app that can ask people for access: registered by itself, or known by its metadata URL.
+model OAuthClient {
+  /// generated for registered apps; the metadata document's URL otherwise
+  id           String          @id
+  name         String
+  redirectUris String[]
+  /// fetched from `id` (a client metadata document) rather than registered
+  fromMetadata Boolean         @default(false)
+  fetchedAt    DateTime?
+  createdAt    DateTime        @default(now())
+  connections  McpConnection[]
+}
+
+/**
+ * A person's approval for one AI app (signed in with OAuth), or a personal access token they made,
+ * with the tool groups (scopes) they granted it.
+ */
+model McpConnection {
+  id         String        @id @default(uuid()) @db.Uuid
+  userId     String        @db.Uuid
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// the app, for OAuth connections (null for personal access tokens)
+  clientId   String?
+  client     OAuthClient?  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  /// a personal access token's name (what it's for)
+  label      String?
+  scopes     String[]
+  createdAt  DateTime      @default(now())
+  lastUsedAt DateTime?
+  /// the board commands of the app's last tool call ({ projectId, commandIds }), for its undo
+  lastCall   Json?
+  codes      OAuthCode[]
+  tokens     OAuthToken[]
+
+  @@unique([userId, clientId])
+}
+
+/// A one-time authorization code (stored hashed), exchanged for tokens with the PKCE verifier.
+model OAuthCode {
+  id            String        @id
+  connectionId  String        @db.Uuid
+  connection    McpConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  scopes        String[]
+  codeChallenge String
+  redirectUri   String
+  expiresAt     DateTime
+}
+
+/// Access and refresh tokens (stored hashed). A refresh token is used once: `rotatedAt` marks it spent.
+model OAuthToken {
+  id           String        @id
+  connectionId String        @db.Uuid
+  connection   McpConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  kind         OAuthTokenKind
+  scopes       String[]
+  expiresAt    DateTime
+  rotatedAt    DateTime?
+  createdAt    DateTime      @default(now())
+
+  @@index([connectionId])
+}
+
+enum OAuthTokenKind {
+  access
+  refresh
+  /// a personal access token (made in Settings, used like an access token)
+  personal
 }

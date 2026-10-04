@@ -7,6 +7,8 @@ export type {
   Comment,
   Highlight,
   Holiday,
+  McpConnection,
+  OAuthClient,
   Project,
   Resource,
   Row as DbRow,

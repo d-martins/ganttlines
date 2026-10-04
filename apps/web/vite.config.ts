@@ -11,6 +11,10 @@ export default defineConfig({
     proxy: {
       "/api": { target: server, changeOrigin: false },
       "/ws": { target: server.replace(/^http/, "ws"), ws: true },
+      // AI access (MCP): the endpoint and its OAuth sign-in
+      "/mcp": { target: server, changeOrigin: false },
+      "/oauth": { target: server, changeOrigin: false },
+      "/.well-known/oauth-": { target: server, changeOrigin: false },
     },
   },
   test: {

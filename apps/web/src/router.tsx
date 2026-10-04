@@ -2,6 +2,7 @@ import { createRootRoute, createRoute, createRouter, Outlet, type RouterHistory 
 import { AppLayout } from "./app/app-layout";
 import { ErrorScreen } from "./app/error-screen";
 import { ChangePasswordPage, ChoosePasswordPage, ForgotPasswordPage, LoginPage, SetupPage, SetUpTwoFactorPage } from "./auth/auth-pages";
+import { ConnectPage } from "./auth/connect-page";
 import { BoardPage } from "./board/board-page";
 import type { CompareMode } from "./board/model";
 import { HomeRedirect } from "./projects/project-pages";
@@ -31,6 +32,16 @@ const choosePasswordRoute = createRoute({
   validateSearch: (search: Record<string, unknown>): { token?: string } => (typeof search["token"] === "string" ? { token: search["token"] } : {}),
 });
 const changePasswordRoute = createRoute({ getParentRoute: () => rootRoute, path: "/change-password", component: ChangePasswordPage });
+/** An AI app's "Allow access?" step (`?request=…` signed by the server, or `?error=…`). */
+const connectRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/connect",
+  component: ConnectPage,
+  validateSearch: (search: Record<string, unknown>): { request?: string; error?: string } => ({
+    ...(typeof search["request"] === "string" ? { request: search["request"] } : {}),
+    ...(typeof search["error"] === "string" ? { error: search["error"] } : {}),
+  }),
+});
 const setUpTwoFactorRoute = createRoute({ getParentRoute: () => rootRoute, path: "/set-up-two-factor", component: SetUpTwoFactorPage });
 const appRoute = createRoute({ getParentRoute: () => rootRoute, id: "app", component: AppLayout });
 const homeRoute = createRoute({ getParentRoute: () => appRoute, path: "/", component: HomeRedirect });
@@ -62,6 +73,7 @@ const routeTree = rootRoute.addChildren([
   loginRoute,
   changePasswordRoute,
   setUpTwoFactorRoute,
+  connectRoute,
   forgotPasswordRoute,
   choosePasswordRoute,
   shareRoute,

@@ -18,15 +18,9 @@ const CommentsQuery = z.object({
 
 /** Comments on tasks: anyone who can see the board reads them; commenters are signed-in users and collaborating link visitors. */
 export function commentRoutes(app: FastifyInstance, context: RouteContext): void {
-  const { db, projects, hub } = context;
+  const { db } = context;
 
-  /** Pushes a created/changed comment to the room, telling each viewer whether it is theirs. */
-  const announce = (comment: Comment) =>
-    hub.broadcastEach(comment.projectId, (connection) => ({
-      type: "comment",
-      projectId: comment.projectId,
-      comment: toCommentDto(comment, connection.viewer?.id ?? null),
-    }));
+  const announce = (comment: Comment) => announceComment(context, comment);
 
   app.get<{ Params: { id: string }; Querystring: Record<string, string> }>("/api/projects/:id/comments", async (request) => {
     const projectId = parseId(request.params.id, "Project");
@@ -58,15 +52,9 @@ export function commentRoutes(app: FastifyInstance, context: RouteContext): void
     const projectId = parseId(request.params.id, "Project");
     const access = await requireProjectAccess(request, context, projectId, "view");
     if (!access.canComment) throw forbidden("You can only view this project");
-    await assertNotArchived(db, projectId);
     const body = parseBody(CommentBody, request.body);
-    if (!(await projects.hasTask(projectId, body.taskId))) throw notFound("Task");
-    const { actor } = access;
-    const comment = await db.comment.create({
-      data: { projectId, taskId: body.taskId, authorUserId: actor.userId, authorVisitorId: actor.visitorId ?? null, authorLabel: actor.label, body: body.body },
-    });
-    announce(comment);
-    return reply.status(201).send({ comment: toCommentDto(comment, actorKey(actor)) });
+    const comment = await postComment(context, projectId, access.actor, body.taskId, body.body);
+    return reply.status(201).send({ comment: toCommentDto(comment, actorKey(access.actor)) });
   });
 
   app.patch<{ Params: { id: string } }>("/api/comments/:id", async (request) => {
@@ -98,6 +86,26 @@ export function commentRoutes(app: FastifyInstance, context: RouteContext): void
     if (!comment) throw notFound("Comment");
     return comment;
   }
+}
+
+/** Pushes a created/changed comment to the room, telling each viewer whether it is theirs. */
+function announceComment({ hub }: RouteContext, comment: Comment): void {
+  hub.broadcastEach(comment.projectId, (connection) => ({
+    type: "comment",
+    projectId: comment.projectId,
+    comment: toCommentDto(comment, connection.viewer?.id ?? null),
+  }));
+}
+
+/** Adds a comment to a task (of a live project) and shows it to everyone with the board open. */
+export async function postComment(context: RouteContext, projectId: string, actor: Actor, taskId: string, body: string): Promise<Comment> {
+  await assertNotArchived(context.db, projectId);
+  if (!(await context.projects.hasTask(projectId, taskId))) throw notFound("Task");
+  const comment = await context.db.comment.create({
+    data: { projectId, taskId, authorUserId: actor.userId, authorVisitorId: actor.visitorId ?? null, authorLabel: actor.label, body },
+  });
+  announceComment(context, comment);
+  return comment;
 }
 
 function authorKeyOf(comment: Comment): string | null {

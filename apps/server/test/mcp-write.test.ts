@@ -1,0 +1,149 @@
+import { randomUUID } from "node:crypto";
+import { describe, expect, it } from "vitest";
+import { createUser, setupAdmin, useTestApp } from "./helpers";
+import { call, connect, enableMcp, mcpClient, registerApp } from "./mcp-support";
+
+const t = useTestApp();
+
+/** An editor (Ed) whose AI app may do everything; a project "Launch"; Ana on the team. */
+async function editorsApp() {
+  const admin = await setupAdmin(t.app);
+  await enableMcp(t.app, admin, ["plans:read", "plans:write", "comments", "team:read", "team:write"]);
+  const ed = await createUser(t.app, admin, { email: "ed@example.com", name: "Ed", role: "editor" });
+  await t.app.inject({ method: "POST", url: "/api/resources", headers: { cookie: admin }, payload: { name: "Ana" } });
+  const projectId = (await t.app.inject({ method: "POST", url: "/api/projects", headers: { cookie: ed.cookie }, payload: { name: "Launch" } })).json().project.id as string;
+  const tokens = await connect(t.app, ed.cookie, await registerApp(t.app, "Claude"));
+  return { admin, ed, projectId, client: await mcpClient(t.app, tokens.access_token) };
+}
+
+const rowsOf = async (projectId: string, cookie: string) =>
+  (await t.app.inject({ url: `/api/projects/${projectId}/state`, headers: { cookie } })).json().rows as { id: string; title: string; parentId: string | null }[];
+
+describe("AI access: editing plans", () => {
+  it("adds sections and tasks — following earlier ones, assigned by name — and answers with their computed dates", async () => {
+    const { ed, projectId, client } = await editorsApp();
+    const result = await call(client, "add_tasks", {
+      project: "Launch",
+      tasks: [
+        { kind: "section", title: "Phase 1" },
+        { title: "Design", parent: "Phase 1", start: "2026-10-05", durationDays: 3, assignee: "ana" },
+        { title: "Build", parent: "Phase 1", predecessor: "Design", durationDays: 2.5 },
+        { title: "Release", parent: "Phase 1", predecessor: "Build", milestone: true },
+      ],
+    });
+    expect(result["error"]).toBeUndefined();
+    expect(result["added"]).toEqual([
+      expect.objectContaining({ title: "Phase 1", type: "section" }),
+      expect.objectContaining({ title: "Design", start: "2026-10-05", end: "2026-10-07", assignee: expect.objectContaining({ name: "Ana" }) }),
+      expect.objectContaining({ title: "Build", start: "2026-10-08", end: "2026-10-12", endsMidday: true, predecessor: expect.objectContaining({ title: "Design" }) }),
+      expect.objectContaining({ title: "Release", type: "milestone", start: "2026-10-12" }),
+    ]);
+    // It's an ordinary change on the board, credited to Ed "via" the app.
+    const history = (await t.app.inject({ url: `/api/projects/${projectId}/activity`, headers: { cookie: ed.cookie } })).json().entries;
+    expect(history[0].actor.label).toBe("Ed via Claude");
+    // Ed's own undo in the browser doesn't revert what his AI did (and vice versa).
+    const undo = await t.app.inject({ method: "POST", url: `/api/projects/${projectId}/undo`, headers: { cookie: ed.cookie }, payload: { commandId: randomUUID() } });
+    expect(undo.json()).toMatchObject({ message: "Nothing to undo" });
+    await client.close();
+  });
+
+  it("changes, moves and deletes tasks; undo reverts the last call as a whole", async () => {
+    const { ed, projectId, client } = await editorsApp();
+    await call(client, "add_tasks", {
+      project: projectId,
+      tasks: [
+        { title: "Design", start: "2026-10-05", durationDays: 2 },
+        { title: "Build", start: "2026-10-05", durationDays: 2 },
+        { kind: "section", title: "Later" },
+      ],
+    });
+    const updated = await call(client, "update_task", { project: "Launch", task: "build", predecessor: "Design", lagDays: 1, title: "Build it", half: "afternoon", start: "2026-10-05" });
+    expect(updated["task"]).toMatchObject({ title: "Build it", start: "2026-10-08", predecessor: { title: "Design", lagDays: 1 } });
+
+    await call(client, "move_tasks", { project: "Launch", tasks: ["Build it"], parent: "Later" });
+    const later = (await rowsOf(projectId, ed.cookie)).find((row) => row.title === "Later")!;
+    expect((await rowsOf(projectId, ed.cookie)).find((row) => row.title === "Build it")!.parentId).toBe(later.id);
+
+    expect(await call(client, "delete_tasks", { project: "Launch", tasks: ["Later"] })).toMatchObject({ deleted: [{ title: "Later" }] });
+    expect((await rowsOf(projectId, ed.cookie)).map((row) => row.title).sort()).toEqual(["Design"]);
+    await call(client, "undo");
+    expect((await rowsOf(projectId, ed.cookie)).map((row) => row.title).sort()).toEqual(["Build it", "Design", "Later"]);
+    expect(await call(client, "undo")).toEqual({ error: "There's nothing to undo." });
+    await client.close();
+  });
+
+  it("stops at the first problem, says what was done, and undo reverts that part", async () => {
+    const { ed, projectId, client } = await editorsApp();
+    const result = await call(client, "add_tasks", {
+      project: "Launch",
+      tasks: [{ title: "One", start: "2026-10-05" }, { title: "Two", assignee: "Zed" }],
+    });
+    expect(result["error"]).toMatch(/^No team member called “Zed”.* — stopped there\. 2 changes before it were made; call undo to revert them\.$/);
+    expect((await rowsOf(projectId, ed.cookie)).map((row) => row.title).sort()).toEqual(["One", "Two"]);
+    await call(client, "undo");
+    expect(await rowsOf(projectId, ed.cookie)).toEqual([]);
+    expect(await call(client, "add_tasks", { project: "Nope", tasks: [{ title: "x" }] })).toEqual({ error: expect.stringContaining("No project called “Nope”") });
+    await client.close();
+  });
+
+  it("creates and renames projects", async () => {
+    const { ed, client } = await editorsApp();
+    const created = await call(client, "create_project", { name: "Website" });
+    expect(created["project"]).toMatchObject({ name: "Website" });
+    await call(client, "rename_project", { project: "Website", name: "New website" });
+    const names = (await t.app.inject({ url: "/api/projects", headers: { cookie: ed.cookie } })).json().projects.map((p: { name: string }) => p.name);
+    expect(names).toEqual(["Launch", "New website"]);
+    await client.close();
+  });
+
+  it("reads and adds comments, as the person via the app", async () => {
+    const { ed, projectId, client } = await editorsApp();
+    await call(client, "add_tasks", { project: "Launch", tasks: [{ title: "Design", start: "2026-10-05" }] });
+    expect(await call(client, "add_comment", { project: "Launch", task: "Design", text: "Looks **good**" })).toMatchObject({ comment: { task: "Design", by: "Ed via Claude" } });
+    const listed = await call(client, "list_comments", { project: "Launch" });
+    expect(listed["comments"]).toEqual([expect.objectContaining({ task: "Design", by: "Ed via Claude", text: "Looks **good**" })]);
+    // In the web app it's Ed's (he can edit or delete it).
+    const comments = (await t.app.inject({ url: `/api/projects/${projectId}/comments`, headers: { cookie: ed.cookie } })).json().comments;
+    expect(comments[0]).toMatchObject({ mine: true, author: { label: "Ed via Claude" } });
+    await client.close();
+  });
+});
+
+describe("AI access: editing the team calendar", () => {
+  it("adds people, locations, holidays, time off and a country's public holidays", async () => {
+    const { client } = await editorsApp();
+    expect(await call(client, "save_location", { name: "Lisbon office", country: "pt" })).toMatchObject({ location: { name: "Lisbon office", country: "PT" } });
+    expect(await call(client, "add_team_member", { name: "Rui", location: "Lisbon" })).toMatchObject({ member: { name: "Rui", locationId: expect.any(String) } });
+    await call(client, "update_team_member", { person: "Ana", location: "Lisbon office" });
+    await call(client, "save_holiday", { name: "Team day", start: "2026-11-06", locations: ["Lisbon office"] });
+    await call(client, "save_time_off", { person: "Ana", start: "2026-11-09", end: "2026-11-13", note: "Vacation" });
+    const imported = await call(client, "import_public_holidays", { location: "Lisbon office", year: 2026 });
+    expect(imported["added"]).toBeGreaterThan(5);
+    expect(await call(client, "import_public_holidays", { location: "Lisbon office", year: 2026 })).toMatchObject({ added: 0 });
+
+    const calendar = await call(client, "get_calendar", { from: "2026-11-01", to: "2026-12-31" });
+    expect(calendar["holidays"]).toContainEqual({ name: "Team day", start: "2026-11-06", end: "2026-11-06", for: ["Lisbon office (location)"] });
+    expect(calendar["holidays"]).toContainEqual(expect.objectContaining({ name: "Christmas Day", start: "2026-12-25" }));
+    expect(calendar["timeOff"]).toEqual([{ person: "Ana", start: "2026-11-09", end: "2026-11-13", note: "Vacation" }]);
+
+    await call(client, "delete_holiday", { holiday: "Team day" });
+    await call(client, "delete_time_off", { person: "Ana", start: "2026-11-09" });
+    const after = await call(client, "get_calendar", { from: "2026-11-01", to: "2026-11-30" });
+    expect(after["timeOff"]).toEqual([]);
+    expect((after["holidays"] as { name: string }[]).map((h) => h.name)).not.toContain("Team day");
+    expect(await call(client, "save_location", { name: "Mars", country: "XX" })).toEqual({ error: "No public holiday data for that country" });
+    await client.close();
+  });
+
+  it("gives a viewer's app no editing tools, whatever the admin allows", async () => {
+    const admin = await setupAdmin(t.app);
+    await enableMcp(t.app, admin, ["plans:read", "plans:write", "comments", "team:read", "team:write"]);
+    const viewer = await createUser(t.app, admin, { email: "vi@example.com", name: "Vi", role: "viewer" });
+    const client = await mcpClient(t.app, (await connect(t.app, viewer.cookie, await registerApp(t.app))).access_token);
+    const names = (await client.listTools()).tools.map((tool) => tool.name);
+    expect(names).toContain("add_comment"); // viewers can comment in the web app too
+    expect(names).not.toContain("add_tasks");
+    expect(names).not.toContain("save_holiday");
+    await client.close();
+  });
+});

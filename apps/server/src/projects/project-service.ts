@@ -2,6 +2,7 @@ import { Prisma, toDbColumns, type Db, type Project } from "@ganttlines/db";
 import {
   applyCommand,
   buildTree,
+  childrenOf,
   computeSchedule,
   diffRows,
   fromDay,
@@ -11,6 +12,7 @@ import {
   type ProjectState,
   type Row,
   type RowChange,
+  type Span,
 } from "@ganttlines/engine";
 import type { BaselineTaskDto, ChangesDto, CommandResultDto, ProjectDto, ProjectStateDto } from "@ganttlines/protocol";
 import { createHash } from "node:crypto";
@@ -54,6 +56,15 @@ type Outcome = { ok: true; result: UndoResultDto | CommandResultDto; digest: str
  * together with its command-log entry and a version bump in a single transaction, then announced
  * to listeners (the real-time hub) in version order.
  */
+/** A row as the board lists it: its depth, whether it's a parent task, and its computed dates. */
+export interface OutlineRow {
+  row: Row;
+  depth: number;
+  isParent: boolean;
+  /** null for sections and unscheduled tasks */
+  span: Span | null;
+}
+
 export class ProjectService {
   private readonly cache = new Map<string, Promise<StoredProject>>();
   private readonly queue = new KeyedQueue();
@@ -176,6 +187,24 @@ export class ProjectService {
     });
   }
 
+  /** Every row in board order (depth first), with the computed dates of scheduled tasks. */
+  outline(projectId: string): Promise<{ project: ProjectDto; rows: OutlineRow[] }> {
+    return this.queue.run(projectId, async () => {
+      const { meta, state } = await this.get(projectId);
+      const schedule = computeSchedule(state, (await this.instance.current()).calendar);
+      const tree = buildTree(state);
+      const rows: OutlineRow[] = [];
+      const visit = (parentId: string | null, depth: number) => {
+        for (const row of childrenOf(tree, parentId)) {
+          rows.push({ row, depth, isParent: isParentTask(tree, row), span: schedule.get(row.id)?.span ?? null });
+          visit(row.id, depth + 1);
+        }
+      };
+      visit(null, 0);
+      return { project: toProjectDto(meta), rows };
+    });
+  }
+
   /**
    * Deletes an archived project and everything in it (rows, command log, comments, highlights,
    * baselines and share links cascade in the database). Live projects must be archived first.
@@ -217,23 +246,51 @@ export class ProjectService {
           this.undoStacks.pop(direction, projectId, userId);
           return error;
         };
-        const logged = await this.db.commandLog.findUnique({ where: { commandId: target } });
-        if (!logged || logged.projectId !== projectId) throw discard(new HttpError(422, "invalid", "That change is no longer available"));
-
-        const { state, skipped } = revertChanges(stored.state, logged.changes as unknown as RowChange[], direction);
-        const problem = findTreeProblem(Object.values(state.rows));
-        if (problem || hasCycle(state, (await this.instance.current()).calendar)) {
-          throw discard(new HttpError(409, "conflict", `Can't ${direction} this any more: the board changed since`));
+        let result: UndoResultDto;
+        try {
+          result = await this.revertLogged(stored, actor, commandId, direction, target, userId);
+        } catch (error) {
+          throw error instanceof HttpError && error.status !== 500 ? discard(error) : error;
         }
-        const changes = diffRows(stored.state, state);
-        if (changes.length === 0) throw discard(new HttpError(409, "conflict", `Nothing left to ${direction}: it was all changed since`));
-        const result = await this.commit(stored, actor, commandId, direction, { target, skipped, by: userId }, state, changes);
         this.undoStacks.pop(direction, projectId, userId);
         if (direction === "undo") this.undoStacks.pushUndone(projectId, userId, target);
         else this.undoStacks.pushRedone(projectId, userId, target);
-        return { ...result, skipped };
+        return result;
       }) as Promise<UndoResultDto>;
     });
+  }
+
+  /**
+   * Undoes one particular logged command (skip-on-conflict, like undo), outside anyone's undo
+   * history — for AI apps undoing their own last tool call.
+   */
+  undoCommand(projectId: string, actor: Actor, commandId: string, targetCommandId: string): Promise<UndoResultDto> {
+    return this.run(projectId, async (stored) => {
+      if (stored.meta.archivedAt) throw conflict("This project is archived");
+      return this.revertLogged(stored, actor, commandId, "undo", targetCommandId, actorKey(actor));
+    });
+  }
+
+  private async revertLogged(
+    stored: StoredProject,
+    actor: Actor,
+    commandId: string,
+    direction: "undo" | "redo",
+    target: string,
+    by: string | null,
+  ): Promise<UndoResultDto> {
+    const projectId = stored.meta.id;
+    const logged = await this.db.commandLog.findUnique({ where: { commandId: target } });
+    if (!logged || logged.projectId !== projectId) throw new HttpError(422, "invalid", "That change is no longer available");
+    const { state, skipped } = revertChanges(stored.state, logged.changes as unknown as RowChange[], direction);
+    const problem = findTreeProblem(Object.values(state.rows));
+    if (problem || hasCycle(state, (await this.instance.current()).calendar)) {
+      throw new HttpError(409, "conflict", `Can't ${direction} this any more: the board changed since`);
+    }
+    const changes = diffRows(stored.state, state);
+    if (changes.length === 0) throw new HttpError(409, "conflict", `Nothing left to ${direction}: it was all changed since`);
+    const result = await this.commit(stored, actor, commandId, direction, { target, skipped, by }, state, changes);
+    return { ...result, skipped };
   }
 
   /** Runs `work` in the project's queue; unexpected failures drop the cached copy so the next request reloads. */

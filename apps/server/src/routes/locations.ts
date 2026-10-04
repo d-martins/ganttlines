@@ -1,10 +1,9 @@
-import { CALENDAR_LIMITS, ImportHolidaysBody, LocationBody, type PublicHolidayDto } from "@ganttlines/protocol";
+import { ImportHolidaysBody, LocationBody, type PublicHolidayDto } from "@ganttlines/protocol";
 import type { FastifyInstance } from "fastify";
 import { actorOf } from "../actor";
 import { requireUser } from "../auth/guard";
-import { toLocationDto } from "../calendar/instance-service";
 import { countries, publicHolidays, regions } from "../calendar/public-holidays";
-import { badRequest, conflict, notFound } from "../errors";
+import { badRequest, notFound } from "../errors";
 import { parseBody, parseId } from "../validation";
 import type { RouteContext } from "./context";
 
@@ -12,34 +11,23 @@ import type { RouteContext } from "./context";
  * Locations (offices, countries) that team members belong to. Holidays can target them, and a
  * country's public holidays can be added to one from a suggested list (then edited like any other).
  */
-export function locationRoutes(app: FastifyInstance, { db, instance }: RouteContext): void {
+export function locationRoutes(app: FastifyInstance, { db, instance, teamEdits }: RouteContext): void {
   const mustExist = async (id: string) => {
     const location = await db.location.findUnique({ where: { id } });
     if (!location) throw notFound("Location");
     return location;
   };
-  const checkRegion = (body: { country: string | null; region: string | null }) => {
-    if (body.region && !body.country) throw badRequest("Choose the country of that region");
-    if (body.country && !countries().some((entry) => entry.code === body.country)) throw badRequest("No public holiday data for that country");
-    if (body.country && body.region && !regions(body.country).some((entry) => entry.code === body.region)) throw badRequest("Unknown region for that country");
-  };
-
   app.post("/api/locations", async (request, reply) => {
     const user = requireUser(request, "editor");
     const body = parseBody(LocationBody, request.body);
-    checkRegion(body);
-    const location = await instance.mutate(actorOf(user), "createLocation", body, (tx) => tx.location.create({ data: body }));
-    return reply.status(201).send({ location: toLocationDto(location) });
+    return reply.status(201).send({ location: await teamEdits.createLocation(actorOf(user), body) });
   });
 
   app.put<{ Params: { id: string } }>("/api/locations/:id", async (request) => {
     const user = requireUser(request, "editor");
     const id = parseId(request.params.id, "Location");
     const body = parseBody(LocationBody, request.body);
-    checkRegion(body);
-    await mustExist(id);
-    const location = await instance.mutate(actorOf(user), "updateLocation", { id, ...body }, (tx) => tx.location.update({ where: { id }, data: body }));
-    return { location: toLocationDto(location) };
+    return { location: await teamEdits.updateLocation(actorOf(user), id, body) };
   });
 
   /** Its members lose the location; holidays only for it go too; holidays also for others just drop it. */
@@ -90,14 +78,6 @@ export function locationRoutes(app: FastifyInstance, { db, instance }: RouteCont
     const user = requireUser(request, "editor");
     const location = await mustExist(parseId(request.params.id, "Location"));
     const body = parseBody(ImportHolidaysBody, request.body);
-    const created = await instance.mutate(actorOf(user), "importHolidays", { locationId: location.id, count: body.holidays.length }, async (tx) => {
-      const existing = await tx.holiday.findMany({ where: { locationIds: { has: location.id } }, select: { name: true, startDate: true } });
-      const have = new Set(existing.map((holiday) => `${holiday.name}|${holiday.startDate}`));
-      const fresh = body.holidays.filter((holiday) => !have.has(`${holiday.name}|${holiday.startDate}`));
-      if ((await tx.holiday.count()) + fresh.length > CALENDAR_LIMITS.holidays) throw conflict(`At most ${CALENDAR_LIMITS.holidays} holidays`);
-      await tx.holiday.createMany({ data: fresh.map((holiday) => ({ ...holiday, appliesToAll: false, resourceIds: [], locationIds: [location.id] })) });
-      return fresh.length;
-    });
-    return reply.status(201).send({ added: created });
+    return reply.status(201).send({ added: await teamEdits.importHolidays(actorOf(user), location.id, body.holidays) });
   });
 }

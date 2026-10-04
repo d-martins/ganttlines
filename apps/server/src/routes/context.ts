@@ -1,5 +1,8 @@
 import type { TwoFactor } from "../auth/two-factor";
 import type { TwoFactorPolicy } from "../auth/two-factor-policy";
+import type { OAuthClients } from "../oauth/clients";
+import type { OAuthGrants } from "../oauth/grants";
+import type { McpSettings } from "../oauth/mcp-settings";
 import type { PasswordTokens } from "../auth/password-tokens";
 import type { Mailer } from "../mail/mailer";
 import type { FirstRun } from "../auth/first-run";
@@ -9,6 +12,7 @@ import type { AccessService } from "../auth/access";
 import type { LoginLimiter } from "../auth/login-limiter";
 import { SESSION_COOKIE, type SessionStore } from "../auth/sessions";
 import type { InstanceService } from "../calendar/instance-service";
+import type { TeamEdits } from "../calendar/team-edits";
 import type { Config } from "../config";
 import type { ProjectService } from "../projects/project-service";
 import type { KeyedQueue } from "../queue";
@@ -38,6 +42,16 @@ export interface RouteContext {
   twoFactor: TwoFactor;
   /** who must use two-factor */
   twoFactorPolicy: TwoFactorPolicy;
+  /** AI access over MCP: the admins' switch and allowed tool groups */
+  mcpSettings: McpSettings;
+  /** AI apps (registered, or known by their metadata address) */
+  oauthClients: OAuthClients;
+  /** people's approvals for AI apps: codes and tokens */
+  oauthGrants: OAuthGrants;
+  /** throttles app registrations per client IP */
+  registerLimiter: LoginLimiter;
+  /** changes to the team calendar (people, locations, holidays, time off) */
+  teamEdits: TeamEdits;
 }
 
 export function setSessionCookie(reply: FastifyReply, config: Config, token: string, expires: Date): void {

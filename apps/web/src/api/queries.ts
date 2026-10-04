@@ -26,6 +26,13 @@ import type {
   UpdateProjectBody,
   UpdateResourceBody,
   TwoFactorRequirement,
+  CreateMcpTokenBody,
+  McpConnectionDto,
+  McpScope,
+  McpSettingsBody,
+  McpSettingsDto,
+  OAuthConsentBody,
+  OAuthRequestDto,
   UpdateUserBody,
   UserDto,
 } from "@ganttlines/protocol";
@@ -50,6 +57,11 @@ export const keys = {
   activity: (id: string, rowId: string) => ["project", id, "activity", rowId] as const,
   shareLinks: (id: string) => ["project", id, "share-links"] as const,
   shareInfo: (token: string) => ["share", token] as const,
+  mcpSettings: ["mcp-settings"] as const,
+  mcpAvailable: ["mcp-available"] as const,
+  /** your AI app connections, or (all) everyone's */
+  mcpConnections: (all: boolean) => ["mcp-connections", { all }] as const,
+  oauthRequest: (request: string) => ["oauth-request", request] as const,
   /** every activity list of a project (refreshed whenever the project changes) */
   allActivity: (id: string) => ["project", id, "activity"] as const,
 };
@@ -201,6 +213,43 @@ export const useSetRequireTwoFactor = () =>
     (require: TwoFactorRequirement) => api<{ require: TwoFactorRequirement }>("PUT", "/api/settings/require-two-factor", { require }),
     (client) => client.invalidateQueries({ queryKey: keys.about }),
   );
+
+export const mcpSettings = queryOptions({
+  queryKey: keys.mcpSettings,
+  queryFn: () => api<McpSettingsDto>("GET", "/api/settings/mcp"),
+});
+export const mcpConnections = (all: boolean) =>
+  queryOptions({
+    queryKey: keys.mcpConnections(all),
+    queryFn: async () => (await api<{ connections: McpConnectionDto[] }>("GET", `/api/mcp/connections${all ? "?all=true" : ""}`)).connections,
+  });
+/** What an AI app asks for, on the "Allow access?" page. */
+export const oauthRequest = (request: string) =>
+  queryOptions({
+    queryKey: keys.oauthRequest(request),
+    queryFn: () => api<OAuthRequestDto>("GET", `/api/oauth/request?request=${encodeURIComponent(request)}`),
+    retry: false,
+  });
+export const useSaveMcpSettings = () =>
+  useApiMutation(
+    (body: McpSettingsBody) => api<McpSettingsDto>("PUT", "/api/settings/mcp", body),
+    // What everyone's Settings offers follows the switch (e.g. the Connected AI apps section).
+    (client) => Promise.all([client.invalidateQueries({ queryKey: keys.mcpSettings }), client.invalidateQueries({ queryKey: keys.mcpAvailable })]),
+  );
+/** Whether AI apps can connect, where, and which groups the signed-in person can grant. */
+export const mcpAvailable = queryOptions({
+  queryKey: keys.mcpAvailable,
+  queryFn: () => api<{ enabled: boolean; url: string; scopes: McpScope[] }>("GET", "/api/mcp/available"),
+});
+export const useCreateMcpToken = () =>
+  useApiMutation(
+    (body: CreateMcpTokenBody) => api<{ token: string; connection: McpConnectionDto }>("POST", "/api/mcp/tokens", body),
+    (client) => client.invalidateQueries({ queryKey: ["mcp-connections"] }),
+  );
+export const useDisconnectApp = () =>
+  useApiMutation((id: string) => api<void>("DELETE", `/api/mcp/connections/${id}`), (client) => client.invalidateQueries({ queryKey: ["mcp-connections"] }));
+/** Approving (or declining) an AI app's request; answers where to send the browser back to the app. */
+export const useOAuthConsent = () => useMutation({ mutationFn: (body: OAuthConsentBody) => api<{ redirect: string }>("POST", "/api/oauth/consent", body) });
 
 export const useSetWorkingWeekdays = () =>
   useApiMutation((workingWeekdays: number[]) => api<CalendarDto>("PUT", "/api/calendar/working-weekdays", { workingWeekdays }), refreshCalendar);
