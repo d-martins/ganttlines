@@ -101,6 +101,7 @@ describe("single sign-on (OIDC)", () => {
 
   it("only goes back to pages on this site", async () => {
     const app = await testApp({ db: t.db, config: { ...testConfig, oidc: settings({ autoCreate: true }) } });
+    await setupAdmin(app);
     for (const target of ["//evil.example", "https://evil.example", "/\\evil.example"]) {
       expect((await signIn(app, { sub: "s", email: "s@example.com" }, target)).headers.location).toBe("/");
     }
@@ -127,5 +128,49 @@ describe("single sign-on (OIDC)", () => {
     expect((await restarted.inject({ url: "/api/auth/me", headers: { cookie } })).json().user.mustSetUpTwoFactor).toBe(false);
     expect((await restarted.inject({ url: "/api/projects", headers: { cookie } })).statusCode).toBe(200);
     await Promise.all([app.close(), restarted.close()]);
+  });
+
+  describe("on a fresh install (no accounts yet)", () => {
+    const fresh = (overrides: Partial<OidcSettings> = {}, firstAdminEmail: string | null = null) =>
+      testApp({ db: t.db, config: { ...testConfig, firstAdminEmail, oidc: settings({ autoCreate: true, ...overrides }) } });
+
+    it("makes ADMIN_EMAIL the admin when they sign in first, and keeps everyone else out until then", async () => {
+      const app = await fresh({}, "boss@example.com");
+      expect((await app.inject({ url: "/api/auth/providers" })).json().oidc).toEqual({ name: "Test IdP", firstAdmin: true });
+      const stranger = await signIn(app, { sub: "x-1", email: "someone@example.com", name: "Someone" });
+      expect(stranger.headers.location).toBe("/login?error=sso_setup_pending");
+      expect(await t.db.user.count()).toBe(0); // no account was auto-created ahead of the admin
+
+      const boss = await signIn(app, { sub: "boss-1", email: "boss@example.com", name: "The Boss" });
+      expect(boss.headers.location).toBe("/p/123");
+      const me = (await app.inject({ url: "/api/auth/me", headers: { cookie: sessionCookie(boss) } })).json().user;
+      expect(me).toMatchObject({ email: "boss@example.com", name: "The Boss", role: "admin" });
+      expect((await app.inject({ url: "/api/setup" })).json()).toEqual({ needsSetup: false });
+      expect((await app.inject({ url: "/api/auth/providers" })).json().oidc).toEqual({ name: "Test IdP" });
+      // From now on it's the usual rules: the stranger is auto-created with the default role.
+      const later = await signIn(app, { sub: "x-1", email: "someone@example.com", name: "Someone" });
+      expect((await app.inject({ url: "/api/auth/me", headers: { cookie: sessionCookie(later) } })).json().user.role).toBe("viewer");
+      await app.close();
+    });
+
+    it("without ADMIN_EMAIL, makes the first person from the allowed domains the admin", async () => {
+      const app = await fresh({ allowedDomains: ["example.com"] });
+      const first = await signIn(app, { sub: "a-1", email: "ana@example.com", name: "Ana" });
+      expect((await app.inject({ url: "/api/auth/me", headers: { cookie: sessionCookie(first) } })).json().user.role).toBe("admin");
+      const second = await signIn(app, { sub: "b-1", email: "bo@example.com", name: "Bo" });
+      expect((await app.inject({ url: "/api/auth/me", headers: { cookie: sessionCookie(second) } })).json().user.role).toBe("viewer");
+      await app.close();
+    });
+
+    it("with neither, waits for setup with the setup code (any domain could sign in first otherwise)", async () => {
+      const app = await fresh();
+      expect((await app.inject({ url: "/api/auth/providers" })).json().oidc).toEqual({ name: "Test IdP" });
+      expect((await signIn(app, { sub: "a-1", email: "ana@example.com", name: "Ana" })).headers.location).toBe("/login?error=sso_setup_pending");
+      expect(await t.db.user.count()).toBe(0);
+      await setupAdmin(app);
+      const after = await signIn(app, { sub: "a-1", email: "ana@example.com", name: "Ana" });
+      expect((await app.inject({ url: "/api/auth/me", headers: { cookie: sessionCookie(after) } })).json().user.role).toBe("viewer");
+      await app.close();
+    });
   });
 });

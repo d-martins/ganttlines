@@ -145,7 +145,8 @@ const refreshCalendar = (client: QueryClient) => Promise.all([client.invalidateQ
 /** Sign-in options besides email and password (single sign-on), for the sign-in page. */
 export const signInProviders = queryOptions({
   queryKey: keys.providers,
-  queryFn: () => api<{ oidc: { name: string } | null; passwordReset: boolean }>("GET", "/api/auth/providers"),
+  // `firstAdmin`: on a fresh install, signing in with the provider can create the admin.
+  queryFn: () => api<{ oidc: { name: string; firstAdmin?: true } | null; passwordReset: boolean }>("GET", "/api/auth/providers"),
   staleTime: Infinity,
 });
 

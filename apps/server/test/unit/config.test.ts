@@ -15,6 +15,7 @@ describe("loadConfig", () => {
       trustProxy: false,
       version: "dev",
       initialAdmin: null,
+      firstAdminEmail: null,
       oidc: null,
       smtp: null,
     });
@@ -50,7 +51,11 @@ describe("loadConfig", () => {
       name: "Admin",
       password: "long enough",
     });
-    expect(() => loadConfig({ ...base, ADMIN_EMAIL: "boss@example.com" })).toThrow("Set both ADMIN_EMAIL and ADMIN_PASSWORD");
+    expect(() => loadConfig({ ...base, ADMIN_EMAIL: "boss@example.com" })).toThrow("Set ADMIN_PASSWORD too");
+    expect(() => loadConfig({ ...base, ADMIN_PASSWORD: "long enough" })).toThrow("Set ADMIN_EMAIL too");
+    // With single sign-on, ADMIN_EMAIL alone names who becomes the admin by signing in.
+    const sso = { OIDC_ISSUER: "https://accounts.example.com", OIDC_CLIENT_ID: "id", OIDC_CLIENT_SECRET: "secret" };
+    expect(loadConfig({ ...base, ...sso, ADMIN_EMAIL: "Boss@Example.com" })).toMatchObject({ initialAdmin: null, firstAdminEmail: "boss@example.com" });
     expect(() => loadConfig({ ...base, ADMIN_EMAIL: "boss@example.com", ADMIN_PASSWORD: "short" })).toThrow("Invalid ADMIN_* settings");
   });
 
