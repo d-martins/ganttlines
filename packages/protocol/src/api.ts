@@ -64,6 +64,8 @@ export interface UserDto {
   mustChangePassword: boolean;
   /** signs in with a code from an authenticator app too */
   twoFactor: boolean;
+  /** two-factor is required for this account but not on yet: setting it up comes first */
+  mustSetUpTwoFactor: boolean;
 }
 
 export interface ProjectDto {

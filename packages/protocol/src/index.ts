@@ -66,4 +66,4 @@ export {
   type HighlightDto,
 } from "./board";
 export type { ProjectStateDto } from "./state";
-export { UpdateCheckBody, type AboutDto } from "./about";
+export { RequireTwoFactorBody, TWO_FACTOR_REQUIREMENTS, UpdateCheckBody, type AboutDto, type TwoFactorRequirement } from "./about";

@@ -3,11 +3,11 @@ import { ApiError } from "./client";
 import { keys } from "./queries";
 
 /** Server answers that mean "your session is gone or blocked": re-check who is signed in. */
-const SESSION_ERRORS = new Set(["unauthorized", "password_change_required"]);
+const SESSION_ERRORS = new Set(["unauthorized", "password_change_required", "two_factor_setup_required"]);
 
 /**
  * The app's query client. When any request reports a lost session, the "who am I" query is
- * refreshed so the signed-in layout redirects to sign-in (or password change) — even on screens
+ * refreshed so the signed-in layout redirects to sign-in (or password change, or two-factor setup) — even on screens
  * that stay open for hours, like the board.
  */
 export function createQueryClient({ retry = true }: { retry?: boolean } = {}): QueryClient {

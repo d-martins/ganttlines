@@ -62,6 +62,8 @@ model Session {
   userId     String   @db.Uuid
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   expiresAt  DateTime
+  /// signed in with single sign-on (the provider handles two-factor), not a password
+  viaSso     Boolean  @default(false)
   lastSeenAt DateTime @default(now())
   createdAt  DateTime @default(now())
 
@@ -145,6 +147,14 @@ model Settings {
   instanceVersion Int   @default(0)
   /// ask GitHub for new releases (admins can switch it off)
   updateCheck     Boolean @default(true)
+  /// who must use two-factor to sign in with a password
+  requireTwoFactor TwoFactorRequirement @default(off)
+}
+
+enum TwoFactorRequirement {
+  off
+  admins
+  everyone
 }
 
 model Holiday {

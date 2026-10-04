@@ -1,7 +1,7 @@
 import { createRootRoute, createRoute, createRouter, Outlet, type RouterHistory } from "@tanstack/react-router";
 import { AppLayout } from "./app/app-layout";
 import { ErrorScreen } from "./app/error-screen";
-import { ChangePasswordPage, ChoosePasswordPage, ForgotPasswordPage, LoginPage, SetupPage } from "./auth/auth-pages";
+import { ChangePasswordPage, ChoosePasswordPage, ForgotPasswordPage, LoginPage, SetupPage, SetUpTwoFactorPage } from "./auth/auth-pages";
 import { BoardPage } from "./board/board-page";
 import type { CompareMode } from "./board/model";
 import { HomeRedirect } from "./projects/project-pages";
@@ -31,6 +31,7 @@ const choosePasswordRoute = createRoute({
   validateSearch: (search: Record<string, unknown>): { token?: string } => (typeof search["token"] === "string" ? { token: search["token"] } : {}),
 });
 const changePasswordRoute = createRoute({ getParentRoute: () => rootRoute, path: "/change-password", component: ChangePasswordPage });
+const setUpTwoFactorRoute = createRoute({ getParentRoute: () => rootRoute, path: "/set-up-two-factor", component: SetUpTwoFactorPage });
 const appRoute = createRoute({ getParentRoute: () => rootRoute, id: "app", component: AppLayout });
 const homeRoute = createRoute({ getParentRoute: () => appRoute, path: "/", component: HomeRedirect });
 /** `?baseline=<id>&compare=switch`: only well-formed values are kept. */
@@ -60,6 +61,7 @@ const routeTree = rootRoute.addChildren([
   setupRoute,
   loginRoute,
   changePasswordRoute,
+  setUpTwoFactorRoute,
   forgotPasswordRoute,
   choosePasswordRoute,
   shareRoute,

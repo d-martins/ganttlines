@@ -25,6 +25,7 @@ import type {
   TimeOffBody,
   UpdateProjectBody,
   UpdateResourceBody,
+  TwoFactorRequirement,
   UpdateUserBody,
   UserDto,
 } from "@ganttlines/protocol";
@@ -155,7 +156,8 @@ export const useLogin = () => useApiMutation((body: { email: string; password: s
 export const useLoginCode = () => useApiMutation((body: { challenge: string; code: string }) => api<{ user: UserDto }>("POST", "/api/auth/login/2fa", body), startSession);
 const refreshMe = (client: QueryClient) => client.invalidateQueries({ queryKey: keys.me });
 export const useTwoFactorSetup = () => useApiMutation(() => api<{ secret: string; otpauthUrl: string; qrSvg: string }>("POST", "/api/auth/2fa/setup"), () => undefined);
-export const useEnableTwoFactor = () => useApiMutation((code: string) => api<{ recoveryCodes: string[] }>("POST", "/api/auth/2fa/enable", { code }), refreshMe);
+// Who is signed in is refreshed once the recovery codes are put away (see TwoFactorSetup).
+export const useEnableTwoFactor = () => useApiMutation((code: string) => api<{ recoveryCodes: string[] }>("POST", "/api/auth/2fa/enable", { code }), () => undefined);
 export const useDisableTwoFactor = () => useApiMutation((password: string) => api<{ user: UserDto }>("POST", "/api/auth/2fa/disable", { password }), refreshMe);
 export const useLogout = () => {
   const client = useQueryClient();
@@ -192,6 +194,12 @@ export const useDeleteUser = () => useApiMutation((id: string) => api<void>("DEL
 export const about = queryOptions({ queryKey: keys.about, queryFn: () => api<AboutDto>("GET", "/api/about"), staleTime: 60 * 60 * 1000 });
 export const useSetUpdateCheck = () =>
   useApiMutation((enabled: boolean) => api<{ enabled: boolean }>("PUT", "/api/settings/update-check", { enabled }), (client) => client.invalidateQueries({ queryKey: keys.about }));
+
+export const useSetRequireTwoFactor = () =>
+  useApiMutation(
+    (require: TwoFactorRequirement) => api<{ require: TwoFactorRequirement }>("PUT", "/api/settings/require-two-factor", { require }),
+    (client) => client.invalidateQueries({ queryKey: keys.about }),
+  );
 
 export const useSetWorkingWeekdays = () =>
   useApiMutation((workingWeekdays: number[]) => api<CalendarDto>("PUT", "/api/calendar/working-weekdays", { workingWeekdays }), refreshCalendar);

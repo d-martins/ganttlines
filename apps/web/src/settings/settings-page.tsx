@@ -1,4 +1,4 @@
-import { ROLES, type Role, type UserDto } from "@ganttlines/protocol";
+import { ROLES, TWO_FACTOR_REQUIREMENTS, type Role, type TwoFactorRequirement, type UserDto } from "@ganttlines/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { errorMessage } from "../api/client";
@@ -12,14 +12,14 @@ import {
   userList,
   useAdminDisableTwoFactor,
   useDisableTwoFactor,
-  useEnableTwoFactor,
   useSendTestEmail,
-  useTwoFactorSetup,
+  useSetRequireTwoFactor,
   useSetUpdateCheck,
   useSetWorkingWeekdays,
   useUpdateUser,
 } from "../api/queries";
 import { ChangePasswordForm } from "../auth/auth-pages";
+import { TwoFactorSetup } from "../auth/two-factor-setup";
 import { useTheme, type ThemePreference } from "../theme";
 import { Button } from "../ui/button";
 import { ConfirmButton } from "../ui/confirm";
@@ -41,6 +41,7 @@ export function SettingsPage() {
       {me.data.role === "admin" ? (
         <>
           <UsersSection me={me.data} />
+          <SignInSecuritySection me={me.data} />
           <WorkingWeekdaysSection />
           <EmailSection />
         </>
@@ -199,95 +200,66 @@ function UsersSection({ me }: { me: UserDto }) {
 
 /**
  * Two-factor sign-in for your own account: turn it on (scan the QR code, confirm a code, save the
- * recovery codes) or off (with your password).
+ * recovery codes) or off (with your password) — unless an admin requires it.
  */
 function TwoFactorSettings({ me }: { me: UserDto }) {
-  const setup = useTwoFactorSetup();
-  const enable = useEnableTwoFactor();
   const disable = useDisableTwoFactor();
-  const [code, setCode] = useState("");
+  const info = useQuery(about);
   const [password, setPassword] = useState("");
-  const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
-
-  let body: React.ReactNode;
-  if (recoveryCodes) {
-    body = (
-      <div className="flex flex-col gap-2">
-        <p role="status">
-          Two-factor sign-in is on. Keep these recovery codes somewhere safe — each one signs you in once if you lose your phone. They won't be shown again.
-        </p>
-        <ul aria-label="Recovery codes" className="grid grid-cols-2 gap-1 rounded-md bg-surface-2 p-3 font-mono text-sm sm:grid-cols-5">
-          {recoveryCodes.map((recovery) => (
-            <li key={recovery}>{recovery}</li>
-          ))}
-        </ul>
-        <Button className="self-start" onClick={() => setRecoveryCodes(null)}>
-          I've saved them
-        </Button>
-      </div>
-    );
-  } else if (me.twoFactor) {
-    body = (
-      <form
-        className="flex flex-wrap items-end gap-2"
-        onSubmit={(event) => {
-          event.preventDefault();
-          disable.mutate(password, { onSuccess: () => setPassword("") });
-        }}
-      >
-        <p className="w-full">On: signing in with your password also asks for a code from your authenticator app.</p>
-        <Field label="Your password (to turn it off)" type="password" value={password} onChange={(event) => setPassword(event.target.value)} required />
-        <Button type="submit" disabled={disable.isPending}>
-          Turn off
-        </Button>
-        <ErrorText>{disable.error ? errorMessage(disable.error) : null}</ErrorText>
-      </form>
-    );
-  } else if (setup.data) {
-    body = (
-      <form
-        className="flex flex-col gap-2"
-        onSubmit={(event) => {
-          event.preventDefault();
-          enable.mutate(code, { onSuccess: ({ recoveryCodes: codes }) => (setRecoveryCodes(codes), setCode(""), setup.reset()) });
-        }}
-      >
-        <p>Scan this with an authenticator app (Google Authenticator, 1Password, Authy …), then enter the code it shows.</p>
-        <div className="flex flex-wrap items-center gap-4">
-          {/* The QR code is drawn by our own server from the otpauth link. */}
-          <div aria-label="QR code for your authenticator app" role="img" className="h-40 w-40 rounded bg-white p-1 [&_svg]:h-full [&_svg]:w-full" dangerouslySetInnerHTML={{ __html: setup.data.qrSvg }} />
-          <div className="flex flex-col gap-1 text-xs text-muted">
-            Can't scan it? Enter this key:
-            <code aria-label="Setup key" className="break-all rounded bg-surface-2 px-2 py-1 font-mono text-sm text-text">
-              {setup.data.secret}
-            </code>
-          </div>
-        </div>
-        <div className="flex items-end gap-2">
-          <Field label="Code from the app" value={code} onChange={(event) => setCode(event.target.value)} inputMode="numeric" autoComplete="one-time-code" required />
-          <Button type="submit" variant="primary" disabled={enable.isPending}>
-            Turn on
-          </Button>
-        </div>
-        <ErrorText>{enable.error ? errorMessage(enable.error) : null}</ErrorText>
-      </form>
-    );
-  } else {
-    body = (
-      <div className="flex flex-wrap items-center gap-3">
-        <p>Off. Add a code from an authenticator app to your password, so a stolen password isn't enough.</p>
-        <Button disabled={setup.isPending} onClick={() => setup.mutate()}>
-          Turn on two-factor
-        </Button>
-        <ErrorText>{setup.error ? errorMessage(setup.error) : null}</ErrorText>
-      </div>
-    );
-  }
+  const required = info.data?.requireTwoFactor === "everyone" || (info.data?.requireTwoFactor === "admins" && me.role === "admin");
   return (
     <div className="mt-5 flex flex-col gap-2 border-t border-border pt-4 text-sm">
       <h3 className="font-medium">Two-factor sign-in</h3>
-      {body}
+      {!me.twoFactor ? (
+        <TwoFactorSetup intro="Off. Add a code from an authenticator app to your password, so a stolen password isn't enough." />
+      ) : required ? (
+        <p>On: signing in with your password also asks for a code from your authenticator app. It's required, so it can't be turned off.</p>
+      ) : (
+        <form
+          className="flex flex-wrap items-end gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            disable.mutate(password, { onSuccess: () => setPassword("") });
+          }}
+        >
+          <p className="w-full">On: signing in with your password also asks for a code from your authenticator app.</p>
+          <Field label="Your password (to turn it off)" type="password" value={password} onChange={(event) => setPassword(event.target.value)} required />
+          <Button type="submit" disabled={disable.isPending}>
+            Turn off
+          </Button>
+          <ErrorText>{disable.error ? errorMessage(disable.error) : null}</ErrorText>
+        </form>
+      )}
     </div>
+  );
+}
+
+const REQUIREMENT_LABELS: Record<TwoFactorRequirement, string> = { off: "Not required", admins: "Required for admins", everyone: "Required for everyone" };
+
+/** Admins: who must use two-factor when signing in with a password. */
+function SignInSecuritySection({ me }: { me: UserDto }) {
+  const info = useQuery(about);
+  const save = useSetRequireTwoFactor();
+  // The choice shows at once; it reverts if the server refuses it.
+  const current = save.isPending ? save.variables : info.data?.requireTwoFactor;
+  if (current === undefined) return null;
+  return (
+    <Section
+      title="Two-factor sign-in"
+      description="People it covers set it up the next time they open GanttLines. Signing in with single sign-on is exempt: your provider's own two-factor applies."
+    >
+      <fieldset className="flex flex-col gap-2 text-sm">
+        <legend className="sr-only">Who must use two-factor</legend>
+        {TWO_FACTOR_REQUIREMENTS.map((requirement) => (
+          <label key={requirement} className="flex items-center gap-2">
+            <input type="radio" name="require-two-factor" checked={current === requirement} onChange={() => save.mutate(requirement)} />
+            {REQUIREMENT_LABELS[requirement]}
+          </label>
+        ))}
+        {!me.twoFactor && current === "off" ? <p className="text-xs text-muted">Turn it on for your own account (above) before requiring it.</p> : null}
+      </fieldset>
+      <ErrorText>{save.error ? errorMessage(save.error) : null}</ErrorText>
+    </Section>
   );
 }
 

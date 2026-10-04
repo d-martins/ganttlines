@@ -15,6 +15,7 @@ export function credentialsOf(request: FastifyRequest, access: AccessService, sh
   const header = request.headers[SHARE_TOKEN_HEADER];
   return {
     user: request.user,
+    pendingStep: request.pendingStep,
     shareToken: shareToken ?? (typeof header === "string" ? header : null),
     visitor: access.readVisitor(request.cookies[VISITOR_COOKIE]),
   };

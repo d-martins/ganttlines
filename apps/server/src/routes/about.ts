@@ -1,14 +1,14 @@
-import { UpdateCheckBody, type AboutDto } from "@ganttlines/protocol";
+import { RequireTwoFactorBody, UpdateCheckBody, type AboutDto } from "@ganttlines/protocol";
 import type { FastifyInstance } from "fastify";
 import { requireUser } from "../auth/guard";
-import { HttpError } from "../errors";
+import { conflict, HttpError } from "../errors";
 import { testEmail } from "../mail/messages";
 import { isNewer, type UpdateChecker } from "../updates";
 import { parseBody } from "../validation";
 import type { RouteContext } from "./context";
 
 /** The running version for everyone signed in; admins also see (and switch) the update check. */
-export function aboutRoutes(app: FastifyInstance, { db, config, mailer }: RouteContext, updates: UpdateChecker): void {
+export function aboutRoutes(app: FastifyInstance, { db, config, mailer, twoFactorPolicy }: RouteContext, updates: UpdateChecker): void {
   app.get("/api/about", async (request): Promise<AboutDto> => {
     const user = requireUser(request);
     if (user.role !== "admin") return { version: config.version };
@@ -19,6 +19,7 @@ export function aboutRoutes(app: FastifyInstance, { db, config, mailer }: RouteC
       version: config.version,
       updates: { enabled, latest, available: latest !== null && isNewer(latest.version, config.version) },
       mail: { configured: mailer !== null },
+      requireTwoFactor: await twoFactorPolicy.requirement(),
     };
   });
 
@@ -39,5 +40,17 @@ export function aboutRoutes(app: FastifyInstance, { db, config, mailer }: RouteC
     const { enabled } = parseBody(UpdateCheckBody, request.body);
     await db.settings.upsert({ where: { id: 1 }, create: { id: 1, updateCheck: enabled }, update: { updateCheck: enabled } });
     return { enabled };
+  });
+
+  /**
+   * Who must use two-factor. The admin making the change must already use it when it would cover
+   * them, so nobody locks themselves into the setup screen by surprise.
+   */
+  app.put("/api/settings/require-two-factor", async (request) => {
+    const admin = requireUser(request, "admin");
+    const { require } = parseBody(RequireTwoFactorBody, request.body);
+    if (!admin.totpEnabled && twoFactorPolicy.covers(admin, require)) throw conflict("Turn on two-factor for your own account first");
+    await twoFactorPolicy.set(require);
+    return { require };
   });
 }

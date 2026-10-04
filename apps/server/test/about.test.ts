@@ -56,6 +56,7 @@ describe("GET /api/about", () => {
       version: "1.2.0",
       updates: { enabled: true, available: true, latest: { version: "1.3.0", url: "https://github.com/d-martins/ganttlines/releases/tag/v1.3.0" } },
       mail: { configured: false },
+      requireTwoFactor: "off",
     });
     expect((await app.inject({ url: "/api/about" })).statusCode).toBe(401);
     const editor = await createUser(app, admin, { email: "eve@example.com", name: "Eve", role: "editor" });
@@ -76,6 +77,7 @@ describe("GET /api/about", () => {
       version: "1.2.0",
       updates: { enabled: false, latest: null, available: false },
       mail: { configured: false },
+      requireTwoFactor: "off",
     });
     expect(fetchFn).not.toHaveBeenCalled();
     await app.close();
