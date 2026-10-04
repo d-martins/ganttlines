@@ -23,7 +23,7 @@ test("AI access: an admin turns it on, an app is approved in the browser, reads 
 
   await page.goto("/settings");
   await page.getByLabel("Allow AI apps to connect").click();
-  await expect(page.getByLabel("MCP server address")).toHaveText(`${BASE_URL}/mcp`);
+  await expect(page.getByLabel("MCP server address", { exact: true })).toHaveText(`${BASE_URL}/mcp`);
 
   // The app discovers the server and registers itself.
   const unauthorized = await fetch(`${BASE_URL}/mcp`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });

@@ -94,8 +94,11 @@ describe("AI access settings", () => {
     const everyone = await screen.findByRole("list", { name: "Everyone's connected AI apps" });
     expect(within(everyone).getByRole("listitem")).toHaveTextContent("Rudy");
     expect(screen.getByText(/^None yet\./)).toBeInTheDocument();
+    // Turned off again: connections can still be seen (and disconnected), but no new tokens are made.
     await user.click(screen.getByLabelText("Allow AI apps to connect"));
-    await vi.waitFor(() => expect(screen.queryByRole("heading", { name: "Connected AI apps" })).not.toBeInTheDocument());
+    expect(await screen.findByText("None. AI apps can connect once an admin turns AI access on.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Connected AI apps" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create an access token" })).not.toBeInTheDocument();
   });
 
   it("lists your own connected apps and disconnects them", async () => {
@@ -136,6 +139,9 @@ describe("AI access settings", () => {
     await user.selectOptions(screen.getByLabelText("Expires"), "never");
     await user.click(screen.getByRole("button", { name: "Create token" }));
     expect(await screen.findByLabelText("New access token")).toHaveTextContent("gl_pat_secret");
+    await user.click(screen.getByRole("button", { name: "Copy: New access token" }));
+    expect(await navigator.clipboard.readText()).toBe("gl_pat_secret");
+    expect(screen.getByRole("button", { name: "Copied: New access token" })).toHaveTextContent("Copied");
     expect(api.calls.find((c) => c.key === "POST /api/mcp/tokens")?.body).toEqual({ name: "Cursor", scopes: ["plans:read"], expiresInDays: null });
     const list = await screen.findByRole("list", { name: "Connected AI apps" });
     expect(within(list).getByRole("listitem")).toHaveTextContent("CursorAccess tokenRead plans");
@@ -144,12 +150,14 @@ describe("AI access settings", () => {
     expect(screen.queryByLabelText("New access token")).not.toBeInTheDocument();
   });
 
-  it("hides Connected AI apps while AI access is off", async () => {
+  it("keeps Connected AI apps while AI access is off, so apps can still be disconnected", async () => {
     const api = signedIn(VIEWER);
     api.on("GET /api/about", () => ({ body: { version: "1.2.0" } }));
     api.on("GET /api/mcp/available", () => ({ body: { enabled: false, url: "http://localhost:3000/mcp", scopes: [] } }));
+    api.on("GET /api/mcp/connections", () => ({ body: { connections: [CONNECTION] } }));
     renderApp("/settings");
-    expect(await screen.findByText("GanttLines 1.2.0")).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Connected AI apps" })).not.toBeInTheDocument();
+    const list = await screen.findByRole("list", { name: "Connected AI apps" });
+    expect(within(list).getByRole("button", { name: "Disconnect" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create an access token" })).not.toBeInTheDocument();
   });
 });

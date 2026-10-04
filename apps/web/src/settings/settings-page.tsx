@@ -30,6 +30,7 @@ import { useTheme, type ThemePreference } from "../theme";
 import { Button } from "../ui/button";
 import { ConfirmButton } from "../ui/confirm";
 import { ErrorText, Field } from "../ui/field";
+import { CopyText } from "../ui/copy-text";
 import { Section, WEEKDAYS } from "../ui/section";
 
 export function SettingsPage() {
@@ -290,8 +291,8 @@ function ConnectedApps() {
   const available = useQuery(mcpAvailable);
   const disconnect = useDisconnectApp();
   const [creating, setCreating] = useState(false);
-  // Only while AI access is on (it appears and goes as an admin switches it).
-  if (!available.data?.enabled) return null;
+  // Shown even while AI access is off, so people can still disconnect apps; new ones need it on.
+  const enabled = available.data?.enabled ?? false;
   return (
     <Section title="Connected AI apps" description="AI apps you've let use GanttLines as you, and your access tokens.">
       <div className="flex flex-col gap-2 text-sm">
@@ -317,10 +318,14 @@ function ConnectedApps() {
             ))}
           </ul>
         ) : (
-          <p className="text-muted">None yet. Add {available.data.url} to an AI app (for example Claude or ChatGPT) and approve it, or create an access token.</p>
+          <p className="text-muted">
+            {enabled
+              ? `None yet. Add ${available.data?.url} to an AI app (for example Claude or ChatGPT) and approve it, or create an access token.`
+              : "None. AI apps can connect once an admin turns AI access on."}
+          </p>
         )}
         <ErrorText>{disconnect.error ? errorMessage(disconnect.error) : null}</ErrorText>
-        {available.data.scopes.length > 0 ? (
+        {enabled && available.data && available.data.scopes.length > 0 ? (
           creating ? (
             <NewAccessToken scopes={available.data.scopes} url={available.data.url} onDone={() => setCreating(false)} />
           ) : (
@@ -345,9 +350,7 @@ function NewAccessToken({ scopes, url, onDone }: { scopes: McpScope[]; url: stri
     return (
       <div className="flex flex-col gap-2 rounded-md border border-border p-3">
         <p role="status">Copy the token now — it won't be shown again. Anyone with it can act as you within what it may do.</p>
-        <code aria-label="New access token" className="break-all rounded bg-surface-2 px-2 py-1 font-mono">
-          {create.data.token}
-        </code>
+        <CopyText label="New access token" value={create.data.token} />
         <p className="text-xs text-muted">
           Give the app the address {url} and the header <code>Authorization: Bearer …</code> with this token.
         </p>
@@ -401,7 +404,6 @@ function AiAccessSection() {
   const save = useSaveMcpSettings();
   const everyone = useQuery(mcpConnections(true));
   const disconnect = useDisconnectApp();
-  const [copied, setCopied] = useState(false);
   if (!settings.data) return null;
   // Changes show at once; they revert if the server refuses them.
   const { enabled, scopes, url } = save.isPending && save.variables ? { ...settings.data, ...save.variables } : settings.data;
@@ -418,17 +420,9 @@ function AiAccessSection() {
         </label>
         {enabled ? (
           <>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-col gap-1">
               <span className="text-muted">Address to give AI apps:</span>
-              <code aria-label="MCP server address" className="rounded bg-surface-2 px-2 py-1 font-mono">
-                {url}
-              </code>
-              <Button
-                variant="ghost"
-                onClick={() => void navigator.clipboard?.writeText(url).then(() => setCopied(true), () => undefined)}
-              >
-                {copied ? "Copied" : "Copy"}
-              </Button>
+              <CopyText label="MCP server address" value={url} />
             </div>
             <fieldset className="flex flex-col gap-2">
               <legend className="mb-1 text-xs font-medium text-muted">What AI apps may be allowed to do</legend>
