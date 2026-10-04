@@ -1,3 +1,5 @@
+import type { PasswordTokens } from "../auth/password-tokens";
+import type { Mailer } from "../mail/mailer";
 import type { FirstRun } from "../auth/first-run";
 import type { Db } from "@ganttlines/db";
 import type { FastifyReply } from "fastify";
@@ -26,6 +28,10 @@ export interface RouteContext {
   boardQueue: KeyedQueue;
   /** creating the first admin (from settings, or in the browser with the setup code) */
   firstRun: FirstRun;
+  /** outgoing email; null when SMTP isn't set up */
+  mailer: Mailer | null;
+  /** one-time "choose your password" links */
+  passwordTokens: PasswordTokens;
 }
 
 export function setSessionCookie(reply: FastifyReply, config: Config, token: string, expires: Date): void {

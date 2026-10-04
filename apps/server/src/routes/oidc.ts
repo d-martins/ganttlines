@@ -21,7 +21,8 @@ const safeRedirect = (value: unknown) => (typeof value === "string" && /^\/(?![/
 export function oidcRoutes(app: FastifyInstance, context: RouteContext, oidc: OidcSignIn | null): void {
   const { db, config, sessions, instance } = context;
 
-  app.get("/api/auth/providers", async () => ({ oidc: oidc ? { name: oidc.settings.name } : null }));
+  // What the sign-in page can offer besides email and password.
+  app.get("/api/auth/providers", async () => ({ oidc: oidc ? { name: oidc.settings.name } : null, passwordReset: context.mailer !== null }));
   if (!oidc) return;
 
   const fail = (reply: FastifyReply, code: string) => reply.clearCookie(PENDING_COOKIE, { path: PENDING_PATH }).redirect(`/login?error=${code}`);

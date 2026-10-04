@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
+import { GenericContainer, Wait } from "testcontainers";
 import { BASE_URL, OIDC_PORT, PORT } from "./support";
 
 const ROOT = join(__dirname, "..");
@@ -15,6 +16,13 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   const database = await new PostgreSqlContainer("postgres:17").start();
   const databaseUrl = database.getConnectionUri();
   process.env["E2E_DATABASE_URL"] = databaseUrl; // for the tests' database resets
+
+  // A mail catcher (SMTP in, HTTP API out), so invitations and password resets can be followed.
+  const mailpit = await new GenericContainer("axllent/mailpit:v1.27")
+    .withExposedPorts(1025, 8025)
+    .withWaitStrategy(Wait.forHttp("/api/v1/info", 8025))
+    .start();
+  process.env["E2E_MAILPIT_URL"] = `http://${mailpit.getHost()}:${mailpit.getMappedPort(8025)}`;
 
   // A test OpenID provider, so single sign-on can be tried end to end.
   const provider = spawn(process.execPath, ["--import", "tsx", "apps/server/test/fake-oidc-cli.ts", String(OIDC_PORT)], { cwd: ROOT, stdio: ["ignore", "pipe", "inherit"] });
@@ -42,6 +50,9 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       OIDC_CLIENT_ID: clientId,
       OIDC_CLIENT_SECRET: clientSecret,
       OIDC_NAME: "Test IdP",
+      SMTP_HOST: mailpit.getHost(),
+      SMTP_PORT: String(mailpit.getMappedPort(1025)),
+      MAIL_FROM: "GanttLines <plan@example.test>",
     },
   });
   let output = "";
@@ -58,6 +69,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   } catch (error) {
     server.kill();
     provider.kill();
+    await mailpit.stop();
     await database.stop();
     throw new Error(`${(error as Error).message}\n--- server output ---\n${output}`);
   }
@@ -66,6 +78,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     server.kill("SIGTERM");
     await new Promise((resolve) => (server.exitCode !== null ? resolve(null) : server.once("exit", resolve)));
     provider.kill();
+    await mailpit.stop();
     await database.stop();
   };
 }

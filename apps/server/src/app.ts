@@ -5,6 +5,8 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { AccessService } from "./auth/access";
 import { FirstRun } from "./auth/first-run";
 import { OidcSignIn } from "./auth/oidc";
+import { PasswordTokens } from "./auth/password-tokens";
+import { smtpMailer, type Mailer } from "./mail/mailer";
 import { LoginLimiter } from "./auth/login-limiter";
 import { SESSION_COOKIE, SessionStore } from "./auth/sessions";
 import { InstanceService } from "./calendar/instance-service";
@@ -34,6 +36,8 @@ import { webRoutes } from "./web";
 export interface AppOptions {
   /** where first-run messages (the setup code) go; the server prints them */
   announce?: (message: string) => void;
+  /** outgoing email (tests pass an outbox); defaults to SMTP from the settings */
+  mailer?: Mailer | null;
   /** a fixed first-run setup code (tests) */
   setupCode?: string;
   /** asks GitHub for new releases (tests pass a fake) */
@@ -47,7 +51,7 @@ export interface AppOptions {
 
 const SESSION_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 
-export async function buildApp({ db, config, now, logger = false, updates = new UpdateChecker(), announce = () => undefined, setupCode }: AppOptions): Promise<FastifyInstance> {
+export async function buildApp({ db, config, now, logger = false, updates = new UpdateChecker(), announce = () => undefined, setupCode, mailer }: AppOptions): Promise<FastifyInstance> {
   const hops = config.trustProxy;
   // A hop count N means "trust the N closest proxies" (proxy-addr trust function: hop 0 = direct peer).
   const trustProxy = typeof hops === "number" ? (_address: string, hop: number) => hop < hops : hops;
@@ -76,6 +80,8 @@ export async function buildApp({ db, config, now, logger = false, updates = new 
     boardQueue: new KeyedQueue(),
     shareLimiter: new LoginLimiter(now ? () => now().getTime() : undefined),
     firstRun: new FirstRun(db, instance, announce, setupCode),
+    mailer: mailer !== undefined ? mailer : config.smtp ? smtpMailer(config.smtp) : null,
+    passwordTokens: new PasswordTokens(db, now),
   };
   await context.firstRun.start(config.initialAdmin);
 

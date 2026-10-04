@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { InitialAdminSettings } from "@ganttlines/protocol";
 import type { InitialAdmin } from "./auth/first-run";
 import { oidcSettings, type OidcSettings } from "./auth/oidc";
+import { smtpSettings, type SmtpSettings } from "./mail/mailer";
 
 export interface Config {
   databaseUrl: string;
@@ -18,6 +19,8 @@ export interface Config {
    * cannot spoof their address; a hop count (e.g. 1) or an address/CIDR list when behind a reverse proxy.
    */
   trustProxy: boolean | number | string;
+  /** Outgoing email (SMTP_*, MAIL_FROM), when configured */
+  smtp: SmtpSettings | null;
   /** Single sign-on (OIDC_*), when configured */
   oidc: OidcSettings | null;
   /** The admin to create on first start (ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_NAME) */
@@ -46,6 +49,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     version: env["APP_VERSION"] || "dev",
     initialAdmin: initialAdmin(env),
     oidc: oidcSettings(env),
+    smtp: smtpSettings(env),
   };
 }
 

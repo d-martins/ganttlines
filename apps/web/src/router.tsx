@@ -1,7 +1,7 @@
 import { createRootRoute, createRoute, createRouter, Outlet, type RouterHistory } from "@tanstack/react-router";
 import { AppLayout } from "./app/app-layout";
 import { ErrorScreen } from "./app/error-screen";
-import { ChangePasswordPage, LoginPage, SetupPage } from "./auth/auth-pages";
+import { ChangePasswordPage, ChoosePasswordPage, ForgotPasswordPage, LoginPage, SetupPage } from "./auth/auth-pages";
 import { BoardPage } from "./board/board-page";
 import type { CompareMode } from "./board/model";
 import { HomeRedirect } from "./projects/project-pages";
@@ -21,6 +21,14 @@ const loginRoute = createRoute({
     // why a single sign-on attempt came back here
     ...(typeof search["error"] === "string" ? { error: search["error"] } : {}),
   }),
+});
+const forgotPasswordRoute = createRoute({ getParentRoute: () => rootRoute, path: "/forgot-password", component: ForgotPasswordPage });
+/** `?token=…` from an emailed invitation or reset link. */
+const choosePasswordRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/reset-password",
+  component: ChoosePasswordPage,
+  validateSearch: (search: Record<string, unknown>): { token?: string } => (typeof search["token"] === "string" ? { token: search["token"] } : {}),
 });
 const changePasswordRoute = createRoute({ getParentRoute: () => rootRoute, path: "/change-password", component: ChangePasswordPage });
 const appRoute = createRoute({ getParentRoute: () => rootRoute, id: "app", component: AppLayout });
@@ -52,6 +60,8 @@ const routeTree = rootRoute.addChildren([
   setupRoute,
   loginRoute,
   changePasswordRoute,
+  forgotPasswordRoute,
+  choosePasswordRoute,
   shareRoute,
   appRoute.addChildren([homeRoute, boardRoute, teamRoute, settingsRoute]),
 ]);

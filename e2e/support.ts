@@ -23,6 +23,7 @@ export async function resetDatabase(): Promise<void> {
   } finally {
     await client.end();
   }
+  await clearMail();
 }
 
 async function ok<T>(response: Awaited<ReturnType<APIRequestContext["post"]>>): Promise<T> {
@@ -45,11 +46,33 @@ export async function signedInUser(
   admin: APIRequestContext,
   user: { email: string; name: string; role: "admin" | "editor" | "viewer" | "guest" },
 ): Promise<{ context: BrowserContext; page: Page }> {
-  const { temporaryPassword } = await ok<{ temporaryPassword: string }>(await admin.post("/api/users", { data: { ...user, createResource: user.role !== "guest" } }));
+  const created = await ok<{ invited?: true }>(await admin.post("/api/users", { data: { ...user, createResource: user.role !== "guest" } }));
+  expect(created.invited, "email is set up in these tests, so new people are invited").toBe(true);
+  // Accept the emailed invitation: choose a password through its link (which also signs in).
   const context = await browser.newContext();
-  await ok(await context.request.post("/api/auth/login", { data: { email: user.email, password: temporaryPassword } }));
-  await ok(await context.request.post("/api/auth/password", { data: { currentPassword: temporaryPassword, newPassword: `${user.role}-password-1` } }));
+  const token = new URL(linkIn(await mailTo(user.email))).searchParams.get("token");
+  await ok(await context.request.post("/api/auth/reset", { data: { token, password: `${user.role}-password-1` } }));
   return { context, page: await context.newPage() };
+}
+
+/** The newest email to `address` (waits up to 10 s for it), as plain text. */
+export async function mailTo(address: string): Promise<string> {
+  const mailpit = process.env["E2E_MAILPIT_URL"];
+  for (let i = 0; i < 40; i++) {
+    const search = await (await fetch(`${mailpit}/api/v1/search?query=${encodeURIComponent(`to:${address}`)}`)).json();
+    const id = (search as { messages: { ID: string }[] }).messages[0]?.ID;
+    if (id) return ((await (await fetch(`${mailpit}/api/v1/message/${id}`)).json()) as { Text: string }).Text;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error(`No email to ${address}`);
+}
+
+/** The first link in an email. */
+export const linkIn = (text: string) => /https?:\/\/\S+/.exec(text)?.[0] ?? "";
+
+/** Forgets every caught email (each test starts with an empty inbox). */
+export async function clearMail(): Promise<void> {
+  await fetch(`${process.env["E2E_MAILPIT_URL"]}/api/v1/messages`, { method: "DELETE" });
 }
 
 export async function createProject(request: APIRequestContext, name: string): Promise<string> {

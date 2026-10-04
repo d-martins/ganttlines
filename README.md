@@ -39,6 +39,7 @@ only with the one-time **setup code** the server prints in its log
 | `SESSION_SECRET` | Required, 32+ characters. Changing it signs everyone out. |
 | `ADMIN_EMAIL`, `ADMIN_NAME`, `ADMIN_PASSWORD` | The first admin, created on the first start (8+ character password). Ignored once anyone has an account. |
 | `OIDC_*` | Single sign-on — see [Single sign-on](#single-sign-on-google-and-others). |
+| `SMTP_*`, `MAIL_FROM` | Email — see [Email](#email). |
 | `PUBLIC_URL` | The address people open, e.g. `https://plan.example.com`. |
 | `HOST_BIND`, `HOST_PORT` | Where it listens on this machine (default `127.0.0.1:3000`, this computer only). |
 | `TRUST_PROXY` | Behind a reverse proxy: how many proxies to trust (e.g. `1`). |
@@ -49,6 +50,23 @@ only with the one-time **setup code** the server prints in its log
 Delete the `COMPOSE_PROFILES` line, set `DATABASE_URL` and start as usual; only the app container
 runs. Use PostgreSQL 13 or newer and an empty database the user owns. A database on this same
 machine is reachable from the container as `host.docker.internal`.
+
+## Email
+
+With email set up, new users get an invitation to choose their own password (no temporary
+passwords to pass on) and the sign-in page offers **Forgot your password?**. Any SMTP service
+works — your mail provider, Postmark, SendGrid, Amazon SES, Mailgun:
+
+```sh
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587            # 587: STARTTLS (default); 465: TLS
+SMTP_USER=…
+SMTP_PASSWORD=…
+MAIL_FROM=GanttLines <plan@example.com>
+```
+
+Check it under Settings → Email → **Send me a test email**. Links in emails use `PUBLIC_URL`, so
+set that to the address people actually open.
 
 ## Single sign-on (Google and others)
 

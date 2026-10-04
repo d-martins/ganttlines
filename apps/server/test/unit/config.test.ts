@@ -16,6 +16,7 @@ describe("loadConfig", () => {
       version: "dev",
       initialAdmin: null,
       oidc: null,
+      smtp: null,
     });
   });
 

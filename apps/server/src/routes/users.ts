@@ -6,18 +6,23 @@ import { insertResource } from "../calendar/instance-service";
 import { requireUser } from "../auth/guard";
 import { generateTemporaryPassword, hashPassword } from "../auth/passwords";
 import { toUserDto } from "../dto";
+import { invitation } from "../mail/messages";
 import { conflict, notFound } from "../errors";
 import { parseBody, parseId } from "../validation";
 import type { RouteContext } from "./context";
 
 /** Admin-only user management. New users get a temporary password they must change. */
-export function userRoutes(app: FastifyInstance, { db, sessions, instance, hub }: RouteContext): void {
+export function userRoutes(app: FastifyInstance, { db, config, sessions, instance, hub, mailer, passwordTokens }: RouteContext): void {
   app.get("/api/users", async (request) => {
     requireUser(request, "admin");
     const users = await db.user.findMany({ orderBy: { createdAt: "asc" } });
     return { users: users.map(toUserDto) };
   });
 
+  /**
+   * New accounts: with email set up, the person gets an invitation to choose their password (the
+   * admin never sees one); otherwise — or if sending fails — the admin gets a temporary password.
+   */
   app.post("/api/users", async (request, reply) => {
     const admin = requireUser(request, "admin");
     const body = parseBody(CreateUserBody, request.body);
@@ -33,6 +38,16 @@ export function userRoutes(app: FastifyInstance, { db, sessions, instance, hub }
           return created;
         })
       : await db.user.create({ data });
+    if (mailer) {
+      try {
+        const link = new URL(`/reset-password?token=${await passwordTokens.issue(user.id, "invite")}`, config.publicUrl).toString();
+        await mailer.send(invitation(user.email, user.name, admin.name, link));
+        return reply.status(201).send({ user: toUserDto(user), invited: true });
+      } catch (error) {
+        request.log.error(error, "couldn't send an invitation email");
+        return reply.status(201).send({ user: toUserDto(user), temporaryPassword, inviteFailed: true });
+      }
+    }
     return reply.status(201).send({ user: toUserDto(user), temporaryPassword });
   });
 
