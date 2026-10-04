@@ -231,7 +231,11 @@ export const oauthRequest = (request: string) =>
     retry: false,
   });
 export const useSaveMcpSettings = () =>
-  useApiMutation((body: McpSettingsBody) => api<McpSettingsDto>("PUT", "/api/settings/mcp", body), (client) => client.invalidateQueries({ queryKey: keys.mcpSettings }));
+  useApiMutation(
+    (body: McpSettingsBody) => api<McpSettingsDto>("PUT", "/api/settings/mcp", body),
+    // What everyone's Settings offers follows the switch (e.g. the Connected AI apps section).
+    (client) => Promise.all([client.invalidateQueries({ queryKey: keys.mcpSettings }), client.invalidateQueries({ queryKey: keys.mcpAvailable })]),
+  );
 /** Whether AI apps can connect, where, and which groups the signed-in person can grant. */
 export const mcpAvailable = queryOptions({
   queryKey: keys.mcpAvailable,

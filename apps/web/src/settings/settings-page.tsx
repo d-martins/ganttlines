@@ -43,13 +43,17 @@ export function SettingsPage() {
           <ThemeChoice />
         </div>
         <TwoFactorSettings me={me.data} />
-        {me.data.role !== "guest" ? <ConnectedApps /> : null}
       </Section>
       {me.data.role === "admin" ? (
         <>
           <UsersSection me={me.data} />
           <SignInSecuritySection me={me.data} />
           <AiAccessSection />
+        </>
+      ) : null}
+      {me.data.role !== "guest" ? <ConnectedApps /> : null}
+      {me.data.role === "admin" ? (
+        <>
           <WorkingWeekdaysSection />
           <EmailSection />
         </>
@@ -286,45 +290,48 @@ function ConnectedApps() {
   const available = useQuery(mcpAvailable);
   const disconnect = useDisconnectApp();
   const [creating, setCreating] = useState(false);
+  // Only while AI access is on (it appears and goes as an admin switches it).
+  if (!available.data?.enabled) return null;
   return (
-    <div className="mt-5 flex flex-col gap-2 border-t border-border pt-4 text-sm">
-      <h3 className="font-medium">Connected AI apps</h3>
-      {connections.data?.length ? (
-        <ul aria-label="Connected AI apps" className="divide-y divide-border">
-          {connections.data.map((connection) => (
-            <li key={connection.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2">
-              <span className="font-medium">{connection.app}</span>
-              {connection.kind === "token" ? <span className="rounded bg-surface-2 px-1.5 py-0.5 text-xs text-muted">Access token</span> : null}
-              <span className="text-muted">{scopeNames(connection.scopes)}</span>
-              <span className="ml-auto text-xs text-muted">
-                last used {when(connection.lastUsedAt)}
-                {expiry(connection)}
-              </span>
-              <ConfirmButton
-                label="Disconnect"
-                confirmLabel="Disconnect"
-                title={`Disconnect ${connection.app}?`}
-                message={connection.kind === "token" ? "The token stops working at once." : "It can't use GanttLines as you any more, until you connect it again."}
-                onConfirm={() => disconnect.mutate(connection.id)}
-              />
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="text-muted">None. AI apps you connect (for example Claude or ChatGPT, when an admin has turned AI access on) appear here.</p>
-      )}
-      <ErrorText>{disconnect.error ? errorMessage(disconnect.error) : null}</ErrorText>
-      {available.data?.enabled && available.data.scopes.length > 0 ? (
-        creating ? (
-          <NewAccessToken scopes={available.data.scopes} url={available.data.url} onDone={() => setCreating(false)} />
+    <Section title="Connected AI apps" description="AI apps you've let use GanttLines as you, and your access tokens.">
+      <div className="flex flex-col gap-2 text-sm">
+        {connections.data?.length ? (
+          <ul aria-label="Connected AI apps" className="divide-y divide-border">
+            {connections.data.map((connection) => (
+              <li key={connection.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2">
+                <span className="font-medium">{connection.app}</span>
+                {connection.kind === "token" ? <span className="rounded bg-surface-2 px-1.5 py-0.5 text-xs text-muted">Access token</span> : null}
+                <span className="text-muted">{scopeNames(connection.scopes)}</span>
+                <span className="ml-auto text-xs text-muted">
+                  last used {when(connection.lastUsedAt)}
+                  {expiry(connection)}
+                </span>
+                <ConfirmButton
+                  label="Disconnect"
+                  confirmLabel="Disconnect"
+                  title={`Disconnect ${connection.app}?`}
+                  message={connection.kind === "token" ? "The token stops working at once." : "It can't use GanttLines as you any more, until you connect it again."}
+                  onConfirm={() => disconnect.mutate(connection.id)}
+                />
+              </li>
+            ))}
+          </ul>
         ) : (
-          <div className="flex flex-wrap items-center gap-3">
-            <Button onClick={() => setCreating(true)}>Create an access token</Button>
-            <span className="text-xs text-muted">For AI apps that take a token instead of signing in (address: {available.data.url}).</span>
-          </div>
-        )
-      ) : null}
-    </div>
+          <p className="text-muted">None yet. Add {available.data.url} to an AI app (for example Claude or ChatGPT) and approve it, or create an access token.</p>
+        )}
+        <ErrorText>{disconnect.error ? errorMessage(disconnect.error) : null}</ErrorText>
+        {available.data.scopes.length > 0 ? (
+          creating ? (
+            <NewAccessToken scopes={available.data.scopes} url={available.data.url} onDone={() => setCreating(false)} />
+          ) : (
+            <div className="flex flex-wrap items-center gap-3">
+              <Button onClick={() => setCreating(true)}>Create an access token</Button>
+              <span className="text-xs text-muted">For AI apps that take a token instead of signing in (address: {available.data.url}).</span>
+            </div>
+          )
+        ) : null}
+      </div>
+    </Section>
   );
 }
 

@@ -75,11 +75,16 @@ describe("AI access settings", () => {
       settings = { ...settings, ...(body as object) };
       return { body: settings };
     });
+    api.on("GET /api/mcp/available", () => ({ body: { enabled: settings.enabled, url: settings.url, scopes: settings.scopes } }));
     api.on("GET /api/mcp/connections", (_body, url) => ({
       body: { connections: url.searchParams.get("all") ? [{ ...CONNECTION, user: { id: "u2", name: "Rudy", email: "r@example.com" } }] : [] },
     }));
     const { user } = renderApp("/settings");
     await user.click(await screen.findByLabelText("Allow AI apps to connect"));
+    // Connected AI apps comes with AI access, right after its section.
+    const connected = await screen.findByRole("heading", { name: "Connected AI apps" });
+    const aiAccess = screen.getByRole("heading", { name: "AI access (MCP)" });
+    expect(aiAccess.compareDocumentPosition(connected) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(await screen.findByLabelText("MCP server address")).toHaveTextContent("http://localhost:3000/mcp");
     await user.click(screen.getByRole("checkbox", { name: /Edit the team calendar/ }));
     expect(api.calls.filter((c) => c.key === "PUT /api/settings/mcp").map((c) => c.body)).toEqual([
@@ -88,13 +93,16 @@ describe("AI access settings", () => {
     ]);
     const everyone = await screen.findByRole("list", { name: "Everyone's connected AI apps" });
     expect(within(everyone).getByRole("listitem")).toHaveTextContent("Rudy");
-    expect(screen.getByText(/^None\. AI apps you connect/)).toBeInTheDocument();
+    expect(screen.getByText(/^None yet\./)).toBeInTheDocument();
+    await user.click(screen.getByLabelText("Allow AI apps to connect"));
+    await vi.waitFor(() => expect(screen.queryByRole("heading", { name: "Connected AI apps" })).not.toBeInTheDocument());
   });
 
   it("lists your own connected apps and disconnects them", async () => {
     const api = signedIn(VIEWER);
     let connections = [CONNECTION];
     api.on("GET /api/about", () => ({ body: { version: "1.2.0" } }));
+    api.on("GET /api/mcp/available", () => ({ body: { enabled: true, url: "http://localhost:3000/mcp", scopes: ["plans:read"] } }));
     api.on("GET /api/mcp/connections", () => ({ body: { connections } }));
     api.on("DELETE /api/mcp/connections/c1", () => {
       connections = [];
@@ -105,7 +113,7 @@ describe("AI access settings", () => {
     expect(within(list).getByRole("listitem")).toHaveTextContent("ClaudeRead plans, Team calendarlast used never");
     await user.click(within(list).getByRole("button", { name: "Disconnect" }));
     await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Disconnect" }));
-    expect(await screen.findByText(/^None\. AI apps you connect/)).toBeInTheDocument();
+    expect(await screen.findByText(/^None yet\./)).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "AI access (MCP)" })).not.toBeInTheDocument();
   });
 
@@ -134,5 +142,14 @@ describe("AI access settings", () => {
     expect(within(list).getByRole("listitem")).toHaveTextContent("never expires");
     await user.click(screen.getByRole("button", { name: "Done" }));
     expect(screen.queryByLabelText("New access token")).not.toBeInTheDocument();
+  });
+
+  it("hides Connected AI apps while AI access is off", async () => {
+    const api = signedIn(VIEWER);
+    api.on("GET /api/about", () => ({ body: { version: "1.2.0" } }));
+    api.on("GET /api/mcp/available", () => ({ body: { enabled: false, url: "http://localhost:3000/mcp", scopes: [] } }));
+    renderApp("/settings");
+    expect(await screen.findByText("GanttLines 1.2.0")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Connected AI apps" })).not.toBeInTheDocument();
   });
 });

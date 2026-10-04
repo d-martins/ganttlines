@@ -75,7 +75,7 @@ test("AI access: an admin turns it on, an app is approved in the browser, reads 
   await expect(mine).toContainText("Test AI");
   await mine.getByRole("button", { name: "Disconnect" }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Disconnect" }).click();
-  await expect(page.getByText(/^None\. AI apps you connect/)).toBeVisible();
+  await expect(page.getByText(/^None yet\./)).toBeVisible();
   await expect(callTool(tokens.access_token, "list_projects")).rejects.toThrow();
 });
 
