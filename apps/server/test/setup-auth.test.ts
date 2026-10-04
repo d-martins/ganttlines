@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ADMIN, sessionCookie, setupAdmin, useTestApp } from "./helpers";
+import { buildApp } from "../src/app";
+import { ADMIN, SETUP_CODE, sessionCookie, setupAdmin, testConfig, useTestApp } from "./helpers";
 
 const t = useTestApp();
 
@@ -11,7 +12,7 @@ describe("first-run setup", () => {
   });
 
   it("creates the admin with a linked team member and signs them in", async () => {
-    const response = await t.app.inject({ method: "POST", url: "/api/setup", payload: ADMIN });
+    const response = await t.app.inject({ method: "POST", url: "/api/setup", payload: { ...ADMIN, setupCode: SETUP_CODE } });
     expect(response.statusCode).toBe(201);
     expect(response.json().user).toMatchObject({ email: ADMIN.email, role: "admin", mustChangePassword: false });
     const me = await t.app.inject({ url: "/api/auth/me", headers: { cookie: sessionCookie(response) } });
@@ -28,12 +29,50 @@ describe("first-run setup", () => {
 
   it("can only run once", async () => {
     await setupAdmin(t.app);
-    const again = await t.app.inject({ method: "POST", url: "/api/setup", payload: { ...ADMIN, email: "x@example.com" } });
+    const again = await t.app.inject({ method: "POST", url: "/api/setup", payload: { ...ADMIN, email: "x@example.com", setupCode: SETUP_CODE } });
     expect(again.statusCode).toBe(409);
   });
 
+  it("needs the setup code from the server's log (any case, with or without the dash)", async () => {
+    const wrong = await t.app.inject({ method: "POST", url: "/api/setup", payload: { ...ADMIN, setupCode: "NOPE-NOPE1" } });
+    expect(wrong.statusCode).toBe(403);
+    expect(wrong.json().error).toBe("wrong_setup_code");
+    expect(await t.db.user.count()).toBe(0);
+    const right = await t.app.inject({ method: "POST", url: "/api/setup", payload: { ...ADMIN, setupCode: " tests setup " } });
+    expect(right.statusCode).toBe(201);
+  });
+
+  it("makes up a random code and prints it when there's no fixed one", async () => {
+    const said: string[] = [];
+    const app = await buildApp({ db: t.db, config: testConfig, announce: (message) => said.push(message) });
+    expect(said).toEqual([expect.stringMatching(/setup code: [A-HJ-NP-Z2-9]{5}-[A-HJ-NP-Z2-9]{5}$/)]);
+    const code = said[0]!.split(": ")[1]!;
+    expect((await app.inject("/api/setup")).json()).toEqual({ needsSetup: true }); // asking again doesn't print a new one
+    expect(said).toHaveLength(1);
+    const response = await app.inject({ method: "POST", url: "/api/setup", payload: { ...ADMIN, setupCode: code } });
+    expect(response.statusCode).toBe(201);
+    await app.close();
+  });
+
+  it("creates the admin from ADMIN_* settings on first start, and never touches it again", async () => {
+    const said: string[] = [];
+    const initialAdmin = { email: "boss@example.com", name: "Boss", password: "from the settings" };
+    const app = await buildApp({ db: t.db, config: { ...testConfig, initialAdmin }, announce: (message) => said.push(message) });
+    expect(said).toEqual([expect.stringContaining("Created the admin account boss@example.com")]);
+    expect((await app.inject("/api/setup")).json()).toEqual({ needsSetup: false });
+    const login = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "boss@example.com", password: "from the settings" } });
+    expect(login.json().user).toMatchObject({ role: "admin", name: "Boss", mustChangePassword: false });
+    await app.close();
+    // A later start with other settings changes nothing.
+    const again = await buildApp({ db: t.db, config: { ...testConfig, initialAdmin: { ...initialAdmin, password: "something else" } } });
+    const stale = await again.inject({ method: "POST", url: "/api/auth/login", payload: { email: "boss@example.com", password: "something else" } });
+    expect(stale.statusCode).toBe(401);
+    expect(await t.db.user.count()).toBe(1);
+    await again.close();
+  });
+
   it("validates the payload", async () => {
-    const response = await t.app.inject({ method: "POST", url: "/api/setup", payload: { email: "nope", name: "", password: "x" } });
+    const response = await t.app.inject({ method: "POST", url: "/api/setup", payload: { email: "nope", name: "", password: "x", setupCode: SETUP_CODE } });
     expect(response.statusCode).toBe(400);
     expect(response.json().error).toBe("invalid_request");
   });

@@ -11,11 +11,17 @@ the server; the app image comes from `ghcr.io/d-martins/ganttlines`.
 
 ```sh
 cp .env.example .env
-# edit .env: set POSTGRES_PASSWORD and SESSION_SECRET (e.g. openssl rand -hex 24 / openssl rand -hex 32)
+# edit .env: set POSTGRES_PASSWORD, SESSION_SECRET (e.g. openssl rand -hex 24 / openssl rand -hex 32)
+# and the first admin: ADMIN_EMAIL, ADMIN_NAME, ADMIN_PASSWORD
 docker compose up -d
 ```
 
-Open <http://localhost:3000> and create the first (admin) account.
+Open <http://localhost:3000> and sign in as that admin. (You can then remove `ADMIN_PASSWORD` from
+`.env`; it's only used to create the account on the first start.)
+
+Left the `ADMIN_*` settings empty? Then the first visitor creates the admin in the browser — but
+only with the one-time **setup code** the server prints in its log
+(`docker compose logs app | grep "setup code"`), so nobody else can claim a fresh install.
 
 | Task | Command |
 | --- | --- |
@@ -31,6 +37,8 @@ Open <http://localhost:3000> and create the first (admin) account.
 | `POSTGRES_PASSWORD` | Password of the bundled database (letters and digits). |
 | `DATABASE_URL` | Your own PostgreSQL instead, e.g. `postgresql://user:pass@host:5432/ganttlines?sslmode=require`. |
 | `SESSION_SECRET` | Required, 32+ characters. Changing it signs everyone out. |
+| `ADMIN_EMAIL`, `ADMIN_NAME`, `ADMIN_PASSWORD` | The first admin, created on the first start (8+ character password). Ignored once anyone has an account. |
+| `OIDC_*` | Single sign-on — see [Single sign-on](#single-sign-on-google-and-others). |
 | `PUBLIC_URL` | The address people open, e.g. `https://plan.example.com`. |
 | `HOST_BIND`, `HOST_PORT` | Where it listens on this machine (default `127.0.0.1:3000`, this computer only). |
 | `TRUST_PROXY` | Behind a reverse proxy: how many proxies to trust (e.g. `1`). |
@@ -41,6 +49,31 @@ Open <http://localhost:3000> and create the first (admin) account.
 Delete the `COMPOSE_PROFILES` line, set `DATABASE_URL` and start as usual; only the app container
 runs. Use PostgreSQL 13 or newer and an empty database the user owns. A database on this same
 machine is reachable from the container as `host.docker.internal`.
+
+## Single sign-on (Google and others)
+
+People can sign in with an OpenID Connect provider — Google, Microsoft Entra ID, Keycloak,
+Authentik and others — next to (or instead of) passwords. For Google:
+
+1. In Google Cloud Console → APIs & Services → Credentials, create an **OAuth client ID** of type
+   *Web application*, with the authorized redirect URI `<PUBLIC_URL>/api/auth/oidc/callback`
+   (e.g. `https://plan.example.com/api/auth/oidc/callback`).
+2. In `.env`:
+
+   ```sh
+   OIDC_ISSUER=https://accounts.google.com
+   OIDC_CLIENT_ID=…apps.googleusercontent.com
+   OIDC_CLIENT_SECRET=…
+   OIDC_NAME=Google
+   OIDC_ALLOWED_DOMAINS=yourcompany.com   # optional: only these email domains
+   ```
+
+3. `docker compose up -d`. The sign-in page now shows **Sign in with Google**.
+
+Who gets in: someone whose (verified) email matches an existing account signs into it — so the
+usual way is to add people under Settings → Users first; their temporary password stops working
+once they've used single sign-on. With `OIDC_AUTO_CREATE=true`, anyone the provider vouches for
+(within `OIDC_ALLOWED_DOMAINS`) gets an account with `OIDC_DEFAULT_ROLE` (default `viewer`).
 
 ## Where the data lives
 

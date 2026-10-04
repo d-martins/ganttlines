@@ -1,3 +1,4 @@
+import type { FirstRun } from "../auth/first-run";
 import type { Db } from "@ganttlines/db";
 import type { FastifyReply } from "fastify";
 import type { AccessService } from "../auth/access";
@@ -23,6 +24,8 @@ export interface RouteContext {
   shareLimiter: LoginLimiter;
   /** serialises highlight/baseline changes per project, so their live list broadcasts stay in order */
   boardQueue: KeyedQueue;
+  /** creating the first admin (from settings, or in the browser with the setup code) */
+  firstRun: FirstRun;
 }
 
 export function setSessionCookie(reply: FastifyReply, config: Config, token: string, expires: Date): void {

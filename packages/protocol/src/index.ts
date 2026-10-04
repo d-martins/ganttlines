@@ -5,6 +5,7 @@ export {
   LIMITS,
   LoginBody,
   ROLES,
+  InitialAdminSettings,
   SetupBody,
   UpdateProjectBody,
   UpdateUserBody,

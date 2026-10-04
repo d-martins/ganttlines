@@ -30,6 +30,7 @@ import { api, ApiError } from "./client";
 
 export const keys = {
   setup: ["setup"] as const,
+  providers: ["providers"] as const,
   about: ["about"] as const,
   me: ["me"] as const,
   projects: (archived: boolean) => ["projects", { archived }] as const,
@@ -128,8 +129,15 @@ const startSession = (client: QueryClient) => client.clear();
 const refreshProjects = (client: QueryClient) => client.invalidateQueries({ queryKey: ["projects"] });
 const refreshCalendar = (client: QueryClient) => Promise.all([client.invalidateQueries({ queryKey: keys.calendar }), client.invalidateQueries({ queryKey: keys.resources })]);
 
+/** Sign-in options besides email and password (single sign-on), for the sign-in page. */
+export const signInProviders = queryOptions({
+  queryKey: keys.providers,
+  queryFn: () => api<{ oidc: { name: string } | null }>("GET", "/api/auth/providers"),
+  staleTime: Infinity,
+});
+
 export const useSetup = () =>
-  useApiMutation((body: { email: string; name: string; password: string }) => api<{ user: UserDto }>("POST", "/api/setup", body), startSession);
+  useApiMutation((body: { email: string; name: string; password: string; setupCode: string }) => api<{ user: UserDto }>("POST", "/api/setup", body), startSession);
 export const useLogin = () => useApiMutation((body: { email: string; password: string }) => api<{ user: UserDto }>("POST", "/api/auth/login", body), startSession);
 export const useLogout = () => {
   const client = useQueryClient();

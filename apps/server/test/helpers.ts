@@ -1,7 +1,7 @@
 import { createDb, type Db } from "@ganttlines/db";
 import type { FastifyInstance, LightMyRequestResponse } from "fastify";
 import { afterAll, beforeEach, inject } from "vitest";
-import { buildApp } from "../src/app";
+import { buildApp, type AppOptions } from "../src/app";
 import type { Config } from "../src/config";
 
 export const PUBLIC_URL = "http://localhost:3000";
@@ -15,7 +15,17 @@ export const testConfig: Config = {
   trustProxy: false,
   webDir: null,
   version: "1.2.0",
+  initialAdmin: null,
+  oidc: null,
 };
+
+/** The first-run setup code the test apps use. */
+export const SETUP_CODE = "TESTS-SETUP";
+
+/** An app for tests (fixed setup code); pass other options as for buildApp. */
+export function testApp(options: Omit<AppOptions, "setupCode">): Promise<FastifyInstance> {
+  return buildApp({ setupCode: SETUP_CODE, ...options });
+}
 
 export interface TestContext {
   db: Db;
@@ -37,7 +47,7 @@ export function useTestApp(): TestContext {
     );
     context.clock.now = new Date("2026-10-01T09:00:00Z");
     await context.app?.close();
-    context.app = await buildApp({ db, config: testConfig, now: () => context.clock.now });
+    context.app = await testApp({ db, config: testConfig, now: () => context.clock.now });
   });
 
   afterAll(async () => {
@@ -59,7 +69,7 @@ export const ADMIN = { email: "admin@example.com", name: "Admin", password: "cor
 
 /** Completes first-run setup and returns the admin's cookie. */
 export async function setupAdmin(app: FastifyInstance): Promise<string> {
-  return sessionCookie(await app.inject({ method: "POST", url: "/api/setup", payload: ADMIN }));
+  return sessionCookie(await app.inject({ method: "POST", url: "/api/setup", payload: { ...ADMIN, setupCode: SETUP_CODE } }));
 }
 
 /** Creates a user as admin, then logs in as them and changes the temporary password. */

@@ -5,7 +5,8 @@ import type { Config } from "./config";
 /** Starts the HTTP/WebSocket server and closes it cleanly on SIGINT/SIGTERM. */
 export async function startServer(config: Config): Promise<void> {
   const db = createDb(config.databaseUrl);
-  const app = await buildApp({ db, config, logger: true });
+  const announce = (message: string) => console.log(`[ganttlines] ${message}`);
+  const app = await buildApp({ db, config, logger: true, announce });
 
   const shutdown = async () => {
     await app.close();

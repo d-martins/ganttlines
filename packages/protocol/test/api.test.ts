@@ -7,8 +7,9 @@ describe("API schemas", () => {
   });
 
   it("enforces password length and trims names", () => {
-    expect(SetupBody.safeParse({ email: "a@b.co", name: "A", password: "short" }).success).toBe(false);
-    expect(SetupBody.parse({ email: "a@b.co", name: "  Ana  ", password: "long enough" }).name).toBe("Ana");
+    expect(SetupBody.safeParse({ email: "a@b.co", name: "A", password: "short", setupCode: "X" }).success).toBe(false);
+    expect(SetupBody.parse({ email: "a@b.co", name: "  Ana  ", password: "long enough", setupCode: "X" }).name).toBe("Ana");
+    expect(SetupBody.safeParse({ email: "a@b.co", name: "A", password: "long enough" }).success).toBe(false); // the setup code is required
   });
 
   it("defaults createResource to true and rejects unknown roles", () => {

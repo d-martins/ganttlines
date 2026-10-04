@@ -3,6 +3,8 @@ import websocket from "@fastify/websocket";
 import { Prisma, type Db } from "@ganttlines/db";
 import Fastify, { type FastifyInstance } from "fastify";
 import { AccessService } from "./auth/access";
+import { FirstRun } from "./auth/first-run";
+import { OidcSignIn } from "./auth/oidc";
 import { LoginLimiter } from "./auth/login-limiter";
 import { SESSION_COOKIE, SessionStore } from "./auth/sessions";
 import { InstanceService } from "./calendar/instance-service";
@@ -13,6 +15,7 @@ import { KeyedQueue } from "./queue";
 import { Hub } from "./realtime/hub";
 import { aboutRoutes } from "./routes/about";
 import { activityRoutes } from "./routes/activity";
+import { oidcRoutes } from "./routes/oidc";
 import { authRoutes } from "./routes/auth";
 import { baselineRoutes } from "./routes/baselines";
 import { calendarRoutes } from "./routes/calendar";
@@ -29,6 +32,10 @@ import { UpdateChecker } from "./updates";
 import { webRoutes } from "./web";
 
 export interface AppOptions {
+  /** where first-run messages (the setup code) go; the server prints them */
+  announce?: (message: string) => void;
+  /** a fixed first-run setup code (tests) */
+  setupCode?: string;
   /** asks GitHub for new releases (tests pass a fake) */
   updates?: UpdateChecker;
   db: Db;
@@ -40,7 +47,7 @@ export interface AppOptions {
 
 const SESSION_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 
-export async function buildApp({ db, config, now, logger = false, updates = new UpdateChecker() }: AppOptions): Promise<FastifyInstance> {
+export async function buildApp({ db, config, now, logger = false, updates = new UpdateChecker(), announce = () => undefined, setupCode }: AppOptions): Promise<FastifyInstance> {
   const hops = config.trustProxy;
   // A hop count N means "trust the N closest proxies" (proxy-addr trust function: hop 0 = direct peer).
   const trustProxy = typeof hops === "number" ? (_address: string, hop: number) => hop < hops : hops;
@@ -68,7 +75,9 @@ export async function buildApp({ db, config, now, logger = false, updates = new 
     access: new AccessService(db, config.sessionSecret),
     boardQueue: new KeyedQueue(),
     shareLimiter: new LoginLimiter(now ? () => now().getTime() : undefined),
+    firstRun: new FirstRun(db, instance, announce, setupCode),
   };
+  await context.firstRun.start(config.initialAdmin);
 
   // Expired sessions are also deleted when presented; this catches the ones that never come back.
   const cleanup = setInterval(() => {
@@ -130,6 +139,7 @@ export async function buildApp({ db, config, now, logger = false, updates = new 
   baselineRoutes(app, context);
   activityRoutes(app, context);
   aboutRoutes(app, context, updates);
+  oidcRoutes(app, context, config.oidc ? new OidcSignIn(config.oidc, new URL("/api/auth/oidc/callback", config.publicUrl).toString(), config.sessionSecret) : null);
   if (config.webDir) await webRoutes(app, config.webDir);
   return app;
 }

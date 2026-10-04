@@ -1,13 +1,18 @@
 import { expect, test } from "@playwright/test";
-import { resetDatabase } from "../support";
+import { resetDatabase, setupCode } from "../support";
 
-test("a new install asks for the admin account, then the first project can be created", async ({ page }) => {
+test("a new install asks for the admin account (with the setup code from the log), then the first project can be created", async ({ page }) => {
   await resetDatabase();
   await page.goto("/");
   await expect(page.getByText("Welcome to GanttLines")).toBeVisible();
   await page.getByLabel("Your name").fill("Ada Admin");
   await page.getByLabel("Email").fill("admin@example.test");
   await page.getByLabel("Password (8+ characters)").fill("admin-password-1");
+  // Without the code from the server's log, nobody can claim a fresh install.
+  await page.getByLabel("Setup code (from the server's log)").fill("WRONG-CODE1");
+  await page.getByRole("button", { name: "Create admin account" }).click();
+  await expect(page.getByText("That setup code isn't right")).toBeVisible();
+  await page.getByLabel("Setup code (from the server's log)").fill(setupCode());
   await page.getByRole("button", { name: "Create admin account" }).click();
 
   await page.getByRole("button", { name: "New project" }).click();

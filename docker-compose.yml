@@ -9,6 +9,16 @@ services:
       # The bundled database, unless DATABASE_URL points at your own
       DATABASE_URL: ${DATABASE_URL:-postgresql://gantt:${POSTGRES_PASSWORD}@postgres:5432/ganttlines}
       SESSION_SECRET: ${SESSION_SECRET}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_NAME: ${ADMIN_NAME:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_NAME: ${OIDC_NAME:-}
+      OIDC_ALLOWED_DOMAINS: ${OIDC_ALLOWED_DOMAINS:-}
+      OIDC_AUTO_CREATE: ${OIDC_AUTO_CREATE:-}
+      OIDC_DEFAULT_ROLE: ${OIDC_DEFAULT_ROLE:-}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:3000}
       TRUST_PROXY: ${TRUST_PROXY:-false}
       BACKUP_BEFORE_MIGRATE: ${BACKUP_BEFORE_MIGRATE:-true}

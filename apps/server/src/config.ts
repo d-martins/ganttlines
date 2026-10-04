@@ -1,6 +1,9 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { InitialAdminSettings } from "@ganttlines/protocol";
+import type { InitialAdmin } from "./auth/first-run";
+import { oidcSettings, type OidcSettings } from "./auth/oidc";
 
 export interface Config {
   databaseUrl: string;
@@ -15,6 +18,10 @@ export interface Config {
    * cannot spoof their address; a hop count (e.g. 1) or an address/CIDR list when behind a reverse proxy.
    */
   trustProxy: boolean | number | string;
+  /** Single sign-on (OIDC_*), when configured */
+  oidc: OidcSettings | null;
+  /** The admin to create on first start (ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_NAME) */
+  initialAdmin: InitialAdmin | null;
   /** The running version (the image's APP_VERSION; "dev" otherwise) */
   version: string;
   /** The built web app to serve (apps/web/dist); null when it isn't built (development, tests) */
@@ -37,7 +44,20 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     trustProxy: parseTrustProxy(env["TRUST_PROXY"]),
     webDir: webDir(env["WEB_DIR"]),
     version: env["APP_VERSION"] || "dev",
+    initialAdmin: initialAdmin(env),
+    oidc: oidcSettings(env),
   };
+}
+
+/** ADMIN_EMAIL + ADMIN_PASSWORD (+ ADMIN_NAME), checked like the setup form; both or neither. */
+function initialAdmin(env: NodeJS.ProcessEnv): InitialAdmin | null {
+  const email = env["ADMIN_EMAIL"];
+  const password = env["ADMIN_PASSWORD"];
+  if (!email && !password) return null;
+  if (!email || !password) throw new Error("Set both ADMIN_EMAIL and ADMIN_PASSWORD (or neither)");
+  const parsed = InitialAdminSettings.safeParse({ email, password, name: env["ADMIN_NAME"] || "Admin" });
+  if (!parsed.success) throw new Error(`Invalid ADMIN_* settings: ${parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")}`);
+  return parsed.data;
 }
 
 /** WEB_DIR, or apps/web/dist when it has been built. */

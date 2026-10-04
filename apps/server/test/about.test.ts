@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildApp } from "../src/app";
 import { isNewer, UpdateChecker } from "../src/updates";
-import { createUser, setupAdmin, testConfig, useTestApp } from "./helpers";
+import { createUser, setupAdmin, testApp, testConfig, useTestApp } from "./helpers";
 
 const release = (tag: string) => new Response(JSON.stringify({ tag_name: tag, html_url: `https://github.com/d-martins/ganttlines/releases/tag/${tag}` }));
 
@@ -50,7 +49,7 @@ describe("GET /api/about", () => {
 
   it("tells admins about a newer release, and everyone the running version", async () => {
     const fetchFn = vi.fn(async () => release("v1.3.0"));
-    const app = await buildApp({ db: t.db, config: testConfig, updates: new UpdateChecker(fetchFn as unknown as typeof fetch) });
+    const app = await testApp({ db: t.db, config: testConfig, updates: new UpdateChecker(fetchFn as unknown as typeof fetch) });
     const admin = await setupAdmin(app);
     const about = await app.inject({ url: "/api/about", headers: { cookie: admin } });
     expect(about.json()).toEqual({
@@ -68,7 +67,7 @@ describe("GET /api/about", () => {
 
   it("lets admins switch the check off, after which GitHub isn't asked", async () => {
     const fetchFn = vi.fn(async () => release("v1.3.0"));
-    const app = await buildApp({ db: t.db, config: testConfig, updates: new UpdateChecker(fetchFn as unknown as typeof fetch) });
+    const app = await testApp({ db: t.db, config: testConfig, updates: new UpdateChecker(fetchFn as unknown as typeof fetch) });
     const admin = await setupAdmin(app);
     const off = await app.inject({ method: "PUT", url: "/api/settings/update-check", headers: { cookie: admin }, payload: { enabled: false } });
     expect(off.json()).toEqual({ enabled: false });

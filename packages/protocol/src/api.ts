@@ -16,7 +16,10 @@ const password = z.string().min(LIMITS.passwordMin).max(LIMITS.passwordMax);
 const personName = z.string().trim().min(1).max(LIMITS.nameMax);
 const projectName = z.string().trim().min(1).max(LIMITS.projectNameMax);
 
-export const SetupBody = z.strictObject({ email, name: personName, password });
+/** First-run setup in the browser; `setupCode` is printed in the server's log. */
+export const SetupBody = z.strictObject({ email, name: personName, password, setupCode: z.string().trim().min(1).max(100) });
+/** ADMIN_EMAIL / ADMIN_NAME / ADMIN_PASSWORD: the admin created on first start. */
+export const InitialAdminSettings = z.object({ email, name: personName, password });
 export const LoginBody = z.strictObject({ email, password: z.string().min(1).max(LIMITS.passwordMax) });
 export const ChangePasswordBody = z.strictObject({
   currentPassword: z.string().min(1).max(LIMITS.passwordMax),
