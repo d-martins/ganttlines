@@ -119,6 +119,27 @@ covers set it up the next time they open GanttLines, before anything else, and c
 The app secrets are stored encrypted with a key derived from `SESSION_SECRET` — changing that
 secret means everyone with two-factor turns it on again (an admin can turn it off for them).
 
+## AI access (MCP)
+
+AI apps can read your plans through [MCP](https://modelcontextprotocol.io) as the person who
+connects them. An admin turns it on under Settings → **AI access (MCP)** and chooses what apps may
+be allowed to do (read plans, edit plans, comments, the team calendar). Then each person adds the
+server address shown there — `https://your-server/mcp` — to their AI app:
+
+- **Claude** (claude.ai or the desktop app): Settings → Connectors → Add custom connector.
+- **Claude Code:** `claude mcp add --transport http ganttlines https://your-server/mcp`
+- **ChatGPT:** Settings → Connectors (developer mode) → Create, with the address.
+- **Cursor** and other apps: add an MCP server with the address (HTTP transport).
+
+The app opens GanttLines to ask **Allow access?**: the person signs in if needed, sees what the app
+asks for, and can give it less. Roles still apply (a viewer's app only reads), and what the app does
+is checked like anything the person does. Everyone sees their connected apps under Settings → Your
+account and can disconnect them; admins see everyone's. Turning AI access off refuses every app at
+once (connections come back when it's turned on again).
+
+AI apps never see users, settings or share links. The server must be reachable over HTTPS from the
+AI app — for claude.ai and ChatGPT that means from the internet.
+
 ## Where the data lives
 
 - **Database:** the `pgdata` volume (bundled database) or your own server.

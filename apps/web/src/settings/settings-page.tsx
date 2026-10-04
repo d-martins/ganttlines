@@ -1,4 +1,4 @@
-import { ROLES, TWO_FACTOR_REQUIREMENTS, type Role, type TwoFactorRequirement, type UserDto } from "@ganttlines/protocol";
+import { MCP_SCOPE_LABELS, MCP_SCOPES, ROLES, TWO_FACTOR_REQUIREMENTS, type McpScope, type Role, type TwoFactorRequirement, type UserDto } from "@ganttlines/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { errorMessage } from "../api/client";
@@ -6,6 +6,10 @@ import {
   about,
   calendar,
   currentUser,
+  mcpConnections,
+  mcpSettings,
+  useDisconnectApp,
+  useSaveMcpSettings,
   useCreateUser,
   useDeleteUser,
   useResetPassword,
@@ -37,11 +41,13 @@ export function SettingsPage() {
           <ThemeChoice />
         </div>
         <TwoFactorSettings me={me.data} />
+        {me.data.role !== "guest" ? <ConnectedApps /> : null}
       </Section>
       {me.data.role === "admin" ? (
         <>
           <UsersSection me={me.data} />
           <SignInSecuritySection me={me.data} />
+          <AiAccessSection />
           <WorkingWeekdaysSection />
           <EmailSection />
         </>
@@ -259,6 +265,125 @@ function SignInSecuritySection({ me }: { me: UserDto }) {
         {!me.twoFactor && current === "off" ? <p className="text-xs text-muted">Turn it on for your own account (above) before requiring it.</p> : null}
       </fieldset>
       <ErrorText>{save.error ? errorMessage(save.error) : null}</ErrorText>
+    </Section>
+  );
+}
+
+const when = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "never");
+const scopeNames = (scopes: McpScope[]) => scopes.map((scope) => MCP_SCOPE_LABELS[scope].label).join(", ");
+
+/** The AI apps you've let use GanttLines as you, and a way to disconnect each. */
+function ConnectedApps() {
+  const connections = useQuery(mcpConnections(false));
+  const disconnect = useDisconnectApp();
+  return (
+    <div className="mt-5 flex flex-col gap-2 border-t border-border pt-4 text-sm">
+      <h3 className="font-medium">Connected AI apps</h3>
+      {connections.data?.length ? (
+        <ul aria-label="Connected AI apps" className="divide-y divide-border">
+          {connections.data.map((connection) => (
+            <li key={connection.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2">
+              <span className="font-medium">{connection.app}</span>
+              <span className="text-muted">{scopeNames(connection.scopes)}</span>
+              <span className="ml-auto text-xs text-muted">last used {when(connection.lastUsedAt)}</span>
+              <ConfirmButton
+                label="Disconnect"
+                confirmLabel="Disconnect"
+                title={`Disconnect ${connection.app}?`}
+                message="It can't use GanttLines as you any more, until you connect it again."
+                onConfirm={() => disconnect.mutate(connection.id)}
+              />
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-muted">None. AI apps you connect (for example Claude or ChatGPT, when an admin has turned AI access on) appear here.</p>
+      )}
+      <ErrorText>{disconnect.error ? errorMessage(disconnect.error) : null}</ErrorText>
+    </div>
+  );
+}
+
+/** Admins: whether AI apps may connect over MCP, which tool groups they may get, and everyone's connections. */
+function AiAccessSection() {
+  const settings = useQuery(mcpSettings);
+  const save = useSaveMcpSettings();
+  const everyone = useQuery(mcpConnections(true));
+  const disconnect = useDisconnectApp();
+  const [copied, setCopied] = useState(false);
+  if (!settings.data) return null;
+  // Changes show at once; they revert if the server refuses them.
+  const { enabled, scopes, url } = save.isPending && save.variables ? { ...settings.data, ...save.variables } : settings.data;
+  const change = (next: Partial<{ enabled: boolean; scopes: McpScope[] }>) => save.mutate({ enabled, scopes, ...next });
+  return (
+    <Section
+      title="AI access (MCP)"
+      description="Lets AI apps such as Claude, ChatGPT or Cursor read and edit plans as the person who connects them. Each person approves each app, and can give it less than allowed here; roles still apply (viewers' apps only read)."
+    >
+      <div className="flex flex-col gap-3 text-sm">
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={enabled} onChange={(event) => change({ enabled: event.target.checked })} />
+          Allow AI apps to connect
+        </label>
+        {enabled ? (
+          <>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-muted">Address to give AI apps:</span>
+              <code aria-label="MCP server address" className="rounded bg-surface-2 px-2 py-1 font-mono">
+                {url}
+              </code>
+              <Button
+                variant="ghost"
+                onClick={() => void navigator.clipboard?.writeText(url).then(() => setCopied(true), () => undefined)}
+              >
+                {copied ? "Copied" : "Copy"}
+              </Button>
+            </div>
+            <fieldset className="flex flex-col gap-2">
+              <legend className="mb-1 text-xs font-medium text-muted">What AI apps may be allowed to do</legend>
+              {MCP_SCOPES.map((scope) => (
+                <label key={scope} className="flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={scopes.includes(scope)}
+                    onChange={() => change({ scopes: scopes.includes(scope) ? scopes.filter((other) => other !== scope) : [...scopes, scope] })}
+                  />
+                  <span>
+                    {MCP_SCOPE_LABELS[scope].label}
+                    <span className="block text-xs text-muted">{MCP_SCOPE_LABELS[scope].detail}</span>
+                  </span>
+                </label>
+              ))}
+            </fieldset>
+          </>
+        ) : (
+          <p className="text-muted">Off: AI apps can't connect, and apps connected earlier are refused until it's back on.</p>
+        )}
+        <ErrorText>{save.error ? errorMessage(save.error) : null}</ErrorText>
+        {everyone.data?.length ? (
+          <div className="flex flex-col gap-1">
+            <h3 className="font-medium">Connected apps</h3>
+            <ul aria-label="Everyone's connected AI apps" className="divide-y divide-border">
+              {everyone.data.map((connection) => (
+                <li key={connection.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2">
+                  <span className="font-medium">{connection.user?.name}</span>
+                  <span>{connection.app}</span>
+                  <span className="text-muted">{scopeNames(connection.scopes)}</span>
+                  <span className="ml-auto text-xs text-muted">last used {when(connection.lastUsedAt)}</span>
+                  <ConfirmButton
+                    label="Disconnect"
+                confirmLabel="Disconnect"
+                    title={`Disconnect ${connection.user?.name}'s ${connection.app}?`}
+                    message="It stops working at once; they can connect it again."
+                    onConfirm={() => disconnect.mutate(connection.id)}
+                  />
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </div>
     </Section>
   );
 }

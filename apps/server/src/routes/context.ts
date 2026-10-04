@@ -1,5 +1,8 @@
 import type { TwoFactor } from "../auth/two-factor";
 import type { TwoFactorPolicy } from "../auth/two-factor-policy";
+import type { OAuthClients } from "../oauth/clients";
+import type { OAuthGrants } from "../oauth/grants";
+import type { McpSettings } from "../oauth/mcp-settings";
 import type { PasswordTokens } from "../auth/password-tokens";
 import type { Mailer } from "../mail/mailer";
 import type { FirstRun } from "../auth/first-run";
@@ -38,6 +41,14 @@ export interface RouteContext {
   twoFactor: TwoFactor;
   /** who must use two-factor */
   twoFactorPolicy: TwoFactorPolicy;
+  /** AI access over MCP: the admins' switch and allowed tool groups */
+  mcpSettings: McpSettings;
+  /** AI apps (registered, or known by their metadata address) */
+  oauthClients: OAuthClients;
+  /** people's approvals for AI apps: codes and tokens */
+  oauthGrants: OAuthGrants;
+  /** throttles app registrations per client IP */
+  registerLimiter: LoginLimiter;
 }
 
 export function setSessionCookie(reply: FastifyReply, config: Config, token: string, expires: Date): void {

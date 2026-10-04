@@ -2,6 +2,7 @@ import { Prisma, toDbColumns, type Db, type Project } from "@ganttlines/db";
 import {
   applyCommand,
   buildTree,
+  childrenOf,
   computeSchedule,
   diffRows,
   fromDay,
@@ -11,6 +12,7 @@ import {
   type ProjectState,
   type Row,
   type RowChange,
+  type Span,
 } from "@ganttlines/engine";
 import type { BaselineTaskDto, ChangesDto, CommandResultDto, ProjectDto, ProjectStateDto } from "@ganttlines/protocol";
 import { createHash } from "node:crypto";
@@ -54,6 +56,15 @@ type Outcome = { ok: true; result: UndoResultDto | CommandResultDto; digest: str
  * together with its command-log entry and a version bump in a single transaction, then announced
  * to listeners (the real-time hub) in version order.
  */
+/** A row as the board lists it: its depth, whether it's a parent task, and its computed dates. */
+export interface OutlineRow {
+  row: Row;
+  depth: number;
+  isParent: boolean;
+  /** null for sections and unscheduled tasks */
+  span: Span | null;
+}
+
 export class ProjectService {
   private readonly cache = new Map<string, Promise<StoredProject>>();
   private readonly queue = new KeyedQueue();
@@ -173,6 +184,24 @@ export class ProjectService {
         });
       }
       return tasks;
+    });
+  }
+
+  /** Every row in board order (depth first), with the computed dates of scheduled tasks. */
+  outline(projectId: string): Promise<{ project: ProjectDto; rows: OutlineRow[] }> {
+    return this.queue.run(projectId, async () => {
+      const { meta, state } = await this.get(projectId);
+      const schedule = computeSchedule(state, (await this.instance.current()).calendar);
+      const tree = buildTree(state);
+      const rows: OutlineRow[] = [];
+      const visit = (parentId: string | null, depth: number) => {
+        for (const row of childrenOf(tree, parentId)) {
+          rows.push({ row, depth, isParent: isParentTask(tree, row), span: schedule.get(row.id)?.span ?? null });
+          visit(row.id, depth + 1);
+        }
+      };
+      visit(null, 0);
+      return { project: toProjectDto(meta), rows };
     });
   }
 

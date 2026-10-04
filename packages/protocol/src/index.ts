@@ -67,3 +67,14 @@ export {
 } from "./board";
 export type { ProjectStateDto } from "./state";
 export { RequireTwoFactorBody, TWO_FACTOR_REQUIREMENTS, UpdateCheckBody, type AboutDto, type TwoFactorRequirement } from "./about";
+export {
+  MCP_SCOPE_LABELS,
+  MCP_SCOPES,
+  MCP_WRITE_SCOPES,
+  McpSettingsBody,
+  OAuthConsentBody,
+  type McpConnectionDto,
+  type McpScope,
+  type McpSettingsDto,
+  type OAuthRequestDto,
+} from "./mcp";

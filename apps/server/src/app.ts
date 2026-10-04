@@ -11,6 +11,12 @@ import { smtpMailer, type Mailer } from "./mail/mailer";
 import { LoginLimiter } from "./auth/login-limiter";
 import { SESSION_COOKIE, SessionStore } from "./auth/sessions";
 import { TwoFactorPolicy } from "./auth/two-factor-policy";
+import { mcpRoutes } from "./mcp/endpoint";
+import { fetchMetadata, OAuthClients, type MetadataFetcher } from "./oauth/clients";
+import { OAuthGrants } from "./oauth/grants";
+import { McpSettings } from "./oauth/mcp-settings";
+import { mcpSettingsRoutes } from "./routes/mcp-settings";
+import { isOAuthPath, oauthRoutes } from "./routes/oauth";
 import { InstanceService } from "./calendar/instance-service";
 import type { Config } from "./config";
 import { forbidden, HttpError } from "./errors";
@@ -50,12 +56,25 @@ export interface AppOptions {
   config: Config;
   /** Clock for session expiry (tests) */
   now?: () => Date;
+  /** reads AI apps' client metadata documents (tests pass a fake) */
+  fetchClientMetadata?: MetadataFetcher;
   logger?: boolean;
 }
 
 const SESSION_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 
-export async function buildApp({ db, config, now, logger = false, updates = new UpdateChecker(), announce = () => undefined, setupCode, mailer }: AppOptions): Promise<FastifyInstance> {
+export async function buildApp({
+  db,
+  config,
+  now,
+  logger = false,
+  updates = new UpdateChecker(),
+  announce = () => undefined,
+  setupCode,
+  mailer,
+  fetchClientMetadata = fetchMetadata,
+}: AppOptions): Promise<FastifyInstance> {
+  const clock = now ?? (() => new Date());
   const hops = config.trustProxy;
   // A hop count N means "trust the N closest proxies" (proxy-addr trust function: hop 0 = direct peer).
   const trustProxy = typeof hops === "number" ? (_address: string, hop: number) => hop < hops : hops;
@@ -88,12 +107,18 @@ export async function buildApp({ db, config, now, logger = false, updates = new 
     passwordTokens: new PasswordTokens(db, now),
     twoFactor: new TwoFactor(config.sessionSecret, now ? () => now().getTime() : undefined),
     twoFactorPolicy: new TwoFactorPolicy(db),
+    mcpSettings: new McpSettings(db),
+    oauthClients: new OAuthClients(db, fetchClientMetadata, clock),
+    oauthGrants: new OAuthGrants(db, config.sessionSecret, clock),
+    registerLimiter: new LoginLimiter(now ? () => now().getTime() : undefined),
   };
   await context.firstRun.start(config.initialAdmin);
 
   // Expired sessions are also deleted when presented; this catches the ones that never come back.
   const cleanup = setInterval(() => {
     context.sessions.deleteExpired().catch((error: unknown) => app.log.error(error));
+    context.oauthGrants.deleteExpired().catch((error: unknown) => app.log.error(error));
+    context.oauthClients.deleteUnused().catch((error: unknown) => app.log.error(error));
   }, SESSION_CLEANUP_INTERVAL_MS);
   cleanup.unref();
   app.addHook("onClose", async () => clearInterval(cleanup));
@@ -104,7 +129,24 @@ export async function buildApp({ db, config, now, logger = false, updates = new 
 
   // Reject cross-site state-changing requests (defence in depth on top of SameSite=Lax cookies).
   // WebSocket upgrades are GETs that carry the session cookie, so they must come from our own origin.
+  // AI apps call the OAuth and MCP endpoints directly, possibly from a web page on another site.
+  // They use bearer tokens (never cookies), so any site may call them; preflights are answered here.
+  app.addHook("onRequest", async (request, reply) => {
+    if (!isOAuthPath(request.url)) return;
+    reply.header("access-control-allow-origin", "*");
+    reply.header("access-control-expose-headers", "www-authenticate, mcp-session-id, mcp-protocol-version");
+    if (request.method === "OPTIONS") {
+      return reply
+        .status(204)
+        .header("access-control-allow-methods", "GET, POST, DELETE, OPTIONS")
+        .header("access-control-allow-headers", "authorization, content-type, mcp-protocol-version, mcp-session-id, last-event-id")
+        .header("access-control-max-age", "86400")
+        .send();
+    }
+  });
+
   app.addHook("onRequest", async (request) => {
+    if (isOAuthPath(request.url)) return;
     const upgrade = request.headers.upgrade?.toLowerCase() === "websocket";
     if (!upgrade && (request.method === "GET" || request.method === "HEAD")) return;
     const origin = request.headers.origin;
@@ -156,6 +198,9 @@ export async function buildApp({ db, config, now, logger = false, updates = new 
   aboutRoutes(app, context, updates);
   twoFactorRoutes(app, context);
   locationRoutes(app, context);
+  oauthRoutes(app, context);
+  mcpSettingsRoutes(app, context);
+  mcpRoutes(app, context);
   oidcRoutes(app, context, config.oidc ? new OidcSignIn(config.oidc, new URL("/api/auth/oidc/callback", config.publicUrl).toString(), config.sessionSecret) : null);
   if (config.webDir) await webRoutes(app, config.webDir);
   return app;
