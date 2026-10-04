@@ -246,23 +246,51 @@ export class ProjectService {
           this.undoStacks.pop(direction, projectId, userId);
           return error;
         };
-        const logged = await this.db.commandLog.findUnique({ where: { commandId: target } });
-        if (!logged || logged.projectId !== projectId) throw discard(new HttpError(422, "invalid", "That change is no longer available"));
-
-        const { state, skipped } = revertChanges(stored.state, logged.changes as unknown as RowChange[], direction);
-        const problem = findTreeProblem(Object.values(state.rows));
-        if (problem || hasCycle(state, (await this.instance.current()).calendar)) {
-          throw discard(new HttpError(409, "conflict", `Can't ${direction} this any more: the board changed since`));
+        let result: UndoResultDto;
+        try {
+          result = await this.revertLogged(stored, actor, commandId, direction, target, userId);
+        } catch (error) {
+          throw error instanceof HttpError && error.status !== 500 ? discard(error) : error;
         }
-        const changes = diffRows(stored.state, state);
-        if (changes.length === 0) throw discard(new HttpError(409, "conflict", `Nothing left to ${direction}: it was all changed since`));
-        const result = await this.commit(stored, actor, commandId, direction, { target, skipped, by: userId }, state, changes);
         this.undoStacks.pop(direction, projectId, userId);
         if (direction === "undo") this.undoStacks.pushUndone(projectId, userId, target);
         else this.undoStacks.pushRedone(projectId, userId, target);
-        return { ...result, skipped };
+        return result;
       }) as Promise<UndoResultDto>;
     });
+  }
+
+  /**
+   * Undoes one particular logged command (skip-on-conflict, like undo), outside anyone's undo
+   * history — for AI apps undoing their own last tool call.
+   */
+  undoCommand(projectId: string, actor: Actor, commandId: string, targetCommandId: string): Promise<UndoResultDto> {
+    return this.run(projectId, async (stored) => {
+      if (stored.meta.archivedAt) throw conflict("This project is archived");
+      return this.revertLogged(stored, actor, commandId, "undo", targetCommandId, actorKey(actor));
+    });
+  }
+
+  private async revertLogged(
+    stored: StoredProject,
+    actor: Actor,
+    commandId: string,
+    direction: "undo" | "redo",
+    target: string,
+    by: string | null,
+  ): Promise<UndoResultDto> {
+    const projectId = stored.meta.id;
+    const logged = await this.db.commandLog.findUnique({ where: { commandId: target } });
+    if (!logged || logged.projectId !== projectId) throw new HttpError(422, "invalid", "That change is no longer available");
+    const { state, skipped } = revertChanges(stored.state, logged.changes as unknown as RowChange[], direction);
+    const problem = findTreeProblem(Object.values(state.rows));
+    if (problem || hasCycle(state, (await this.instance.current()).calendar)) {
+      throw new HttpError(409, "conflict", `Can't ${direction} this any more: the board changed since`);
+    }
+    const changes = diffRows(stored.state, state);
+    if (changes.length === 0) throw new HttpError(409, "conflict", `Nothing left to ${direction}: it was all changed since`);
+    const result = await this.commit(stored, actor, commandId, direction, { target, skipped, by }, state, changes);
+    return { ...result, skipped };
   }
 
   /** Runs `work` in the project's queue; unexpected failures drop the cached copy so the next request reloads. */

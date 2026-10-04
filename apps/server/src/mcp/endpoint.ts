@@ -7,19 +7,48 @@ import { notFound } from "../errors";
 import { scopesForRole } from "../oauth/grants";
 import type { RouteContext } from "../routes/context";
 import { oauthUrls } from "../routes/oauth";
+import { comments } from "./comments";
 import { readPlans } from "./plans-read";
+import { writePlans } from "./plans-write";
 import { readTeam } from "./team-read";
+import { writeTeam } from "./team-write";
 import type { McpCaller, ToolGroup } from "./tools";
 
-const GROUPS: Partial<Record<McpScope, ToolGroup>> = {
+const GROUPS: Record<McpScope, ToolGroup> = {
   "plans:read": readPlans,
+  "plans:write": writePlans,
+  comments,
   "team:read": readTeam,
+  "team:write": writeTeam,
 };
+
+/** Requests one connection may make per minute (an AI app working through a plan stays well under). */
+const CALLS_PER_MINUTE = 300;
+
+/** Counts each connection's requests in the current minute. */
+class CallBudget {
+  private readonly windows = new Map<string, { start: number; count: number }>();
+
+  constructor(private readonly now: () => number) {}
+
+  take(key: string): boolean {
+    const now = this.now();
+    const window = this.windows.get(key);
+    if (!window || now - window.start >= 60_000) {
+      if (this.windows.size > 10_000) this.windows.clear();
+      this.windows.set(key, { start: now, count: 1 });
+      return true;
+    }
+    window.count++;
+    return window.count <= CALLS_PER_MINUTE;
+  }
+}
 
 const INSTRUCTIONS =
   "GanttLines is a team's Gantt planner. Projects are boards of sections and tasks; tasks have working-day durations, " +
   "can follow a predecessor (with a lag), and are scheduled around weekends, holidays and their assignee's time off. " +
-  "Look projects and people up by name or id; dates are YYYY-MM-DD.";
+  "Look projects and people up by name or id; dates are YYYY-MM-DD. Changes show up live for everyone, credited to the person " +
+  "who connected this app; undo reverts this app's last board change.";
 
 /**
  * The MCP endpoint for AI apps. Each request is served on its own (no sessions): the bearer token
@@ -29,11 +58,12 @@ const INSTRUCTIONS =
 export function mcpRoutes(app: FastifyInstance, context: RouteContext): void {
   const { config, mcpSettings, oauthGrants } = context;
   const urls = oauthUrls(config.publicUrl);
+  const budget = new CallBudget(Date.now);
 
   const handler = createMcpHandler(({ authInfo }) => {
     const caller = authInfo?.extra?.["caller"] as McpCaller;
     const server = new McpServer({ name: "GanttLines", version: config.version }, { instructions: INSTRUCTIONS });
-    for (const scope of caller.scopes) GROUPS[scope]?.(server, { context, caller });
+    for (const scope of caller.scopes) GROUPS[scope](server, { context, caller });
     return server;
   });
 
@@ -52,6 +82,9 @@ export function mcpRoutes(app: FastifyInstance, context: RouteContext): void {
     const access = await oauthGrants.verifyAccess(token);
     // The person must still be able to use the app: an admin's later changes apply at once.
     if (!access || access.user.mustChangePassword || access.user.role === "guest") return challenge(reply, "invalid_token");
+    if (!budget.take(access.connection.id)) {
+      return reply.status(429).header("retry-after", "60").send({ error: "too_many_requests", message: "Too many requests from this app — wait a minute" });
+    }
     const forRole = scopesForRole(access.user.role);
     const scopes = access.scopes.filter((scope) => settings.scopes.includes(scope) && forRole.includes(scope));
     await oauthGrants.touch(access.connection);

@@ -12,6 +12,7 @@ import { LoginLimiter } from "./auth/login-limiter";
 import { SESSION_COOKIE, SessionStore } from "./auth/sessions";
 import { TwoFactorPolicy } from "./auth/two-factor-policy";
 import { mcpRoutes } from "./mcp/endpoint";
+import { TeamEdits } from "./calendar/team-edits";
 import { fetchMetadata, OAuthClients, type MetadataFetcher } from "./oauth/clients";
 import { OAuthGrants } from "./oauth/grants";
 import { McpSettings } from "./oauth/mcp-settings";
@@ -111,6 +112,7 @@ export async function buildApp({
     oauthClients: new OAuthClients(db, fetchClientMetadata, clock),
     oauthGrants: new OAuthGrants(db, config.sessionSecret, clock),
     registerLimiter: new LoginLimiter(now ? () => now().getTime() : undefined),
+    teamEdits: new TeamEdits(instance),
   };
   await context.firstRun.start(config.initialAdmin);
 

@@ -1,7 +1,7 @@
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { expect, test } from "@playwright/test";
 import { createHash, randomBytes } from "node:crypto";
-import { addTask, BASE_URL, createProject, resetDatabase, setupAdmin } from "../support";
+import { addTask, BASE_URL, createProject, listRow, resetDatabase, setupAdmin } from "../support";
 
 const REDIRECT = "https://ai-app.example/callback";
 
@@ -77,4 +77,63 @@ test("AI access: an admin turns it on, an app is approved in the browser, reads 
   await page.getByRole("dialog").getByRole("button", { name: "Disconnect" }).click();
   await expect(page.getByText(/^None\. AI apps you connect/)).toBeVisible();
   await expect(callTool(tokens.access_token, "list_projects")).rejects.toThrow();
+});
+
+/** Registers an app, approves it in `page`'s browser (with the groups ticked as they come), and returns its access token. */
+async function connectApp(page: import("@playwright/test").Page, scope: string): Promise<string> {
+  const registered = (await (
+    await fetch(`${BASE_URL}/oauth/register`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ client_name: "Claude", redirect_uris: [REDIRECT] }) })
+  ).json()) as { client_id: string };
+  const verifier = randomBytes(32).toString("base64url");
+  const query = new URLSearchParams({
+    response_type: "code",
+    client_id: registered.client_id,
+    redirect_uri: REDIRECT,
+    code_challenge: createHash("sha256").update(verifier).digest("base64url"),
+    code_challenge_method: "S256",
+    scope,
+  });
+  let returned = "";
+  await page.route(`${REDIRECT}**`, async (route) => {
+    returned = route.request().url();
+    await route.fulfill({ body: "back in the app" });
+  });
+  await page.goto(`${BASE_URL}/oauth/authorize?${query}`);
+  await page.getByRole("button", { name: "Allow" }).click();
+  await expect(page.getByText("back in the app")).toBeVisible();
+  const tokens = (await (
+    await fetch(`${BASE_URL}/oauth/token`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ grant_type: "authorization_code", code: new URL(returned).searchParams.get("code")!, client_id: registered.client_id, redirect_uri: REDIRECT, code_verifier: verifier }),
+    })
+  ).json()) as { access_token: string };
+  return tokens.access_token;
+}
+
+test("AI access: tasks an app adds show up live on an open board, credited to the person, and its undo takes them back", async ({ page, browser }) => {
+  await resetDatabase();
+  await setupAdmin(page.request);
+  await page.request.put("/api/settings/mcp", { data: { enabled: true, scopes: ["plans:read", "plans:write"] } });
+  const projectId = await createProject(page.request, "Launch");
+  await addTask(page.request, projectId, "Design", "2026-10-05", 3);
+  const token = await connectApp(await (await browser.newContext({ storageState: await page.context().storageState() })).newPage(), "plans:read plans:write");
+
+  await page.goto(`/p/${projectId}`);
+  await expect(listRow(page, "Design")).toBeVisible();
+  const added = await callTool(token, "add_tasks", { project: "Launch", tasks: [{ title: "Build", predecessor: "Design", durationDays: 2 }, { title: "Ship", predecessor: "Build" }] });
+  expect(added.isError).toBeFalsy();
+  await expect(listRow(page, "Build")).toBeVisible();
+  await expect(listRow(page, "Ship")).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Build, Oct 8 – Oct 9/ })).toBeVisible(); // after Design (Mon 5 – Wed 7)
+
+  // The task's history credits the person, via the app.
+  await listRow(page, "Build").getByRole("button", { name: /Open details/ }).click();
+  await page.getByRole("tab", { name: "History" }).click();
+  await expect(page.getByText(/Ada Admin via Claude/).first()).toBeVisible();
+
+  await callTool(token, "undo");
+  await expect(listRow(page, "Build")).toHaveCount(0);
+  await expect(listRow(page, "Ship")).toHaveCount(0);
+  await expect(listRow(page, "Design")).toBeVisible();
 });

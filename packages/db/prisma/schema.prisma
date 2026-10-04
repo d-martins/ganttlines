@@ -302,6 +302,8 @@ model McpConnection {
   scopes     String[]
   createdAt  DateTime      @default(now())
   lastUsedAt DateTime?
+  /// the board commands of the app's last tool call ({ projectId, commandIds }), for its undo
+  lastCall   Json?
   codes      OAuthCode[]
   tokens     OAuthToken[]
 

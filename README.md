@@ -143,6 +143,13 @@ is checked like anything the person does. Everyone sees their connected apps und
 account and can disconnect them; admins see everyone's. Turning AI access off refuses every app at
 once (connections come back when it's turned on again).
 
+What apps can do, by group: **read plans** (list projects, read a board with its computed dates,
+find tasks across projects, recent changes); **edit plans** (create and rename projects; add, change,
+move and delete tasks — several at once, following each other, assigned by name; undo the app's
+last change); **comments** (read and add); **team calendar** (read, and — if allowed — change team
+members, locations, holidays and time off, or add a country's public holidays). Changes appear live
+on open boards and in the history as “Ana via Claude”; people can undo them like any other.
+
 AI apps never see users, settings or share links. The server must be reachable over HTTPS from the
 AI app — for claude.ai and ChatGPT that means from the internet.
 
