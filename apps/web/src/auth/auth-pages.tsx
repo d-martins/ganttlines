@@ -2,9 +2,21 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, Navigate, useNavigate, useSearch } from "@tanstack/react-router";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { errorMessage } from "../api/client";
-import { currentUser, setupStatus, signInProviders, useChangePassword, useChoosePassword, useLogin, useLoginCode, useRequestPasswordReset, useSetup } from "../api/queries";
+import {
+  currentUser,
+  setupStatus,
+  signInProviders,
+  useChangePassword,
+  useChoosePassword,
+  useLogin,
+  useLoginCode,
+  useLogout,
+  useRequestPasswordReset,
+  useSetup,
+} from "../api/queries";
 import { Button } from "../ui/button";
 import { ErrorText, Field } from "../ui/field";
+import { TwoFactorSetup } from "./two-factor-setup";
 
 function Card({ title, subtitle, children }: { title: string; subtitle?: string | undefined; children: ReactNode }) {
   return (
@@ -226,6 +238,24 @@ export function ChangePasswordPage() {
   return (
     <Card title="Choose a new password" subtitle="You signed in with a temporary password. Pick your own to continue.">
       <ChangePasswordForm />
+    </Card>
+  );
+}
+
+/** Required by an admin: setting up two-factor comes before anything else. */
+export function SetUpTwoFactorPage() {
+  const me = useQuery(currentUser);
+  const navigate = useNavigate();
+  const logout = useLogout();
+  if (me.data === null) return <Navigate to="/login" />;
+  return (
+    <Card title="Set up two-factor sign-in" subtitle="Your admin requires a code from an authenticator app when you sign in with a password.">
+      <div className="text-sm">
+        <TwoFactorSetup intro="It takes a minute: you'll scan a QR code with an app on your phone." onDone={() => void navigate({ to: "/" })} />
+      </div>
+      <Button variant="ghost" className="self-start" onClick={() => logout.mutate(undefined, { onSuccess: () => void navigate({ to: "/login" }) })}>
+        Sign out
+      </Button>
     </Card>
   );
 }

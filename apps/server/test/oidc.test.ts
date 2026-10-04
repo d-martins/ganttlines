@@ -116,4 +116,16 @@ describe("single sign-on (OIDC)", () => {
     expect(impostor.headers.location).toBe("/login?error=sso_no_account");
     await app.close();
   });
+
+  it("isn't held back when two-factor is required: the provider decides how people sign in", async () => {
+    const app = await testApp({ db: t.db, config: { ...testConfig, oidc: settings() } });
+    const admin = await setupAdmin(app);
+    await createUser(app, admin, { email: "eve@example.com", name: "Eve", role: "editor" });
+    await t.db.settings.upsert({ where: { id: 1 }, create: { id: 1, requireTwoFactor: "everyone" }, update: { requireTwoFactor: "everyone" } });
+    const restarted = await testApp({ db: t.db, config: { ...testConfig, oidc: settings() } });
+    const cookie = sessionCookie(await signIn(restarted, { sub: "eve-1", email: "eve@example.com", name: "Eve" }));
+    expect((await restarted.inject({ url: "/api/auth/me", headers: { cookie } })).json().user.mustSetUpTwoFactor).toBe(false);
+    expect((await restarted.inject({ url: "/api/projects", headers: { cookie } })).statusCode).toBe(200);
+    await Promise.all([app.close(), restarted.close()]);
+  });
 });

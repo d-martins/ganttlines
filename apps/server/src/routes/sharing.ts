@@ -72,7 +72,7 @@ export function sharingRoutes(app: FastifyInstance, context: RouteContext): void
       access: link.access,
       collaboration: link.collaboration,
       label: link.label,
-      needsSignIn: link.access === "authenticated" && (!user || user.mustChangePassword),
+      needsSignIn: link.access === "authenticated" && (!user || request.pendingStep !== null),
       visitor: link.access === "anonymous" ? pickName(access.readVisitor(request.cookies[VISITOR_COOKIE])) : null,
     };
   });

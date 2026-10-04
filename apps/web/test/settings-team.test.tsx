@@ -52,6 +52,26 @@ describe("settings", () => {
     expect(api.calls.find((c) => c.key === "POST /api/auth/2fa/enable")?.body).toEqual({ code: "123456" });
   });
 
+  it("lets admins require two-factor, once they use it themselves", async () => {
+    const api = signedIn({ ...ADMIN, twoFactor: true });
+    let require = "off";
+    api.on("GET /api/users", () => ({ body: { users: [ADMIN] } }));
+    api.on("GET /api/calendar", () => ({ body: CALENDAR }));
+    api.on("GET /api/about", () => ({ body: { version: "1.2.0", requireTwoFactor: require } }));
+    api.on("PUT /api/settings/require-two-factor", (body) => {
+      require = (body as { require: string }).require;
+      return { body };
+    });
+    const { user } = renderApp("/settings");
+    expect(await screen.findByRole("button", { name: "Turn off" })).toBeInTheDocument();
+    await user.click(await screen.findByLabelText("Required for admins"));
+    expect(await screen.findByLabelText("Required for admins")).toBeChecked();
+    expect(api.calls.find((c) => c.key === "PUT /api/settings/require-two-factor")?.body).toEqual({ require: "admins" });
+    // Now it covers this admin, so it can't be turned off from here.
+    expect(await screen.findByText(/It's required, so it can't be turned off/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Turn off" })).not.toBeInTheDocument();
+  });
+
   it("saves working weekdays", async () => {
     const api = signedIn(ADMIN);
     api.on("GET /api/users", () => ({ body: { users: [ADMIN] } }));

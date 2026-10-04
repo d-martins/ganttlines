@@ -1,6 +1,6 @@
 export { createDb, type Db } from "./client";
 export { toDbColumns, toEngineRow } from "./rows";
-export { LinkAccess, Prisma, Role } from "../generated/prisma/client";
+export { LinkAccess, Prisma, Role, TwoFactorRequirement } from "../generated/prisma/client";
 export type {
   Baseline,
   CommandLog,

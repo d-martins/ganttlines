@@ -103,3 +103,59 @@ describe("two-factor sign-in", () => {
     await app.close();
   });
 });
+
+describe("requiring two-factor", () => {
+  const requireFor = (app: FastifyInstance, cookie: string, require: string) =>
+    app.inject({ method: "PUT", url: "/api/settings/require-two-factor", headers: { cookie }, payload: { require } });
+
+  it("can only be switched on by an admin who already uses it", async () => {
+    const admin = await setupAdmin(t.app);
+    const eve = await createUser(t.app, admin, { email: "eve@example.com", name: "Eve", role: "editor" });
+    expect((await requireFor(t.app, eve.cookie, "everyone")).statusCode).toBe(403);
+    expect((await requireFor(t.app, admin, "admins")).json()).toMatchObject({ error: "conflict" });
+    await enable(t.app, admin, t.clock.now);
+    expect((await requireFor(t.app, admin, "admins")).json()).toEqual({ require: "admins" });
+    expect((await t.app.inject({ url: "/api/about", headers: { cookie: admin } })).json().requireTwoFactor).toBe("admins");
+  });
+
+  it("sends people it covers to set it up before anything else, then lets them in", async () => {
+    const admin = await setupAdmin(t.app);
+    const eve = await createUser(t.app, admin, { email: "eve@example.com", name: "Eve", role: "editor" });
+    await enable(t.app, admin, t.clock.now);
+    await requireFor(t.app, admin, "everyone");
+
+    // Eve's existing session is held back too, not only new sign-ins.
+    const me = await t.app.inject({ url: "/api/auth/me", headers: { cookie: eve.cookie } });
+    expect(me.json().user).toMatchObject({ twoFactor: false, mustSetUpTwoFactor: true });
+    expect((await t.app.inject({ url: "/api/projects", headers: { cookie: eve.cookie } })).json()).toMatchObject({ error: "two_factor_setup_required" });
+    expect((await t.app.inject({ url: "/api/calendar", headers: { cookie: eve.cookie } })).json()).toMatchObject({ error: "two_factor_setup_required" });
+    const login = await passwordStep(t.app, "eve@example.com", eve.password);
+    expect(login.json().user.mustSetUpTwoFactor).toBe(true);
+
+    await enable(t.app, eve.cookie, t.clock.now);
+    expect((await t.app.inject({ url: "/api/auth/me", headers: { cookie: eve.cookie } })).json().user.mustSetUpTwoFactor).toBe(false);
+    expect((await t.app.inject({ url: "/api/projects", headers: { cookie: eve.cookie } })).statusCode).toBe(200);
+    // …and it can't be turned off while it's required.
+    const off = await t.app.inject({ method: "POST", url: "/api/auth/2fa/disable", headers: { cookie: eve.cookie }, payload: { password: eve.password } });
+    expect(off.statusCode).toBe(409);
+  });
+
+  it("only covers admins when set to admins — including people promoted later", async () => {
+    const admin = await setupAdmin(t.app);
+    const eve = await createUser(t.app, admin, { email: "eve@example.com", name: "Eve", role: "editor" });
+    await enable(t.app, admin, t.clock.now);
+    await requireFor(t.app, admin, "admins");
+    expect((await t.app.inject({ url: "/api/projects", headers: { cookie: eve.cookie } })).statusCode).toBe(200);
+    await t.app.inject({ method: "PATCH", url: `/api/users/${eve.id}`, headers: { cookie: admin }, payload: { role: "admin" } });
+    expect((await t.app.inject({ url: "/api/projects", headers: { cookie: eve.cookie } })).json()).toMatchObject({ error: "two_factor_setup_required" });
+  });
+
+  it("is remembered across restarts", async () => {
+    const admin = await setupAdmin(t.app);
+    await enable(t.app, admin, t.clock.now);
+    await requireFor(t.app, admin, "everyone");
+    const restarted = await testApp({ db: t.db, config: testConfig, now: () => t.clock.now });
+    expect((await restarted.inject({ url: "/api/about", headers: { cookie: admin } })).json().requireTwoFactor).toBe("everyone");
+    await restarted.close();
+  });
+});

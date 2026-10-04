@@ -11,7 +11,10 @@ import { clearSessionCookie, setSessionCookie, type RouteContext } from "./conte
 
 const invalidCredentials = () => new HttpError(401, "invalid_credentials", "Wrong email or password");
 
-export function authRoutes(app: FastifyInstance, { db, config, sessions, loginLimiter, hub, mailer, passwordTokens, twoFactor }: RouteContext): void {
+export function authRoutes(
+  app: FastifyInstance,
+  { db, config, sessions, loginLimiter, hub, mailer, passwordTokens, twoFactor, twoFactorPolicy }: RouteContext,
+): void {
   // Unknown emails are checked against this hash so they take as long as real accounts (no account probing).
   const dummyHash = hashPassword(randomBytes(16).toString("hex"));
 
@@ -32,7 +35,7 @@ export function authRoutes(app: FastifyInstance, { db, config, sessions, loginLi
     if (user.totpEnabled) return { twoFactor: { challenge: twoFactor.challenge(user.id) } };
     const session = await sessions.create(user.id);
     setSessionCookie(reply, config, session.token, session.expiresAt);
-    return { user: toUserDto(user) };
+    return { user: toUserDto(user, await twoFactorPolicy.mustSetUp(user, false)) };
   });
 
   /**
@@ -65,7 +68,7 @@ export function authRoutes(app: FastifyInstance, { db, config, sessions, loginLi
     if (user.totpEnabled) return { twoFactor: { challenge: twoFactor.challenge(user.id) } };
     const session = await sessions.create(user.id);
     setSessionCookie(reply, config, session.token, session.expiresAt);
-    return { user: toUserDto(user) };
+    return { user: toUserDto(user, await twoFactorPolicy.mustSetUp(user, false)) };
   });
 
   app.post("/api/auth/logout", async (request, reply) => {
@@ -78,12 +81,13 @@ export function authRoutes(app: FastifyInstance, { db, config, sessions, loginLi
   });
 
   app.get("/api/auth/me", async (request) => {
-    return { user: toUserDto(requireUser(request, "guest", { allowPendingPasswordChange: true })) };
+    const user = requireUser(request, "guest", { allowPendingPasswordChange: true, allowTwoFactorSetup: true });
+    return { user: toUserDto(user, request.pendingStep === "set_up_two_factor") };
   });
 
   /** Changing the password clears "must change password" and signs out every other session. */
   app.post("/api/auth/password", async (request, reply) => {
-    const user = requireUser(request, "guest", { allowPendingPasswordChange: true });
+    const user = requireUser(request, "guest", { allowPendingPasswordChange: true, allowTwoFactorSetup: true });
     const body = parseBody(ChangePasswordBody, request.body);
     const keys = [`user:${user.id}`];
     if (loginLimiter.isBlocked(keys)) {

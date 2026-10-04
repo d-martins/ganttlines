@@ -12,11 +12,11 @@ const OFF = { totpEnabled: false, totpSecret: null, totpLastStep: null, totpReco
 const tooMany = () => new HttpError(429, "too_many_attempts", "Too many failed attempts, try again in a few minutes");
 
 /**
- * Two-factor sign-in for password accounts. Turning it on: `/setup` (secret + QR), then `/enable`
+ * Two-factor sign-in for password accounts (admins can require it, see `TwoFactorPolicy`). Turning it on: `/setup` (secret + QR), then `/enable`
  * with the app's first code (returns recovery codes). Signing in: the password step answers with
  * a challenge, and `/api/auth/login/2fa` exchanges it and a code for a session.
  */
-export function twoFactorRoutes(app: FastifyInstance, { db, config, sessions, loginLimiter, twoFactor }: RouteContext): void {
+export function twoFactorRoutes(app: FastifyInstance, { db, config, sessions, loginLimiter, twoFactor, twoFactorPolicy }: RouteContext): void {
   /** Checks an app code (not reused) or a recovery code (used up); returns the fields to store, or null. */
   function accept(user: User, code: string): Partial<User> | null {
     const secret = user.totpSecret ? twoFactor.decrypt(user.totpSecret) : null;
@@ -46,7 +46,7 @@ export function twoFactorRoutes(app: FastifyInstance, { db, config, sessions, lo
   });
 
   app.post("/api/auth/2fa/setup", async (request) => {
-    const user = requireUser(request);
+    const user = requireUser(request, "guest", { allowTwoFactorSetup: true });
     if (user.totpEnabled) throw conflict("Two-factor sign-in is already on");
     const enrolment = await twoFactor.enrolment(user.email);
     await db.user.update({ where: { id: user.id }, data: { totpSecret: twoFactor.encrypt(enrolment.secret), totpEnabled: false } });
@@ -54,7 +54,7 @@ export function twoFactorRoutes(app: FastifyInstance, { db, config, sessions, lo
   });
 
   app.post("/api/auth/2fa/enable", async (request) => {
-    const user = requireUser(request);
+    const user = requireUser(request, "guest", { allowTwoFactorSetup: true });
     const { code } = parseBody(EnableTwoFactorBody, request.body);
     if (user.totpEnabled) throw conflict("Two-factor sign-in is already on");
     const secret = user.totpSecret ? twoFactor.decrypt(user.totpSecret) : null;
@@ -69,6 +69,7 @@ export function twoFactorRoutes(app: FastifyInstance, { db, config, sessions, lo
   app.post("/api/auth/2fa/disable", async (request) => {
     const user = requireUser(request);
     const { password } = parseBody(DisableTwoFactorBody, request.body);
+    if (twoFactorPolicy.covers(user, await twoFactorPolicy.requirement())) throw conflict("Two-factor sign-in is required for your account");
     const keys = [`user:${user.id}`];
     if (loginLimiter.isBlocked(keys)) throw tooMany();
     if (!(await verifyPassword(user.passwordHash, password))) {

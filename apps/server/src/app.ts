@@ -10,6 +10,7 @@ import { TwoFactor } from "./auth/two-factor";
 import { smtpMailer, type Mailer } from "./mail/mailer";
 import { LoginLimiter } from "./auth/login-limiter";
 import { SESSION_COOKIE, SessionStore } from "./auth/sessions";
+import { TwoFactorPolicy } from "./auth/two-factor-policy";
 import { InstanceService } from "./calendar/instance-service";
 import type { Config } from "./config";
 import { forbidden, HttpError } from "./errors";
@@ -86,6 +87,7 @@ export async function buildApp({ db, config, now, logger = false, updates = new 
     mailer: mailer !== undefined ? mailer : config.smtp ? smtpMailer(config.smtp) : null,
     passwordTokens: new PasswordTokens(db, now),
     twoFactor: new TwoFactor(config.sessionSecret, now ? () => now().getTime() : undefined),
+    twoFactorPolicy: new TwoFactorPolicy(db),
   };
   await context.firstRun.start(config.initialAdmin);
 
@@ -98,6 +100,7 @@ export async function buildApp({ db, config, now, logger = false, updates = new 
 
   app.decorateRequest("user", null);
   app.decorateRequest("sessionToken", null);
+  app.decorateRequest("pendingStep", null);
 
   // Reject cross-site state-changing requests (defence in depth on top of SameSite=Lax cookies).
   // WebSocket upgrades are GETs that carry the session cookie, so they must come from our own origin.
@@ -116,6 +119,8 @@ export async function buildApp({ db, config, now, logger = false, updates = new 
     if (!resolved) return;
     request.user = resolved.user;
     request.sessionToken = token;
+    if (resolved.user.mustChangePassword) request.pendingStep = "change_password";
+    else if (await context.twoFactorPolicy.mustSetUp(resolved.user, resolved.viaSso)) request.pendingStep = "set_up_two_factor";
     if (resolved.refreshedUntil) setSessionCookie(reply, config, token, resolved.refreshedUntil);
   });
 

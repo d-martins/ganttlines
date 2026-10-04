@@ -137,4 +137,28 @@ describe("getting in", () => {
     renderApp("/settings");
     expect(await screen.findByRole("heading", { name: "Choose a new password" })).toBeInTheDocument();
   });
+
+  it("has people set up two-factor first when an admin requires it, then lets them in", async () => {
+    let on = false;
+    fakeApi({
+      "GET /api/setup": () => ({ body: { needsSetup: false } }),
+      "GET /api/auth/me": () => ({ body: { user: { ...ADMIN, twoFactor: on, mustSetUpTwoFactor: !on } } }),
+      "GET /api/projects": () => ({ body: { projects: [] } }),
+      "POST /api/auth/2fa/setup": () => ({ body: { secret: "JBSWY3DPEHPK3PXP", otpauthUrl: "otpauth://totp/x", qrSvg: "<svg></svg>" } }),
+      "POST /api/auth/2fa/enable": () => {
+        on = true;
+        return { body: { recoveryCodes: ["aaaa-bbbb"] } };
+      },
+    });
+    const { user, router } = renderApp("/settings");
+    expect(await screen.findByRole("heading", { name: "Set up two-factor sign-in" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Turn on two-factor" }));
+    await user.type(await screen.findByLabelText("Code from the app"), "123456");
+    await user.click(screen.getByRole("button", { name: "Turn on" }));
+    // The recovery codes stay up until they're put away, although two-factor is already on.
+    expect(await screen.findByRole("list", { name: "Recovery codes" })).toHaveTextContent("aaaa-bbbb");
+    await user.click(screen.getByRole("button", { name: "I've saved them" }));
+    expect(await screen.findByText("No projects yet.", { selector: "p.text-text" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/");
+  });
 });

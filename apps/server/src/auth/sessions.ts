@@ -8,6 +8,8 @@ const REFRESH_INTERVAL_MS = 60 * 60 * 1000;
 
 export interface ResolvedSession {
   user: User;
+  /** signed in with single sign-on rather than a password */
+  viaSso: boolean;
   /** New expiry when the session was extended by this request (the cookie should be re-sent). */
   refreshedUntil: Date | null;
 }
@@ -20,11 +22,11 @@ export class SessionStore {
     private readonly now: () => Date = () => new Date(),
   ) {}
 
-  async create(userId: string): Promise<{ token: string; expiresAt: Date }> {
+  async create(userId: string, { viaSso = false } = {}): Promise<{ token: string; expiresAt: Date }> {
     const token = randomBytes(32).toString("base64url");
     const now = this.now();
     const expiresAt = new Date(now.getTime() + SESSION_TTL_MS);
-    await this.db.session.create({ data: { id: this.digest(token), userId, expiresAt, lastSeenAt: now } });
+    await this.db.session.create({ data: { id: this.digest(token), userId, expiresAt, lastSeenAt: now, viaSso } });
     return { token, expiresAt };
   }
 
@@ -38,13 +40,13 @@ export class SessionStore {
       return null;
     }
     if (now.getTime() - session.lastSeenAt.getTime() < REFRESH_INTERVAL_MS) {
-      return { user: session.user, refreshedUntil: null };
+      return { user: session.user, viaSso: session.viaSso, refreshedUntil: null };
     }
     const expiresAt = new Date(now.getTime() + SESSION_TTL_MS);
     // updateMany: the session may have been revoked concurrently (e.g. logout in another tab).
     const { count } = await this.db.session.updateMany({ where: { id }, data: { lastSeenAt: now, expiresAt } });
     if (count === 0) return null;
-    return { user: session.user, refreshedUntil: expiresAt };
+    return { user: session.user, viaSso: session.viaSso, refreshedUntil: expiresAt };
   }
 
   /** Removes sessions that expired without being presented again; returns how many. */

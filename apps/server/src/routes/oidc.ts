@@ -56,7 +56,7 @@ export function oidcRoutes(app: FastifyInstance, context: RouteContext, oidc: Oi
     }
     const user = await accountFor(outcome.identity);
     if (!user) return fail(reply, "sso_no_account");
-    const session = await sessions.create(user.id);
+    const session = await sessions.create(user.id, { viaSso: true });
     setSessionCookie(reply, config, session.token, session.expiresAt);
     return reply.clearCookie(PENDING_COOKIE, { path: PENDING_PATH }).redirect(outcome.redirect);
   });

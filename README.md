@@ -113,6 +113,9 @@ Anyone with a password can add a code from an authenticator app (Google Authenti
 recovery codes for when they lose their phone; an admin can also turn it off for them (Settings →
 Users). People signing in through single sign-on use their provider's two-factor instead.
 
+Admins can require it for admins or for everyone (Settings → Two-factor sign-in). People it
+covers set it up the next time they open GanttLines, before anything else, and can't turn it off.
+
 The app secrets are stored encrypted with a key derived from `SESSION_SECRET` — changing that
 secret means everyone with two-factor turns it on again (an admin can turn it off for them).
 

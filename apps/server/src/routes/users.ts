@@ -16,7 +16,7 @@ export function userRoutes(app: FastifyInstance, { db, config, sessions, instanc
   app.get("/api/users", async (request) => {
     requireUser(request, "admin");
     const users = await db.user.findMany({ orderBy: { createdAt: "asc" } });
-    return { users: users.map(toUserDto) };
+    return { users: users.map((user) => toUserDto(user)) };
   });
 
   /**

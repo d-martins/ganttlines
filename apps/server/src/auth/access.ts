@@ -2,6 +2,7 @@ import type { Db, ShareLink, User } from "@ganttlines/db";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { actorOf, type Actor } from "../actor";
 import { HttpError, notFound, unauthorized } from "../errors";
+import { pendingStepError, type PendingStep } from "./guard";
 
 export const VISITOR_COOKIE = "gp_visitor";
 
@@ -13,6 +14,8 @@ export interface Visitor {
 /** What a request (or WebSocket) presents: a signed-in user, a share-link token, an anonymous visitor. */
 export interface Credentials {
   user: User | null;
+  /** the user must change their password or set up two-factor before anything else */
+  pendingStep: PendingStep | null;
   shareToken: string | null;
   visitor: Visitor | null;
 }
@@ -128,7 +131,7 @@ export class AccessService {
       if (!link || link.projectId !== projectId) return notFound("Share link");
       if (link.revokedAt) return new HttpError(410, "link_revoked", "This share link was turned off");
     }
-    if (user && !user.mustChangePassword && user.role !== "guest") {
+    if (user && !credentials.pendingStep && user.role !== "guest") {
       if (!(await this.projectExists(projectId))) return notFound("Project");
       const byRole = user.role === "editor" || user.role === "admin";
       // A collaborative link lets any signed-in user who opens it edit, like it does for guests.
@@ -144,7 +147,7 @@ export class AccessService {
       };
     }
     if (!link) {
-      if (user?.mustChangePassword) return new HttpError(403, "password_change_required", "Please change your password first");
+      if (user && credentials.pendingStep) return pendingStepError(credentials.pendingStep);
       return user ? new HttpError(403, "forbidden", "You don't have access to this project") : unauthorized();
     }
     return this.viaLink(link, credentials) ?? new HttpError(403, "forbidden", "You don't have access to this project");
@@ -171,9 +174,9 @@ export class AccessService {
    */
   async requireInstanceRead(credentials: Credentials): Promise<"member" | "link"> {
     const { user } = credentials;
-    if (user && !user.mustChangePassword && user.role !== "guest") return "member";
+    if (user && !credentials.pendingStep && user.role !== "guest") return "member";
     if (!credentials.shareToken) {
-      if (user?.mustChangePassword) throw new HttpError(403, "password_change_required", "Please change your password first");
+      if (user && credentials.pendingStep) throw pendingStepError(credentials.pendingStep);
       throw user ? new HttpError(403, "forbidden", "You don't have access to this") : unauthorized();
     }
     const link = await this.find(credentials.shareToken);
@@ -183,11 +186,11 @@ export class AccessService {
     return "link";
   }
 
-  private viaLink(link: ShareLink, { user, visitor }: Credentials): ProjectAccess | null {
+  private viaLink(link: ShareLink, { user, pendingStep, visitor }: Credentials): ProjectAccess | null {
     const base = { projectId: link.projectId, canEdit: link.collaboration, canComment: link.collaboration, linkId: link.id };
     if (link.access === "authenticated") {
       if (!user) throw new HttpError(401, "sign_in_required", "Sign in to open this link");
-      if (user.mustChangePassword) throw new HttpError(403, "password_change_required", "Please change your password first");
+      if (pendingStep) throw pendingStepError(pendingStep);
       return { ...base, actor: { ...actorOf(user), linkId: link.id }, key: `user:${user.id}` };
     }
     if (!visitor) throw new HttpError(401, "visitor_required", "Choose a display name to open this link");
