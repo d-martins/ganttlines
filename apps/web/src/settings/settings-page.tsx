@@ -1,4 +1,4 @@
-import { MCP_SCOPE_LABELS, MCP_SCOPES, ROLES, TWO_FACTOR_REQUIREMENTS, type McpScope, type Role, type TwoFactorRequirement, type UserDto } from "@ganttlines/protocol";
+import { MCP_SCOPE_LABELS, MCP_SCOPES, ROLES, TWO_FACTOR_REQUIREMENTS, type McpConnectionDto, type McpScope, type Role, type TwoFactorRequirement, type UserDto } from "@ganttlines/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { errorMessage } from "../api/client";
@@ -6,8 +6,10 @@ import {
   about,
   calendar,
   currentUser,
+  mcpAvailable,
   mcpConnections,
   mcpSettings,
+  useCreateMcpToken,
   useDisconnectApp,
   useSaveMcpSettings,
   useCreateUser,
@@ -272,10 +274,18 @@ function SignInSecuritySection({ me }: { me: UserDto }) {
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "never");
 const scopeNames = (scopes: McpScope[]) => scopes.map((scope) => MCP_SCOPE_LABELS[scope].label).join(", ");
 
-/** The AI apps you've let use GanttLines as you, and a way to disconnect each. */
+const expiry = (connection: McpConnectionDto) =>
+  connection.kind === "token" ? (connection.expiresAt ? ` · expires ${when(connection.expiresAt)}` : " · never expires") : "";
+
+/**
+ * The AI apps you've let use GanttLines as you (and your personal access tokens), with a way to
+ * disconnect each — and to make a token for apps that take one instead of signing in.
+ */
 function ConnectedApps() {
   const connections = useQuery(mcpConnections(false));
+  const available = useQuery(mcpAvailable);
   const disconnect = useDisconnectApp();
+  const [creating, setCreating] = useState(false);
   return (
     <div className="mt-5 flex flex-col gap-2 border-t border-border pt-4 text-sm">
       <h3 className="font-medium">Connected AI apps</h3>
@@ -284,13 +294,17 @@ function ConnectedApps() {
           {connections.data.map((connection) => (
             <li key={connection.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2">
               <span className="font-medium">{connection.app}</span>
+              {connection.kind === "token" ? <span className="rounded bg-surface-2 px-1.5 py-0.5 text-xs text-muted">Access token</span> : null}
               <span className="text-muted">{scopeNames(connection.scopes)}</span>
-              <span className="ml-auto text-xs text-muted">last used {when(connection.lastUsedAt)}</span>
+              <span className="ml-auto text-xs text-muted">
+                last used {when(connection.lastUsedAt)}
+                {expiry(connection)}
+              </span>
               <ConfirmButton
                 label="Disconnect"
                 confirmLabel="Disconnect"
                 title={`Disconnect ${connection.app}?`}
-                message="It can't use GanttLines as you any more, until you connect it again."
+                message={connection.kind === "token" ? "The token stops working at once." : "It can't use GanttLines as you any more, until you connect it again."}
                 onConfirm={() => disconnect.mutate(connection.id)}
               />
             </li>
@@ -300,7 +314,77 @@ function ConnectedApps() {
         <p className="text-muted">None. AI apps you connect (for example Claude or ChatGPT, when an admin has turned AI access on) appear here.</p>
       )}
       <ErrorText>{disconnect.error ? errorMessage(disconnect.error) : null}</ErrorText>
+      {available.data?.enabled && available.data.scopes.length > 0 ? (
+        creating ? (
+          <NewAccessToken scopes={available.data.scopes} url={available.data.url} onDone={() => setCreating(false)} />
+        ) : (
+          <div className="flex flex-wrap items-center gap-3">
+            <Button onClick={() => setCreating(true)}>Create an access token</Button>
+            <span className="text-xs text-muted">For AI apps that take a token instead of signing in (address: {available.data.url}).</span>
+          </div>
+        )
+      ) : null}
     </div>
+  );
+}
+
+/** Making a personal access token: what it's for, what it may do, how long it lasts; then the token, once. */
+function NewAccessToken({ scopes, url, onDone }: { scopes: McpScope[]; url: string; onDone: () => void }) {
+  const create = useCreateMcpToken();
+  const [name, setName] = useState("");
+  const [chosen, setChosen] = useState<McpScope[]>(scopes.filter((scope) => scope !== "team:write"));
+  const [days, setDays] = useState<"30" | "90" | "365" | "never">("90");
+  if (create.data) {
+    return (
+      <div className="flex flex-col gap-2 rounded-md border border-border p-3">
+        <p role="status">Copy the token now — it won't be shown again. Anyone with it can act as you within what it may do.</p>
+        <code aria-label="New access token" className="break-all rounded bg-surface-2 px-2 py-1 font-mono">
+          {create.data.token}
+        </code>
+        <p className="text-xs text-muted">
+          Give the app the address {url} and the header <code>Authorization: Bearer …</code> with this token.
+        </p>
+        <Button className="self-start" onClick={onDone}>
+          Done
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <form
+      className="flex flex-col gap-3 rounded-md border border-border p-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        create.mutate({ name: name.trim(), scopes: chosen, expiresInDays: days === "never" ? null : (Number(days) as 30 | 90 | 365) });
+      }}
+    >
+      <Field label="What it's for" value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Cursor on my laptop" required />
+      <fieldset className="flex flex-col gap-2">
+        <legend className="mb-1 text-xs font-medium text-muted">It may</legend>
+        {scopes.map((scope) => (
+          <label key={scope} className="flex items-center gap-2">
+            <input type="checkbox" checked={chosen.includes(scope)} onChange={() => setChosen(chosen.includes(scope) ? chosen.filter((other) => other !== scope) : [...chosen, scope])} />
+            {MCP_SCOPE_LABELS[scope].label}
+          </label>
+        ))}
+      </fieldset>
+      <label className="flex items-center gap-2">
+        Expires
+        <select aria-label="Expires" value={days} onChange={(event) => setDays(event.target.value as typeof days)} className="rounded border border-border-strong bg-bg px-1 py-0.5">
+          <option value="30">in 30 days</option>
+          <option value="90">in 90 days</option>
+          <option value="365">in a year</option>
+          <option value="never">never</option>
+        </select>
+      </label>
+      <ErrorText>{create.error ? errorMessage(create.error) : null}</ErrorText>
+      <div className="flex gap-2">
+        <Button type="submit" variant="primary" disabled={!name.trim() || chosen.length === 0 || create.isPending}>
+          Create token
+        </Button>
+        <Button onClick={onDone}>Cancel</Button>
+      </div>
+    </form>
   );
 }
 
@@ -368,7 +452,10 @@ function AiAccessSection() {
               {everyone.data.map((connection) => (
                 <li key={connection.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2">
                   <span className="font-medium">{connection.user?.name}</span>
-                  <span>{connection.app}</span>
+                  <span>
+                    {connection.app}
+                    {connection.kind === "token" ? " (access token)" : ""}
+                  </span>
                   <span className="text-muted">{scopeNames(connection.scopes)}</span>
                   <span className="ml-auto text-xs text-muted">last used {when(connection.lastUsedAt)}</span>
                   <ConfirmButton

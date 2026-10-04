@@ -26,7 +26,9 @@ import type {
   UpdateProjectBody,
   UpdateResourceBody,
   TwoFactorRequirement,
+  CreateMcpTokenBody,
   McpConnectionDto,
+  McpScope,
   McpSettingsBody,
   McpSettingsDto,
   OAuthConsentBody,
@@ -56,6 +58,7 @@ export const keys = {
   shareLinks: (id: string) => ["project", id, "share-links"] as const,
   shareInfo: (token: string) => ["share", token] as const,
   mcpSettings: ["mcp-settings"] as const,
+  mcpAvailable: ["mcp-available"] as const,
   /** your AI app connections, or (all) everyone's */
   mcpConnections: (all: boolean) => ["mcp-connections", { all }] as const,
   oauthRequest: (request: string) => ["oauth-request", request] as const,
@@ -229,6 +232,16 @@ export const oauthRequest = (request: string) =>
   });
 export const useSaveMcpSettings = () =>
   useApiMutation((body: McpSettingsBody) => api<McpSettingsDto>("PUT", "/api/settings/mcp", body), (client) => client.invalidateQueries({ queryKey: keys.mcpSettings }));
+/** Whether AI apps can connect, where, and which groups the signed-in person can grant. */
+export const mcpAvailable = queryOptions({
+  queryKey: keys.mcpAvailable,
+  queryFn: () => api<{ enabled: boolean; url: string; scopes: McpScope[] }>("GET", "/api/mcp/available"),
+});
+export const useCreateMcpToken = () =>
+  useApiMutation(
+    (body: CreateMcpTokenBody) => api<{ token: string; connection: McpConnectionDto }>("POST", "/api/mcp/tokens", body),
+    (client) => client.invalidateQueries({ queryKey: ["mcp-connections"] }),
+  );
 export const useDisconnectApp = () =>
   useApiMutation((id: string) => api<void>("DELETE", `/api/mcp/connections/${id}`), (client) => client.invalidateQueries({ queryKey: ["mcp-connections"] }));
 /** Approving (or declining) an AI app's request; answers where to send the browser back to the app. */

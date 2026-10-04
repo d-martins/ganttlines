@@ -71,6 +71,7 @@ export {
   MCP_SCOPE_LABELS,
   MCP_SCOPES,
   MCP_WRITE_SCOPES,
+  CreateMcpTokenBody,
   McpSettingsBody,
   OAuthConsentBody,
   type McpConnectionDto,

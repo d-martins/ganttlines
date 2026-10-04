@@ -150,6 +150,12 @@ last change); **comments** (read and add); **team calendar** (read, and — if a
 members, locations, holidays and time off, or add a country's public holidays). Changes appear live
 on open boards and in the history as “Ana via Claude”; people can undo them like any other.
 
+**Access tokens** are for apps (or scripts) that take a token instead of signing in: Settings →
+Your account → **Create an access token**, choose what it may do and when it expires, and give the
+app the address plus the header `Authorization: Bearer gl_pat_…`. For example, with Claude Code:
+`claude mcp add --transport http ganttlines https://your-server/mcp --header "Authorization: Bearer gl_pat_…"`.
+Tokens are listed (and disconnected) with the other apps, and follow the same rules.
+
 AI apps never see users, settings or share links. The server must be reachable over HTTPS from the
 AI app — for claude.ai and ChatGPT that means from the internet.
 

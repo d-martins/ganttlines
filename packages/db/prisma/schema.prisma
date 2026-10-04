@@ -292,13 +292,19 @@ model OAuthClient {
   connections  McpConnection[]
 }
 
-/// A person's approval for one AI app, with the tool groups (scopes) they granted it.
+/**
+ * A person's approval for one AI app (signed in with OAuth), or a personal access token they made,
+ * with the tool groups (scopes) they granted it.
+ */
 model McpConnection {
   id         String        @id @default(uuid()) @db.Uuid
   userId     String        @db.Uuid
   user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  clientId   String
-  client     OAuthClient   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  /// the app, for OAuth connections (null for personal access tokens)
+  clientId   String?
+  client     OAuthClient?  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  /// a personal access token's name (what it's for)
+  label      String?
   scopes     String[]
   createdAt  DateTime      @default(now())
   lastUsedAt DateTime?
@@ -338,4 +344,6 @@ model OAuthToken {
 enum OAuthTokenKind {
   access
   refresh
+  /// a personal access token (made in Settings, used like an access token)
+  personal
 }

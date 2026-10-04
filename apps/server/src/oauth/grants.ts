@@ -7,6 +7,8 @@ const CODE_FOR_MS = 10 * 60 * 1000;
 export const ACCESS_FOR_MS = 60 * 60 * 1000;
 /** Refresh tokens last this long without being used; each use replaces it. */
 const REFRESH_FOR_MS = 90 * 24 * 60 * 60 * 1000;
+/** Personal access tokens that "never" expire stop working this far away. */
+export const NEVER_EXPIRES = new Date("9999-12-31T00:00:00Z");
 /** How long an authorization request may wait on the "Allow access?" page. */
 const REQUEST_FOR_MS = 15 * 60 * 1000;
 
@@ -133,16 +135,34 @@ export class OAuthGrants {
     await this.db.oAuthToken.deleteMany({ where: { id: this.digest(token) } });
   }
 
-  /** The connection and person behind a live access token, or null. */
-  async verifyAccess(token: string): Promise<{ connection: McpConnection & { client: { name: string } }; user: User; scopes: McpScope[]; expiresAt: Date } | null> {
+  /** The connection, app name and person behind a live access token (or personal access token), or null. */
+  async verifyAccess(token: string): Promise<{ connection: McpConnection; app: string; user: User; scopes: McpScope[]; expiresAt: Date } | null> {
     const found = await this.db.oAuthToken.findUnique({
       where: { id: this.digest(token) },
       include: { connection: { include: { user: true, client: { select: { name: true } } } } },
     });
-    if (!found || found.kind !== "access" || found.expiresAt <= this.now()) return null;
-    const { user, ...connection } = found.connection;
+    if (!found || found.kind === "refresh" || found.expiresAt <= this.now()) return null;
+    const { user, client, ...connection } = found.connection;
     const scopes = (found.scopes as McpScope[]).filter((scope) => connection.scopes.includes(scope));
-    return { connection, user, scopes, expiresAt: found.expiresAt };
+    return { connection, app: client?.name ?? connection.label ?? "Access token", user, scopes, expiresAt: found.expiresAt };
+  }
+
+  /**
+   * A personal access token: a connection of its own (no app), shown to its maker once. It starts
+   * with "gl_pat_" so people (and secret scanners) can tell what it is.
+   */
+  async createPersonalToken(
+    userId: string,
+    label: string,
+    scopes: McpScope[],
+    expiresInDays: number | null,
+  ): Promise<{ token: string; connection: McpConnection; expiresAt: Date }> {
+    const token = `gl_pat_${randomBytes(32).toString("base64url")}`;
+    const expiresAt = expiresInDays === null ? NEVER_EXPIRES : new Date(this.now().getTime() + expiresInDays * 24 * 60 * 60 * 1000);
+    const connection = await this.db.mcpConnection.create({
+      data: { userId, label, scopes, tokens: { create: { id: this.digest(token), kind: "personal", scopes, expiresAt } } },
+    });
+    return { token, connection, expiresAt };
   }
 
   /** Notes when an app last used its connection (at most once a minute). */
@@ -152,11 +172,12 @@ export class OAuthGrants {
     await this.db.mcpConnection.updateMany({ where: { id: connection.id }, data: { lastUsedAt: now } });
   }
 
-  /** Codes and tokens past their expiry. */
+  /** Codes and tokens past their expiry (and personal access tokens' connections with them). */
   async deleteExpired(): Promise<void> {
     const now = this.now();
     await this.db.oAuthCode.deleteMany({ where: { expiresAt: { lte: now } } });
     await this.db.oAuthToken.deleteMany({ where: { expiresAt: { lte: now } } });
+    await this.db.mcpConnection.deleteMany({ where: { clientId: null, tokens: { none: {} } } });
   }
 
   private async issueTokens(connectionId: string, scopes: McpScope[]): Promise<IssuedTokens> {

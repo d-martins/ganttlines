@@ -62,7 +62,7 @@ describe("connecting an AI app", () => {
   });
 });
 
-const CONNECTION: McpConnectionDto = { id: "c1", app: "Claude", scopes: ["plans:read", "team:read"], createdAt: "2026-10-01T10:00:00Z", lastUsedAt: null };
+const CONNECTION: McpConnectionDto = { id: "c1", app: "Claude", kind: "app", scopes: ["plans:read", "team:read"], createdAt: "2026-10-01T10:00:00Z", lastUsedAt: null };
 
 describe("AI access settings", () => {
   it("lets admins turn AI access on and choose what apps may do, and see everyone's connections", async () => {
@@ -107,5 +107,32 @@ describe("AI access settings", () => {
     await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Disconnect" }));
     expect(await screen.findByText(/^None\. AI apps you connect/)).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "AI access (MCP)" })).not.toBeInTheDocument();
+  });
+
+  it("makes a personal access token and shows it once", async () => {
+    const api = signedIn(VIEWER);
+    let connections: McpConnectionDto[] = [];
+    api.on("GET /api/about", () => ({ body: { version: "1.2.0" } }));
+    api.on("GET /api/mcp/available", () => ({ body: { enabled: true, url: "http://localhost:3000/mcp", scopes: ["plans:read", "comments", "team:read"] } }));
+    api.on("GET /api/mcp/connections", () => ({ body: { connections } }));
+    api.on("POST /api/mcp/tokens", (body) => {
+      const connection: McpConnectionDto = { id: "t1", app: "Cursor", kind: "token", scopes: ["plans:read"], createdAt: "2026-10-04T10:00:00Z", lastUsedAt: null, expiresAt: null };
+      connections = [connection];
+      return { status: 201, body: { token: "gl_pat_secret", connection, sent: body } };
+    });
+    const { user } = renderApp("/settings");
+    await user.click(await screen.findByRole("button", { name: "Create an access token" }));
+    await user.type(screen.getByLabelText("What it's for"), "Cursor");
+    await user.click(screen.getByRole("checkbox", { name: "Comments" }));
+    await user.click(screen.getByRole("checkbox", { name: "Team calendar" }));
+    await user.selectOptions(screen.getByLabelText("Expires"), "never");
+    await user.click(screen.getByRole("button", { name: "Create token" }));
+    expect(await screen.findByLabelText("New access token")).toHaveTextContent("gl_pat_secret");
+    expect(api.calls.find((c) => c.key === "POST /api/mcp/tokens")?.body).toEqual({ name: "Cursor", scopes: ["plans:read"], expiresInDays: null });
+    const list = await screen.findByRole("list", { name: "Connected AI apps" });
+    expect(within(list).getByRole("listitem")).toHaveTextContent("CursorAccess tokenRead plans");
+    expect(within(list).getByRole("listitem")).toHaveTextContent("never expires");
+    await user.click(screen.getByRole("button", { name: "Done" }));
+    expect(screen.queryByLabelText("New access token")).not.toBeInTheDocument();
   });
 });

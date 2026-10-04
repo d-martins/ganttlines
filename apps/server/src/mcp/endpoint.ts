@@ -88,7 +88,7 @@ export function mcpRoutes(app: FastifyInstance, context: RouteContext): void {
     const forRole = scopesForRole(access.user.role);
     const scopes = access.scopes.filter((scope) => settings.scopes.includes(scope) && forRole.includes(scope));
     await oauthGrants.touch(access.connection);
-    const caller: McpCaller = { user: access.user, app: access.connection.client.name, connectionId: access.connection.id, scopes };
+    const caller: McpCaller = { user: access.user, app: access.app, connectionId: access.connection.id, scopes };
 
     const headers = new Headers();
     for (const [name, value] of Object.entries(request.headers)) {
@@ -100,7 +100,7 @@ export function mcpRoutes(app: FastifyInstance, context: RouteContext): void {
     const response = await handler.fetch(new Request(urls.resource, init), {
       authInfo: {
         token,
-        clientId: access.connection.clientId,
+        clientId: access.connection.clientId ?? `token:${access.connection.id}`,
         scopes,
         expiresAt: Math.floor(access.expiresAt.getTime() / 1000),
         resource: new URL(urls.resource),

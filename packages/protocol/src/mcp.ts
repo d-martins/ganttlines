@@ -28,10 +28,14 @@ export interface McpSettingsDto {
 export const McpSettingsBody = z.strictObject({ enabled: z.boolean(), scopes: z.array(z.enum(MCP_SCOPES)).max(MCP_SCOPES.length) });
 export type McpSettingsBody = z.infer<typeof McpSettingsBody>;
 
-/** A person's approval for one AI app. */
+/** A person's approval for one AI app, or a personal access token they made. */
 export interface McpConnectionDto {
   id: string;
+  /** the app's name, or the token's */
   app: string;
+  kind: "app" | "token";
+  /** when a token stops working (null: never); absent for apps */
+  expiresAt?: string | null;
   scopes: McpScope[];
   createdAt: string;
   lastUsedAt: string | null;
@@ -53,3 +57,12 @@ export const OAuthConsentBody = z.strictObject({
   scopes: z.array(z.enum(MCP_SCOPES)).max(MCP_SCOPES.length),
 });
 export type OAuthConsentBody = z.infer<typeof OAuthConsentBody>;
+
+/** POST /api/mcp/tokens — a personal access token, for AI apps that don't sign in with OAuth. */
+export const CreateMcpTokenBody = z.strictObject({
+  name: z.string().trim().min(1).max(100),
+  scopes: z.array(z.enum(MCP_SCOPES)).min(1).max(MCP_SCOPES.length),
+  /** days until it stops working; null: never */
+  expiresInDays: z.union([z.literal(30), z.literal(90), z.literal(365), z.null()]),
+});
+export type CreateMcpTokenBody = z.infer<typeof CreateMcpTokenBody>;

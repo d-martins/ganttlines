@@ -1,5 +1,5 @@
 -- CreateEnum
-CREATE TYPE "OAuthTokenKind" AS ENUM ('access', 'refresh');
+CREATE TYPE "OAuthTokenKind" AS ENUM ('access', 'refresh', 'personal');
 
 -- AlterTable
 ALTER TABLE "Settings" ADD COLUMN     "mcpEnabled" BOOLEAN NOT NULL DEFAULT false,
@@ -21,10 +21,12 @@ CREATE TABLE "OAuthClient" (
 CREATE TABLE "McpConnection" (
     "id" UUID NOT NULL,
     "userId" UUID NOT NULL,
-    "clientId" TEXT NOT NULL,
+    "clientId" TEXT,
+    "label" TEXT,
     "scopes" TEXT[],
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "lastUsedAt" TIMESTAMP(3),
+    "lastCall" JSONB,
 
     CONSTRAINT "McpConnection_pkey" PRIMARY KEY ("id")
 );
