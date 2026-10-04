@@ -1,6 +1,8 @@
 name: Release
 
 # Push a version tag to publish: git tag v1.2.0 && git push origin v1.2.0
+# For release notes, annotate the tag with them (verbatim, so Markdown headings survive):
+#   git tag -a v1.2.0 --cleanup=verbatim -F notes.md && git push origin v1.2.0
 on:
   push:
     tags: ["v*.*.*"]
@@ -51,11 +53,17 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Create the GitHub release (notes from the commits since the last one)
+      - name: Create the GitHub release (notes from the tag's message, else the commits since the last one)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
         run: |
-          flags="--generate-notes --verify-tag"
+          # checkout leaves the tag lightweight; fetch it again to read an annotated tag's message.
+          git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
+          # An annotated tag's message is the notes, unless it's only the tag's name.
+          : > notes.md
+          if [ "$(git cat-file -t "$TAG")" = tag ]; then git tag -l --format='%(contents)' "$TAG" | sed "1{/^$TAG\$/d;}" > notes.md; fi
+          flags="--verify-tag"
+          if grep -q '[^[:space:]]' notes.md; then flags="$flags --notes-file notes.md"; else flags="$flags --generate-notes"; fi
           case "$TAG" in *-*) flags="$flags --prerelease" ;; esac
           gh release create "$TAG" $flags --title "GanttLines ${TAG#v}"
