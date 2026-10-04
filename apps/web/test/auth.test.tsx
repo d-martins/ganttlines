@@ -24,6 +24,17 @@ describe("getting in", () => {
     expect(api.calls.find((c) => c.key === "POST /api/setup")?.body).toEqual({ name: "Ada Admin", email: "admin@example.com", password: "long enough", setupCode: "Q82FC-3CKAP" });
   });
 
+  it("offers single sign-on on the setup page when it can create the admin", async () => {
+    fakeApi({
+      "GET /api/setup": () => ({ body: { needsSetup: true } }),
+      "GET /api/auth/me": () => ({ status: 401, body: { error: "unauthorized", message: "Please sign in" } }),
+      "GET /api/auth/providers": () => ({ body: { oidc: { name: "Google", firstAdmin: true }, passwordReset: false } }),
+    });
+    renderApp("/");
+    expect(await screen.findByRole("link", { name: "Sign in with Google to become the admin" })).toHaveAttribute("href", "/api/auth/oidc/start");
+    expect(screen.getByRole("button", { name: "Create admin account" })).toBeInTheDocument(); // the setup code still works too
+  });
+
   it("asks signed-out people to sign in and shows wrong-password errors", async () => {
     let signedIn = false;
     fakeApi({

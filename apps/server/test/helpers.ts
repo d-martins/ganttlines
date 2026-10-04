@@ -16,6 +16,7 @@ export const testConfig: Config = {
   webDir: null,
   version: "1.2.0",
   initialAdmin: null,
+  firstAdminEmail: null,
   oidc: null,
   smtp: null,
 };

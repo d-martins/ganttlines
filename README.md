@@ -106,6 +106,12 @@ usual way is to add people under Settings → Users first; their temporary passw
 once they've used single sign-on. With `OIDC_AUTO_CREATE=true`, anyone the provider vouches for
 (within `OIDC_ALLOWED_DOMAINS`) gets an account with `OIDC_DEFAULT_ROLE` (default `viewer`).
 
+**The first admin on a fresh install** can sign in with the provider too: set `ADMIN_EMAIL` (no
+password needed) and whoever first signs in with that email becomes the admin. Without
+`ADMIN_EMAIL`, the first person to sign in from one of `OIDC_ALLOWED_DOMAINS` becomes the admin. With
+neither, single sign-on waits until the admin is created with the setup code — otherwise anyone
+the provider knows could claim the install.
+
 ## Two-factor sign-in
 
 Anyone with a password can add a code from an authenticator app (Google Authenticator,

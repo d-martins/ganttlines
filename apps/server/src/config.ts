@@ -25,6 +25,8 @@ export interface Config {
   oidc: OidcSettings | null;
   /** The admin to create on first start (ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_NAME) */
   initialAdmin: InitialAdmin | null;
+  /** ADMIN_EMAIL without a password (single sign-on only): whoever first signs in with it becomes the admin */
+  firstAdminEmail: string | null;
   /** The running version (the image's APP_VERSION; "dev" otherwise) */
   version: string;
   /** The built web app to serve (apps/web/dist); null when it isn't built (development, tests) */
@@ -38,6 +40,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
   const publicUrl = new URL(env["PUBLIC_URL"] ?? "http://localhost:3000");
   const port = Number(env["PORT"] ?? 3000);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`Invalid PORT: ${env["PORT"]}`);
+  const oidc = oidcSettings(env);
   return {
     databaseUrl,
     sessionSecret,
@@ -47,21 +50,30 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     trustProxy: parseTrustProxy(env["TRUST_PROXY"]),
     webDir: webDir(env["WEB_DIR"]),
     version: env["APP_VERSION"] || "dev",
-    initialAdmin: initialAdmin(env),
-    oidc: oidcSettings(env),
+    ...admins(env, oidc),
+    oidc,
     smtp: smtpSettings(env),
   };
 }
 
-/** ADMIN_EMAIL + ADMIN_PASSWORD (+ ADMIN_NAME), checked like the setup form; both or neither. */
-function initialAdmin(env: NodeJS.ProcessEnv): InitialAdmin | null {
+/**
+ * The first admin. ADMIN_EMAIL + ADMIN_PASSWORD (+ ADMIN_NAME), checked like the setup form, create
+ * it on start. With single sign-on, ADMIN_EMAIL alone names who becomes the admin by signing in.
+ */
+function admins(env: NodeJS.ProcessEnv, oidc: OidcSettings | null): { initialAdmin: InitialAdmin | null; firstAdminEmail: string | null } {
   const email = env["ADMIN_EMAIL"];
   const password = env["ADMIN_PASSWORD"];
-  if (!email && !password) return null;
-  if (!email || !password) throw new Error("Set both ADMIN_EMAIL and ADMIN_PASSWORD (or neither)");
+  if (!email && !password) return { initialAdmin: null, firstAdminEmail: null };
+  if (email && !password) {
+    if (!oidc) throw new Error("Set ADMIN_PASSWORD too (ADMIN_EMAIL alone works with single sign-on, OIDC_*)");
+    const parsed = InitialAdminSettings.shape.email.safeParse(email);
+    if (!parsed.success) throw new Error("Invalid ADMIN_EMAIL");
+    return { initialAdmin: null, firstAdminEmail: parsed.data };
+  }
+  if (!email) throw new Error("Set ADMIN_EMAIL too (with ADMIN_PASSWORD)");
   const parsed = InitialAdminSettings.safeParse({ email, password, name: env["ADMIN_NAME"] || "Admin" });
   if (!parsed.success) throw new Error(`Invalid ADMIN_* settings: ${parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")}`);
-  return parsed.data;
+  return { initialAdmin: parsed.data, firstAdminEmail: null };
 }
 
 /** WEB_DIR, or apps/web/dist when it has been built. */

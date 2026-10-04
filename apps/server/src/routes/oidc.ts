@@ -5,6 +5,7 @@ import { actorOf } from "../actor";
 import { OidcError, type OidcIdentity, type OidcSignIn } from "../auth/oidc";
 import { hashPassword } from "../auth/passwords";
 import { insertResource } from "../calendar/instance-service";
+import { HttpError } from "../errors";
 import { setSessionCookie, type RouteContext } from "./context";
 
 const PENDING_COOKIE = "gp_oidc";
@@ -19,10 +20,20 @@ const safeRedirect = (value: unknown) => (typeof value === "string" && /^\/(?![/
  * first use by their verified email; creating one only when OIDC_AUTO_CREATE is on.
  */
 export function oidcRoutes(app: FastifyInstance, context: RouteContext, oidc: OidcSignIn | null): void {
-  const { db, config, sessions, instance } = context;
+  const { db, config, sessions, instance, firstRun } = context;
+  const firstAdminEmail = config.firstAdminEmail;
 
-  // What the sign-in page can offer besides email and password.
-  app.get("/api/auth/providers", async () => ({ oidc: oidc ? { name: oidc.settings.name } : null, passwordReset: context.mailer !== null }));
+  // What the sign-in page can offer besides email and password. `firstAdmin`: on a fresh install,
+  // signing in with the provider can create the admin (ADMIN_EMAIL or OIDC_ALLOWED_DOMAINS is set).
+  app.get("/api/auth/providers", async () => ({
+    oidc: oidc
+      ? {
+          name: oidc.settings.name,
+          ...((config.firstAdminEmail || oidc.settings.allowedDomains.length > 0) && (await firstRun.needsSetup()) ? { firstAdmin: true } : {}),
+        }
+      : null,
+    passwordReset: context.mailer !== null,
+  }));
   if (!oidc) return;
 
   const fail = (reply: FastifyReply, code: string) => reply.clearCookie(PENDING_COOKIE, { path: PENDING_PATH }).redirect(`/login?error=${code}`);
@@ -55,24 +66,39 @@ export function oidcRoutes(app: FastifyInstance, context: RouteContext, oidc: Oi
       return fail(reply, error.code);
     }
     const user = await accountFor(outcome.identity);
-    if (!user) return fail(reply, "sso_no_account");
+    if (typeof user === "string") return fail(reply, user);
     const session = await sessions.create(user.id, { viaSso: true });
     setSessionCookie(reply, config, session.token, session.expiresAt);
     return reply.clearCookie(PENDING_COOKIE, { path: PENDING_PATH }).redirect(outcome.redirect);
   });
 
-  /** The linked account; else the one with this (verified) email, linked now; else a new one if allowed. */
-  async function accountFor({ subject, email, name }: OidcIdentity): Promise<User | null> {
+  /**
+   * The linked account; else the one with this (verified) email, linked now; else a new one if
+   * allowed. On a fresh install (no accounts) only the first admin gets in: ADMIN_EMAIL, or — without
+   * it — someone from OIDC_ALLOWED_DOMAINS; anyone else waits until setup is done.
+   */
+  async function accountFor({ subject, email, name }: OidcIdentity): Promise<User | "sso_no_account" | "sso_setup_pending"> {
+    if (await firstRun.needsSetup()) {
+      const allowed = firstAdminEmail ? email === firstAdminEmail : oidc!.settings.allowedDomains.length > 0;
+      if (!allowed) return "sso_setup_pending";
+      try {
+        return await firstRun.createAdminFromSso({ email, name, subject });
+      } catch (error) {
+        // Someone finished setup a moment earlier: sign in like any other time.
+        if (error instanceof HttpError && error.status === 409) return accountFor({ subject, email, name });
+        throw error;
+      }
+    }
     const linked = await db.user.findUnique({ where: { oidcSubject: subject } });
     if (linked) return linked;
     const existing = await db.user.findUnique({ where: { email } });
     if (existing) {
-      if (existing.oidcSubject !== null) return null; // already tied to another account at the provider
+      if (existing.oidcSubject !== null) return "sso_no_account"; // already tied to another account at the provider
       // An account waiting for its first sign-in: the temporary password an admin handed out stops working.
       const retire = existing.mustChangePassword ? { mustChangePassword: false, passwordHash: await unusablePassword() } : {};
       return db.user.update({ where: { id: existing.id }, data: { oidcSubject: subject, ...retire } });
     }
-    if (!oidc!.settings.autoCreate) return null;
+    if (!oidc!.settings.autoCreate) return "sso_no_account";
     const passwordHash = await unusablePassword();
     const role = oidc!.settings.defaultRole;
     return instance.mutate(actorOf, "createUser", { email }, async (tx) => {
