@@ -13,15 +13,26 @@ test("a location's public holidays move the tasks of the people in it", async ({
   await page.goto("/team");
   await page.getByLabel("New location").fill("Lisbon office");
   await page.getByRole("button", { name: "Add location" }).click();
-  await page.getByLabel("Country of Lisbon office").selectOption({ label: "Portugal" });
+  await page.getByLabel("Country of Lisbon office").click();
+  await page.getByRole("combobox", { name: "Find a country" }).fill("portu");
+  await page.keyboard.press("Enter");
+  await expect(page.getByLabel("Country of Lisbon office")).toHaveText("Portugal");
   await page.getByLabel("Location of Ana").selectOption({ label: "Lisbon office" });
   await page.getByRole("button", { name: "Public holidays…" }).click();
   await page.getByLabel("Year").selectOption("2026");
   const list = page.getByRole("list", { name: "Public holidays for Lisbon office" });
   await expect(list.getByRole("checkbox", { name: /Christmas Day/ })).toBeChecked(); // days off by law come ticked
   await page.getByRole("button", { name: /^Add \d+ holidays$/ }).click();
-  await expect(page.getByText("Christmas Day")).toBeVisible(); // now in the holiday list, for the location
-  await expect(page.getByRole("listitem").filter({ hasText: /^Christmas Day/ })).toContainText("Lisbon office");
+  const holidays = page.getByRole("list", { name: "Holidays", exact: true });
+  await expect(holidays.getByRole("listitem").filter({ hasText: /^Christmas Day/ })).toContainText("Lisbon office"); // now in the holiday list, for the location
+  // The list narrows to one person's days off (their location's included), or to a name.
+  await page.getByLabel("Holidays for:").click();
+  await page.getByRole("combobox", { name: "Find a location or person" }).fill("Ana");
+  await page.keyboard.press("Enter");
+  await expect(holidays.getByText("Christmas Day")).toBeVisible();
+  await page.getByLabel("Find a holiday").fill("new year");
+  await expect(holidays.getByRole("listitem")).toHaveCount(1);
+  await expect(holidays).toContainText("New Year");
 
   // On the board, Ana's task now skips Friday 25: Thu 24, Mon 28, Tue 29.
   await page.goto(`/p/${projectId}`);
