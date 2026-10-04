@@ -25,6 +25,13 @@ model User {
   mustChangePassword Boolean   @default(false)
   /// single sign-on account ("<issuer>#<subject>"), once linked
   oidcSubject        String?   @unique
+  /// two-factor: the authenticator secret (encrypted; set while enrolling, kept once enabled)
+  totpSecret         String?
+  totpEnabled        Boolean   @default(false)
+  /// the last code's time step, so a code can't be used twice
+  totpLastStep       Int?
+  /// hashes of unused recovery codes
+  totpRecovery       String[]  @default([])
   createdAt          DateTime  @default(now())
   sessions           Session[]
   passwordTokens     PasswordToken[]

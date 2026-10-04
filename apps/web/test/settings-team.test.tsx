@@ -36,6 +36,22 @@ describe("settings", () => {
     expect(await screen.findByText(`Sent to ${ADMIN.email} — check your inbox.`)).toBeInTheDocument();
   });
 
+  it("turns two-factor on: scan or type the key, confirm a code, keep the recovery codes", async () => {
+    const api = signedIn(ADMIN);
+    api.on("GET /api/users", () => ({ body: { users: [ADMIN] } }));
+    api.on("GET /api/calendar", () => ({ body: CALENDAR }));
+    api.on("POST /api/auth/2fa/setup", () => ({ body: { secret: "JBSWY3DPEHPK3PXP", otpauthUrl: "otpauth://totp/x", qrSvg: "<svg></svg>" } }));
+    api.on("POST /api/auth/2fa/enable", () => ({ body: { recoveryCodes: ["aaaa-bbbb", "cccc-dddd"] } }));
+    const { user } = renderApp("/settings");
+    await user.click(await screen.findByRole("button", { name: "Turn on two-factor" }));
+    expect(await screen.findByLabelText("Setup key")).toHaveTextContent("JBSWY3DPEHPK3PXP");
+    expect(screen.getByRole("img", { name: "QR code for your authenticator app" })).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Code from the app"), "123456");
+    await user.click(screen.getByRole("button", { name: "Turn on" }));
+    expect(within(await screen.findByRole("list", { name: "Recovery codes" })).getAllByRole("listitem").map((item) => item.textContent)).toEqual(["aaaa-bbbb", "cccc-dddd"]);
+    expect(api.calls.find((c) => c.key === "POST /api/auth/2fa/enable")?.body).toEqual({ code: "123456" });
+  });
+
   it("saves working weekdays", async () => {
     const api = signedIn(ADMIN);
     api.on("GET /api/users", () => ({ body: { users: [ADMIN] } }));

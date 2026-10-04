@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, Navigate, useNavigate, useSearch } from "@tanstack/react-router";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { errorMessage } from "../api/client";
-import { currentUser, setupStatus, signInProviders, useChangePassword, useChoosePassword, useLogin, useRequestPasswordReset, useSetup } from "../api/queries";
+import { currentUser, setupStatus, signInProviders, useChangePassword, useChoosePassword, useLogin, useLoginCode, useRequestPasswordReset, useSetup } from "../api/queries";
 import { Button } from "../ui/button";
 import { ErrorText, Field } from "../ui/field";
 
@@ -74,8 +74,10 @@ export function LoginPage() {
   const providers = useQuery(signInProviders);
   const login = useLogin();
   const [values, setValues] = useState({ email: "", password: "" });
+  const [challenge, setChallenge] = useState<string | null>(null);
   // Already signed in (e.g. a second tab): go straight back.
   if (me.data && !login.isPending) return <Navigate to={redirect ?? "/"} />;
+  if (challenge) return <TwoFactorStep challenge={challenge} onDone={() => navigate({ to: redirect ?? "/" })} />;
   const sso = providers.data?.oidc;
   return (
     <Card title="Sign in" subtitle={sso ? undefined : "Use the email and password your admin gave you."}>
@@ -95,7 +97,7 @@ export function LoginPage() {
           <p className="flex items-center gap-2 text-xs text-muted before:h-px before:flex-1 before:bg-border after:h-px after:flex-1 after:bg-border">or with a password</p>
         </>
       ) : null}
-      <Form onSubmit={() => login.mutate(values, { onSuccess: () => navigate({ to: redirect ?? "/" }) })}>
+      <Form onSubmit={() => login.mutate(values, { onSuccess: (result) => (result.twoFactor ? setChallenge(result.twoFactor.challenge) : navigate({ to: redirect ?? "/" })) })}>
         <Field label="Email" type="email" value={values.email} onChange={(e) => setValues({ ...values, email: e.target.value })} required autoFocus />
         <Field label="Password" type="password" value={values.password} onChange={(e) => setValues({ ...values, password: e.target.value })} required />
         <ErrorText>{login.error ? errorMessage(login.error) : null}</ErrorText>
@@ -180,9 +182,11 @@ function ChoosePasswordForm({ token }: { token: string }) {
   const navigate = useNavigate();
   const choose = useChoosePassword();
   const [password, setPassword] = useState("");
+  // With two-factor on, an emailed link still needs the code.
+  if (choose.data?.twoFactor) return <TwoFactorStep challenge={choose.data.twoFactor.challenge} onDone={() => navigate({ to: "/" })} />;
   return (
     <Card title="Choose your password" subtitle="You'll use it with your email to sign in.">
-      <Form onSubmit={() => choose.mutate({ token, password }, { onSuccess: () => navigate({ to: "/" }) })}>
+      <Form onSubmit={() => choose.mutate({ token, password }, { onSuccess: (result) => void (result.user && navigate({ to: "/" })) })}>
         <Field label="New password (8+ characters)" type="password" value={password} onChange={(e) => setPassword(e.target.value)} minLength={8} required autoFocus />
         <ErrorText>{choose.error ? errorMessage(choose.error) : null}</ErrorText>
         <Button type="submit" variant="primary" disabled={choose.isPending}>
@@ -194,6 +198,24 @@ function ChoosePasswordForm({ token }: { token: string }) {
           Get a new link
         </Link>
       ) : null}
+    </Card>
+  );
+}
+
+/** The second sign-in step: a code from the authenticator app, or a recovery code. */
+function TwoFactorStep({ challenge, onDone }: { challenge: string; onDone: () => void }) {
+  const send = useLoginCode();
+  const [code, setCode] = useState("");
+  return (
+    <Card title="Two-factor sign-in" subtitle="Enter the 6-digit code from your authenticator app.">
+      <Form onSubmit={() => send.mutate({ challenge, code }, { onSuccess: onDone })}>
+        <Field label="Code" value={code} onChange={(e) => setCode(e.target.value)} inputMode="numeric" autoComplete="one-time-code" required autoFocus />
+        <ErrorText>{send.error ? errorMessage(send.error) : null}</ErrorText>
+        <Button type="submit" variant="primary" disabled={send.isPending}>
+          Sign in
+        </Button>
+      </Form>
+      <p className="text-xs text-muted">Lost your phone? Use one of your recovery codes instead, or ask an admin to turn two-factor off for you.</p>
     </Card>
   );
 }

@@ -20,7 +20,9 @@
     "fastify": "^5",
     "nodemailer": "^7",
     "openid-client": "^6",
+    "otpauth": "^9",
     "pg": "^8",
+    "qrcode": "^1",
     "tsx": "^4",
     "ws": "^8",
     "zod": "^4"
@@ -30,6 +32,7 @@
     "@types/node": "^24",
     "@types/nodemailer": "^7",
     "@types/pg": "^8",
+    "@types/qrcode": "^1",
     "@types/ws": "^8",
     "jose": "^6",
     "typescript": "~5.9.3",

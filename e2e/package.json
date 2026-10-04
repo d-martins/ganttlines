@@ -11,6 +11,7 @@
     "@testcontainers/postgresql": "^12",
     "@types/node": "^24",
     "@types/pg": "^8",
+    "otpauth": "^9",
     "pg": "^8",
     "testcontainers": "^12",
     "typescript": "~5.9.3"
