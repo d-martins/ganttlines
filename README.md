@@ -51,6 +51,19 @@ Delete the `COMPOSE_PROFILES` line, set `DATABASE_URL` and start as usual; only 
 runs. Use PostgreSQL 13 or newer and an empty database the user owns. A database on this same
 machine is reachable from the container as `host.docker.internal`.
 
+## Locations and public holidays
+
+Under Team & calendar → **Locations**, add the offices or countries people work in and put each
+team member in one. A holiday can be for everyone, for some people, or for whole locations — and
+it follows people when they move. Give a location a country (and region, where holidays differ by
+region) and **Public holidays…** suggests that year's holidays: the days off by law come ticked,
+others (observances, bank or school holidays) can be ticked too. Added holidays are ordinary
+holidays — rename, move or delete them as needed, and check them against official sources.
+
+Holiday data comes from [date-holidays](https://github.com/commenthol/date-holidays) (data under
+[CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/)), included in the app — nothing is
+fetched from the internet.
+
 ## Email
 
 With email set up, new users get an invitation to choose their own password (no temporary

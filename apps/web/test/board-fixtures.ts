@@ -18,14 +18,17 @@ export function projectState(rows: ProjectStateDto["rows"], version = 5): Projec
   return { project: { id: PROJECT_ID, name: "Launch", version, archived: false }, rows };
 }
 
-export const ANA: ResourceDto = { id: "r-ana", name: "Ana Silva", avatarColor: "#e0569b", inactive: false, userId: "u-admin" };
+export const ANA: ResourceDto = { id: "r-ana", name: "Ana Silva", avatarColor: "#e0569b", inactive: false, userId: "u-admin", locationId: null };
 
 /** Mon–Fri, Monday 2026-10-05 off for everyone, Ana away 2026-10-07. */
 export const CALENDAR: CalendarDto = {
   instanceVersion: 1,
   workingWeekdays: [1, 2, 3, 4, 5],
-  holidays: [{ id: "h1", name: "Republic Day", startDate: "2026-10-05", endDate: "2026-10-05", appliesTo: "all" }],
+  holidays: [
+    { id: "h1", name: "Republic Day", startDate: "2026-10-05", endDate: "2026-10-05", appliesTo: "all", target: { all: true, resourceIds: [], locationIds: [] } },
+  ],
   timeOff: [{ id: "t1", resourceId: ANA.id, startDate: "2026-10-07", endDate: "2026-10-07", note: "" }],
+  locations: [],
 };
 
 /** Stands in for the browser WebSocket: opens on the next tick, records what the app sends. */

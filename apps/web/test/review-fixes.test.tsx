@@ -3,8 +3,8 @@ import { fireEvent, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { ADMIN, fakeApi, GUEST, project, renderApp, screen, signedIn } from "./utils";
 
-const CALENDAR: CalendarDto = { instanceVersion: 1, workingWeekdays: [1, 2, 3, 4, 5], holidays: [], timeOff: [] };
-const ANA: ResourceDto = { id: "r-ana", name: "Ana", avatarColor: "#4f8cff", inactive: false, userId: null };
+const CALENDAR: CalendarDto = { instanceVersion: 1, workingWeekdays: [1, 2, 3, 4, 5], holidays: [], timeOff: [], locations: [] };
+const ANA: ResourceDto = { id: "r-ana", name: "Ana", avatarColor: "#4f8cff", inactive: false, userId: null, locationId: null };
 const RUDY: UserDto = { id: "u-rudy", email: "rudy@example.com", name: "Rudy", role: "editor", mustChangePassword: false, twoFactor: false };
 const unauthorized = { status: 401, body: { error: "unauthorized", message: "Please sign in" } };
 

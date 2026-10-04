@@ -1,4 +1,7 @@
 import type {
+  LocationBody,
+  LocationDto,
+  PublicHolidayDto,
   AboutDto,
   ActivityDto,
   BaselineDto,
@@ -200,6 +203,32 @@ export const useSaveHoliday = () =>
 export const useDeleteHoliday = () => useApiMutation((id: string) => api<void>("DELETE", `/api/holidays/${id}`), refreshCalendar);
 export const useSaveTimeOff = () =>
   useApiMutation(({ id, ...body }: TimeOffBody & { id?: string }) => (id ? api("PUT", `/api/time-off/${id}`, body) : api("POST", "/api/time-off", body)), refreshCalendar);
+export const useSaveLocation = () =>
+  useApiMutation(
+    ({ id, ...body }: LocationBody & { id?: string }) => (id ? api<{ location: LocationDto }>("PUT", `/api/locations/${id}`, body) : api<{ location: LocationDto }>("POST", "/api/locations", body)),
+    refreshCalendar,
+  );
+export const useDeleteLocation = () => useApiMutation((id: string) => api<void>("DELETE", `/api/locations/${id}`), refreshCalendar);
+export const useImportHolidays = () =>
+  useApiMutation(({ id, holidays }: { id: string; holidays: { name: string; startDate: string; endDate: string }[] }) => api<{ added: number }>("POST", `/api/locations/${id}/holidays`, { holidays }), refreshCalendar);
+/** Countries (and their regions) with public holiday data. */
+export const holidayCountries = queryOptions({
+  queryKey: ["public-holidays", "countries"],
+  queryFn: () => api<{ countries: { code: string; name: string }[] }>("GET", "/api/public-holidays/countries"),
+  staleTime: Infinity,
+});
+export const holidayRegions = (country: string) =>
+  queryOptions({
+    queryKey: ["public-holidays", "regions", country],
+    queryFn: () => api<{ regions: { code: string; name: string }[] }>("GET", `/api/public-holidays/countries/${country}/regions`),
+    staleTime: Infinity,
+  });
+/** A location's public holidays for a year, marking those already added. */
+export const locationPublicHolidays = (id: string, year: number) =>
+  queryOptions({
+    queryKey: [...keys.calendar, "public-holidays", id, year],
+    queryFn: () => api<{ holidays: PublicHolidayDto[] }>("GET", `/api/locations/${id}/public-holidays?year=${year}`),
+  });
 export const useDeleteTimeOff = () => useApiMutation((id: string) => api<void>("DELETE", `/api/time-off/${id}`), refreshCalendar);
 
 /** Highlights of one project (the server broadcasts the new list; the refetch covers a missed one). */

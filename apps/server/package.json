@@ -17,6 +17,7 @@
     "@ganttlines/engine": "workspace:^",
     "@ganttlines/protocol": "workspace:^",
     "@node-rs/argon2": "^2",
+    "date-holidays": "^3",
     "fastify": "^5",
     "nodemailer": "^7",
     "openid-client": "^6",

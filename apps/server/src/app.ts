@@ -18,6 +18,7 @@ import { KeyedQueue } from "./queue";
 import { Hub } from "./realtime/hub";
 import { aboutRoutes } from "./routes/about";
 import { activityRoutes } from "./routes/activity";
+import { locationRoutes } from "./routes/locations";
 import { oidcRoutes } from "./routes/oidc";
 import { twoFactorRoutes } from "./routes/two-factor";
 import { authRoutes } from "./routes/auth";
@@ -149,6 +150,7 @@ export async function buildApp({ db, config, now, logger = false, updates = new 
   activityRoutes(app, context);
   aboutRoutes(app, context, updates);
   twoFactorRoutes(app, context);
+  locationRoutes(app, context);
   oidcRoutes(app, context, config.oidc ? new OidcSignIn(config.oidc, new URL("/api/auth/oidc/callback", config.publicUrl).toString(), config.sessionSecret) : null);
   if (config.webDir) await webRoutes(app, config.webDir);
   return app;

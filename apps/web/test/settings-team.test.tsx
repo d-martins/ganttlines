@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import { within } from "@testing-library/react";
 import { ADMIN, renderApp, screen, signedIn, VIEWER } from "./utils";
 
-const CALENDAR: CalendarDto = { instanceVersion: 1, workingWeekdays: [1, 2, 3, 4, 5], holidays: [], timeOff: [] };
-const ANA: ResourceDto = { id: "r-ana", name: "Ana", avatarColor: "#4f8cff", inactive: false, userId: null };
+const CALENDAR: CalendarDto = { instanceVersion: 1, workingWeekdays: [1, 2, 3, 4, 5], holidays: [], timeOff: [], locations: [] };
+const ANA: ResourceDto = { id: "r-ana", name: "Ana", avatarColor: "#4f8cff", inactive: false, userId: null, locationId: null };
 
 describe("settings", () => {
   it("lets admins add users and shows the temporary password", async () => {
@@ -130,13 +130,14 @@ describe("team & calendar", () => {
       startDate: "2026-10-08",
       endDate: "2026-10-08",
       appliesTo: ["r-ana"],
+      locationIds: [],
     });
   });
 
   it("asks for confirmation before deleting a holiday", async () => {
     const api = signedIn(ADMIN);
     api.on("GET /api/resources", () => ({ body: { resources: [ANA] } }));
-    api.on("GET /api/calendar", () => ({ body: { ...CALENDAR, holidays: [{ id: "h1", name: "Carnival", startDate: "2027-02-09", endDate: "2027-02-09", appliesTo: "all" }] } }));
+    api.on("GET /api/calendar", () => ({ body: { ...CALENDAR, holidays: [{ id: "h1", name: "Carnival", startDate: "2027-02-09", endDate: "2027-02-09", appliesTo: "all", target: { all: true, resourceIds: [], locationIds: [] } }] } }));
     api.on("DELETE /api/holidays/h1", () => ({ status: 204 }));
     const { user } = renderApp("/team");
     await user.click(await screen.findByRole("button", { name: "Delete" }));
@@ -160,6 +161,45 @@ describe("team & calendar", () => {
     expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
+  });
+
+  it("keeps locations: people belong to one, and a country's public holidays can be added to it", async () => {
+    const LISBON = { id: "l-lisbon", name: "Lisbon office", country: "PT", region: null };
+    const api = signedIn(ADMIN);
+    api.on("GET /api/resources", () => ({ body: { resources: [ANA] } }));
+    api.on("GET /api/calendar", () => ({ body: { ...CALENDAR, locations: [LISBON] } }));
+    api.on("GET /api/public-holidays/countries", () => ({ body: { countries: [{ code: "PT", name: "Portugal" }] } }));
+    api.on("GET /api/public-holidays/countries/PT/regions", () => ({ body: { regions: [] } }));
+    api.on("GET /api/locations/l-lisbon/public-holidays", () => ({
+      body: {
+        holidays: [
+          { name: "New Year's Day", startDate: "2026-01-01", endDate: "2026-01-01", type: "public", added: false },
+          { name: "Carnival", startDate: "2026-02-17", endDate: "2026-02-17", type: "observance", added: false },
+          { name: "Freedom Day", startDate: "2026-04-25", endDate: "2026-04-25", type: "public", added: true },
+        ],
+      },
+    }));
+    api.on("POST /api/locations", (body) => ({ status: 201, body: { location: { id: "l2", ...(body as object) } } }));
+    api.on("PATCH /api/resources/r-ana", (body) => ({ body: { resource: { ...ANA, ...(body as object) } } }));
+    api.on("POST /api/locations/l-lisbon/holidays", () => ({ status: 201, body: { added: 1 } }));
+    const { user } = renderApp("/team");
+
+    await user.selectOptions(await screen.findByLabelText("Location of Ana"), "Lisbon office");
+    expect(api.calls.find((c) => c.key === "PATCH /api/resources/r-ana")?.body).toEqual({ locationId: "l-lisbon" });
+    await user.type(screen.getByLabelText("New location"), "Munich office");
+    await user.click(screen.getByRole("button", { name: "Add location" }));
+    expect(api.calls.find((c) => c.key === "POST /api/locations")?.body).toEqual({ name: "Munich office" });
+
+    // Public holidays: days off by law come ticked, others not; ones already added can't be added again.
+    await user.click(screen.getByRole("button", { name: "Public holidays…" }));
+    const list = await screen.findByRole("list", { name: "Public holidays for Lisbon office" });
+    expect(await within(list).findByRole("checkbox", { name: /New Year's Day/ })).toBeChecked();
+    expect(within(list).getByRole("checkbox", { name: /Carnival/ })).not.toBeChecked();
+    expect(within(list).getByRole("checkbox", { name: /Freedom Day/ })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Add 1 holiday" }));
+    expect(api.calls.find((c) => c.key === "POST /api/locations/l-lisbon/holidays")?.body).toEqual({
+      holidays: [{ name: "New Year's Day", startDate: "2026-01-01", endDate: "2026-01-01" }],
+    });
   });
 
   it("is read-only for viewers", async () => {

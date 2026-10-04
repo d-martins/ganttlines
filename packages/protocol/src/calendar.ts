@@ -22,13 +22,42 @@ function checkRange(value: { startDate: string; endDate: string }, ctx: z.Refine
 }
 
 export const CreateResourceBody = z.strictObject({ name, avatarColor: color.optional() });
-export const UpdateResourceBody = z.strictObject({ name: name.optional(), avatarColor: color.optional(), inactive: z.boolean().optional() });
+export const UpdateResourceBody = z.strictObject({
+  name: name.optional(),
+  avatarColor: color.optional(),
+  inactive: z.boolean().optional(),
+  /** where they work (null: no location) */
+  locationId: z.uuid().nullable().optional(),
+});
+/** ISO 3166-1 country code ("PT") and a region code within it ("BY"), for public holidays. */
+const country = z.string().regex(/^[A-Z]{2}$/, "Use a two-letter country code");
+const region = z.string().regex(/^[A-Z0-9]{1,6}$/i, "Use a region code");
+export const LocationBody = z.strictObject({ name, country: country.nullable().default(null), region: region.nullable().default(null) });
+/** Public holidays to add to a location (picked from the suggested list; still editable afterwards). */
+export const ImportHolidaysBody = z.strictObject({
+  holidays: z
+    .array(z.strictObject({ name, startDate: date, endDate: date }).superRefine(checkRange))
+    .min(1)
+    .max(100),
+});
 export const WorkingWeekdaysBody = z.strictObject({
   workingWeekdays: z.array(z.int().min(0).max(6)).min(1).max(7).refine((days) => new Set(days).size === days.length, "Duplicate weekday"),
 });
+/** A holiday for everyone, or for some people and/or everyone in some locations. */
 export const HolidayBody = z
-  .strictObject({ name, startDate: date, endDate: date, appliesTo: z.union([z.literal("all"), z.array(z.uuid()).min(1).max(1000)]) })
-  .superRefine(checkRange);
+  .strictObject({
+    name,
+    startDate: date,
+    endDate: date,
+    appliesTo: z.union([z.literal("all"), z.array(z.uuid()).max(1000)]),
+    locationIds: z.array(z.uuid()).max(100).default([]),
+  })
+  .superRefine(checkRange)
+  .superRefine((value, ctx) => {
+    if (value.appliesTo !== "all" && value.appliesTo.length === 0 && value.locationIds.length === 0) {
+      ctx.addIssue({ code: "custom", message: "Choose who the holiday is for", path: ["appliesTo"] });
+    }
+  });
 export const TimeOffBody = z
   .strictObject({ resourceId: z.uuid(), startDate: date, endDate: date, note: z.string().max(500).default("") })
   .superRefine(checkRange);
@@ -36,7 +65,9 @@ export const TimeOffBody = z
 export type CreateResourceBody = z.infer<typeof CreateResourceBody>;
 export type UpdateResourceBody = z.infer<typeof UpdateResourceBody>;
 export type WorkingWeekdaysBody = z.infer<typeof WorkingWeekdaysBody>;
-export type HolidayBody = z.infer<typeof HolidayBody>;
+export type HolidayBody = z.input<typeof HolidayBody>;
+export type LocationBody = z.input<typeof LocationBody>;
+export type ImportHolidaysBody = z.infer<typeof ImportHolidaysBody>;
 export type TimeOffBody = z.input<typeof TimeOffBody>;
 
 export interface ResourceDto {
@@ -45,6 +76,33 @@ export interface ResourceDto {
   avatarColor: string;
   inactive: boolean;
   userId: string | null;
+  locationId: string | null;
+}
+
+export interface LocationDto {
+  id: string;
+  name: string;
+  country: string | null;
+  region: string | null;
+}
+
+/**
+ * A holiday as the engine schedules it (`appliesTo`: everyone, or the people it currently covers —
+ * including everyone in its locations) plus what it was set up for, for editing.
+ */
+export interface HolidayDto extends Holiday {
+  target: { all: boolean; resourceIds: string[]; locationIds: string[] };
+}
+
+/** A public holiday suggested for a location (from the date-holidays data, CC BY-SA 3.0). */
+export interface PublicHolidayDto {
+  name: string;
+  startDate: string;
+  endDate: string;
+  /** "public" (days off by law), "bank", "optional", "school" or "observance" */
+  type: string;
+  /** already added to this location */
+  added: boolean;
 }
 
 export interface TimeOffDto extends TimeOff {
@@ -55,6 +113,7 @@ export interface TimeOffDto extends TimeOff {
 export interface CalendarDto {
   instanceVersion: number;
   workingWeekdays: number[];
-  holidays: Holiday[];
+  holidays: HolidayDto[];
   timeOff: TimeOffDto[];
+  locations: LocationDto[];
 }
