@@ -118,6 +118,12 @@ export class PgLock implements ProjectLock {
   async run<T>(key: string, work: () => Promise<T>): Promise<T> {
     const client = await this.pool.connect();
     let healthy = true;
+    // While the lock is held, nothing else listens for this connection's errors (a dropped
+    // connection would otherwise crash the server); a broken one is thrown away on release.
+    const broken = () => {
+      healthy = false;
+    };
+    client.on("error", broken);
     try {
       await client.query("SELECT pg_advisory_lock($1, hashtext($2))", [LOCK_NAMESPACE, key]).catch((error: unknown) => {
         healthy = false;
@@ -132,6 +138,7 @@ export class PgLock implements ProjectLock {
         });
       }
     } finally {
+      client.off("error", broken);
       client.release(!healthy);
     }
   }

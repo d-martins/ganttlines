@@ -130,3 +130,22 @@ describe("project lock (postgres)", () => {
     await Promise.all(pools.map((pool) => pool.end()));
   });
 });
+
+describe("project lock (postgres): a dropped connection", () => {
+  it("doesn't crash the server when the database connection holding a lock drops mid-work", async () => {
+    const pool = new pg.Pool({ connectionString: inject("databaseUrl"), max: 2, application_name: "ganttlines-lock-test" });
+    pool.on("error", () => undefined);
+    const lock = new PgLock(pool);
+    const admin = new pg.Client({ connectionString: inject("databaseUrl") });
+    await admin.connect();
+    const result = await lock.run("project:z", async () => {
+      await admin.query("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'ganttlines-lock-test'");
+      await new Promise((resolve) => setTimeout(resolve, 200)); // the dropped connection reports its error meanwhile
+      return "finished";
+    });
+    expect(result).toBe("finished");
+    expect(await lock.run("project:z", async () => "again")).toBe("again"); // the broken connection was thrown away
+    await admin.end();
+    await pool.end();
+  });
+});
