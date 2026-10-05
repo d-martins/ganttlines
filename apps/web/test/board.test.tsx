@@ -193,6 +193,16 @@ describe("board", () => {
     expect(router.state.location.search).toEqual({});
   });
 
+  it("sends you to sign in when the session ends while a board loads", async () => {
+    const { api, router } = openBoard();
+    // The session ends exactly when the board asks for its state: only that answer can reveal it.
+    let ended = false;
+    const signedOut = { status: 401, body: { error: "unauthorized", message: "Please sign in" } };
+    api.on("GET /api/auth/me", () => (ended ? signedOut : { body: { user: ADMIN } }));
+    api.on(`GET /api/projects/${PROJECT_ID}/state`, () => ((ended = true), signedOut));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
+  });
+
   it("explains projects that are gone or off limits", async () => {
     const { api } = openBoard();
     api.on(`GET /api/projects/${PROJECT_ID}/state`, () => ({ status: 404, body: { error: "not_found", message: "Project not found" } }));

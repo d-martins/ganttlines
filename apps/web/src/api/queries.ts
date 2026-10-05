@@ -19,7 +19,6 @@ import type {
   HighlightDto,
   HolidayBody,
   ProjectDto,
-  ProjectStateDto,
   ResourceDto,
   ShareInfoDto,
   ShareLinkDto,
@@ -107,9 +106,6 @@ export const resourceList = queryOptions({
   queryKey: keys.resources,
   queryFn: async () => (await api<{ resources: ResourceDto[] }>("GET", "/api/resources")).resources,
 });
-
-/** The board's rows are kept by the sync client (not the query cache); this is its first load. */
-export const loadProjectState = (projectId: string) => api<ProjectStateDto>("GET", `/api/projects/${projectId}/state`);
 
 export const highlightList = (projectId: string) =>
   queryOptions({

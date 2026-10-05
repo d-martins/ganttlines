@@ -641,6 +641,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@ganttlines/web@workspace:apps/web"
   dependencies:
+    "@ganttlines/client": "workspace:^"
     "@ganttlines/engine": "workspace:^"
     "@ganttlines/protocol": "workspace:^"
     "@radix-ui/react-context-menu": "npm:^2"

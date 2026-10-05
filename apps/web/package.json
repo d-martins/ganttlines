@@ -11,6 +11,7 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
+    "@ganttlines/client": "workspace:^",
     "@ganttlines/engine": "workspace:^",
     "@ganttlines/protocol": "workspace:^",
     "@radix-ui/react-context-menu": "^2",

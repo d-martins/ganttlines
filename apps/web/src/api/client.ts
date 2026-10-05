@@ -1,15 +1,7 @@
+import { ApiError, createApi } from "@ganttlines/client";
 import { SHARE_TOKEN_HEADER } from "@ganttlines/protocol/constants";
 
-/** A failed API call: `code` is the server's machine-readable `error` (e.g. "unauthorized"). */
-export class ApiError extends Error {
-  constructor(
-    readonly status: number,
-    readonly code: string,
-    message: string,
-  ) {
-    super(message);
-  }
-}
+export { ApiError };
 
 let shareToken: string | null = null;
 
@@ -18,26 +10,14 @@ export function setShareToken(token: string | null): void {
   shareToken = token;
 }
 
+/** The share link's token while in link mode (the board's live link carries it too). */
+export const currentShareToken = (): string | null => shareToken;
+
 /** JSON request to the server (same origin, session cookie). Resolves to undefined for 204. */
-export async function api<T>(method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE", path: string, body?: unknown): Promise<T> {
-  const headers: Record<string, string> = {};
-  if (body !== undefined) headers["content-type"] = "application/json";
-  if (shareToken) headers[SHARE_TOKEN_HEADER] = shareToken;
-  let response: Response;
-  try {
-    response = await fetch(path, { method, credentials: "same-origin", headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
-  } catch {
-    throw new ApiError(0, "network", "Can't reach the server. Check your connection.");
-  }
-  if (response.status === 204) return undefined as T;
-  const data = (await response.json().catch(() => null)) as { error?: string; message?: string } | null;
-  if (!response.ok) {
-    // No JSON body: a proxy or gateway answered because the server itself is down or restarting.
-    if (!data && response.status >= 500) throw new ApiError(response.status, "unavailable", "The server isn't responding. Try again in a moment.");
-    throw new ApiError(response.status, data?.error ?? "http_error", data?.message ?? response.statusText);
-  }
-  return data as T;
-}
+export const api = createApi(
+  (path, init) => fetch(path, { ...init, credentials: "same-origin" }),
+  (): Record<string, string> => (shareToken ? { [SHARE_TOKEN_HEADER]: shareToken } : {}),
+);
 
 /** A readable message for any thrown error (API errors carry the server's own wording). */
 export function errorMessage(error: unknown): string {

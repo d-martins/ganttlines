@@ -6,10 +6,11 @@ import type { BoardSearch } from "../router";
 import { useEffect, useMemo, useState } from "react";
 import { useStore } from "zustand";
 import { ApiError, errorMessage } from "../api/client";
-import { baselineSnapshot, calendar, currentUser, highlightList, keys, loadProjectState, resourceList, upsertComment } from "../api/queries";
+import { baselineSnapshot, calendar, currentUser, highlightList, keys, resourceList, upsertComment } from "../api/queries";
+import { workspace } from "../workspace";
 import { lastProjectKey } from "../projects/project-pages";
 import { writePref } from "../storage";
-import { BoardSync, type BoardEvent, type SocketLike } from "../sync/board-sync";
+import { BoardSync, type BoardEvent } from "../sync/board-sync";
 import { Button } from "../ui/button";
 import { toast } from "../ui/toast";
 import { BoardContext, type BoardContextValue } from "./board-context";
@@ -17,10 +18,6 @@ import { replay } from "./pending";
 import { resetSelection } from "./selection";
 import { useActiveBoard } from "./active-board";
 import { Board } from "./board";
-
-/** In link mode the socket carries the link's token (the REST client sends it as a header). */
-const webSocketUrl = (shareToken: string | null) =>
-  `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws${shareToken ? `?share=${encodeURIComponent(shareToken)}` : ""}`;
 
 /** The board opened through a share link: its token and whether the link lets people edit. */
 export interface ShareAccess {
@@ -72,13 +69,15 @@ function useBoardSync(projectId: string, shareToken: string | null): BoardSync |
   const client = useQueryClient();
   const [sync, setSync] = useState<BoardSync | null>(null);
   useEffect(() => {
+    const board = workspace().openBoard(projectId);
     const next = new BoardSync({
       projectId,
-      // Through the query cache, so a lost session is noticed like any other request.
-      loadState: () => client.fetchQuery({ queryKey: [...keys.project(projectId), "state"], queryFn: () => loadProjectState(projectId), staleTime: 0, gcTime: 0 }),
-      openSocket: () => new WebSocket(webSocketUrl(shareToken)) as unknown as SocketLike,
+      connection: {
+        ...board,
+        // Through the query cache, so a lost session is noticed like any other request.
+        load: () => client.fetchQuery({ queryKey: [...keys.project(projectId), "state"], queryFn: () => board.load(), staleTime: 0, gcTime: 0 }),
+      },
       onEvent: (event) => applyEvent(client, projectId, event),
-      isFatal: (error) => error instanceof ApiError && error.status >= 400 && error.status < 500,
     });
     setSync(next);
     useActiveBoard.setState({ sync: next });
