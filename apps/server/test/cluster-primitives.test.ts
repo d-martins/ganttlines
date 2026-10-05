@@ -7,6 +7,33 @@ import type { ClusterEvent } from "../src/cluster/types";
 describe("mode guard", () => {
   const url = () => inject("databaseUrl");
 
+  it("waits a while for the other server to stop (deploys that start the new one first)", async () => {
+    const old = await holdModeGuard(url(), "single");
+    const waiting: string[] = [];
+    const next = holdModeGuard(url(), "single", { waitMs: 5000, retryMs: 100, log: (message) => waiting.push(message) });
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await old.release();
+    await (await next).release();
+    expect(waiting[0]).toMatch(/Waiting for the other GanttLines server/);
+  });
+
+  it("keeps holding the guard when its database connection drops (and doesn't crash)", async () => {
+    const guard = await holdModeGuard(url(), "single", { retryMs: 100 });
+    const admin = new pg.Client({ connectionString: url() });
+    await admin.connect();
+    await admin.query("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'ganttlines-guard'");
+    let retaken = false;
+    for (let i = 0; i < 50 && !retaken; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const { rows } = await admin.query("SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory' AND classid = 7101 AND granted");
+      retaken = rows[0].n === 1;
+    }
+    expect(retaken).toBe(true);
+    await expect(holdModeGuard(url(), "single")).rejects.toThrow("Another GanttLines server");
+    await admin.end();
+    await guard.release();
+  });
+
   it("lets postgres-mode copies share the database, but never with a single-mode one", async () => {
     const a = await holdModeGuard(url(), "postgres");
     const b = await holdModeGuard(url(), "postgres");
