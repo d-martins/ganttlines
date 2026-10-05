@@ -21,16 +21,16 @@ export function authRoutes(
   app.post("/api/auth/login", async (request, reply) => {
     const body = parseBody(LoginBody, request.body);
     const keys = [`ip:${request.ip}`, `email:${body.email}`];
-    if (loginLimiter.isBlocked(keys)) {
+    if (await loginLimiter.isBlocked(keys)) {
       throw new HttpError(429, "too_many_attempts", "Too many failed attempts, try again in a few minutes");
     }
     const user = await db.user.findUnique({ where: { email: body.email } });
     const passwordOk = await verifyPassword(user?.passwordHash ?? (await dummyHash), body.password);
     if (!user || !passwordOk) {
-      loginLimiter.recordFailure(keys);
+      await loginLimiter.recordFailure(keys);
       throw invalidCredentials();
     }
-    loginLimiter.reset(keys);
+    await loginLimiter.reset(keys);
     // Two-factor: no session yet — the code comes next, with this proof that the password was right.
     if (user.totpEnabled) return { twoFactor: { challenge: twoFactor.challenge(user.id) } };
     const session = await sessions.create(user.id);
@@ -46,8 +46,8 @@ export function authRoutes(
     const { email } = parseBody(ForgotPasswordBody, request.body);
     const keys = [`forgot-ip:${request.ip}`, `forgot:${email}`];
     if (!mailer) throw new HttpError(503, "mail_not_configured", "Email isn't set up on this server — ask an admin to reset your password");
-    if (loginLimiter.isBlocked(keys)) throw new HttpError(429, "too_many_attempts", "Too many requests, try again in a few minutes");
-    loginLimiter.recordFailure(keys); // every request counts: it sends an email
+    if (await loginLimiter.isBlocked(keys)) throw new HttpError(429, "too_many_attempts", "Too many requests, try again in a few minutes");
+    await loginLimiter.recordFailure(keys); // every request counts: it sends an email
     const user = await db.user.findUnique({ where: { email } });
     if (user) {
       const link = new URL(`/reset-password?token=${await passwordTokens.issue(user.id, "reset")}`, config.publicUrl).toString();
@@ -90,14 +90,14 @@ export function authRoutes(
     const user = requireUser(request, "guest", { allowPendingPasswordChange: true, allowTwoFactorSetup: true });
     const body = parseBody(ChangePasswordBody, request.body);
     const keys = [`user:${user.id}`];
-    if (loginLimiter.isBlocked(keys)) {
+    if (await loginLimiter.isBlocked(keys)) {
       throw new HttpError(429, "too_many_attempts", "Too many failed attempts, try again in a few minutes");
     }
     if (!(await verifyPassword(user.passwordHash, body.currentPassword))) {
-      loginLimiter.recordFailure(keys);
+      await loginLimiter.recordFailure(keys);
       throw invalidCredentials();
     }
-    loginLimiter.reset(keys);
+    await loginLimiter.reset(keys);
     await db.user.update({
       where: { id: user.id },
       data: { passwordHash: await hashPassword(body.newPassword), mustChangePassword: false },

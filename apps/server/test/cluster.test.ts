@@ -186,7 +186,7 @@ describe("several copies: revocations hold even if a notification is lost", () =
 describe("several copies: access checks on open connections", () => {
   it("closes a board connection once its person may no longer see the board, even after a rejected command", async () => {
     const config = { ...testConfig, cluster: "postgres" as const, databaseUrl: inject("databaseUrl") };
-    const b = await testApp({ db: t.db, config, liveRevalidateMs: 100 });
+    const b = await testApp({ db: t.db, config, liveRevalidateMs: 1000 }); // long enough for the command to be answered first
     copies.push(b);
     const admin = await setupAdmin(b);
     const ed = await createUser(b, admin, { email: "ed@example.com", name: "Ed", role: "editor" });
@@ -247,5 +247,16 @@ describe("several copies: undo", () => {
     const redo = await a.inject({ method: "POST", url: `/api/projects/${projectId}/redo`, headers: { cookie: ed.cookie }, payload: { commandId: randomUUID() } });
     expect(redo.statusCode).toBe(200);
     expect((await state(b, ed.cookie, projectId)).rows.map((row) => row.title)).toEqual(["Design"]);
+  });
+});
+
+describe("several copies: rate limits", () => {
+  it("counts failed sign-ins on every copy together (keys stored hashed)", async () => {
+    const { a, b } = await twoCopies();
+    const wrong = (app: FastifyInstance) => app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "ed@example.com", password: "wrong" } });
+    for (let i = 0; i < 10; i++) await wrong(i % 2 ? b : a);
+    expect((await wrong(a)).statusCode).toBe(429);
+    expect((await wrong(b)).statusCode).toBe(429);
+    expect(await t.db.rateCounter.count({ where: { key: { contains: "ed@example.com" } } })).toBe(0);
   });
 });

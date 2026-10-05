@@ -9,7 +9,7 @@ import { OidcSignIn } from "./auth/oidc";
 import { PasswordTokens } from "./auth/password-tokens";
 import { TwoFactor } from "./auth/two-factor";
 import { smtpMailer, type Mailer } from "./mail/mailer";
-import { LoginLimiter } from "./auth/login-limiter";
+import { MemoryLimiter, PgLimiter, type LimitOptions } from "./auth/limiter";
 import { SESSION_COOKIE, SessionStore } from "./auth/sessions";
 import { TwoFactorPolicy } from "./auth/two-factor-policy";
 import { createCluster } from "./cluster";
@@ -129,12 +129,16 @@ export async function buildApp({
   projects.onApplied((event) => live.patch(event));
   projects.onMetaChange((project) => live.projectMeta(project));
   instance.onChange((snapshot) => live.instanceChanged(snapshot.version));
+  // Rate limits: in memory with one copy; counted in the database (hashed keys) with several.
+  const nowMs = now ? () => now().getTime() : Date.now;
+  const limit = (name: string, options?: LimitOptions) =>
+    cluster.mode === "postgres" ? new PgLimiter(db, name, options, nowMs) : new MemoryLimiter(nowMs, options);
   const context: RouteContext = {
     db,
     config,
     cluster,
     sessions: new SessionStore(db, config.sessionSecret, now),
-    loginLimiter: new LoginLimiter(now ? () => now().getTime() : undefined),
+    loginLimiter: limit("login"),
     instance,
     projects,
     hub,
@@ -142,7 +146,7 @@ export async function buildApp({
     live,
     presence,
     boardQueue: new KeyedQueue(),
-    shareLimiter: new LoginLimiter(now ? () => now().getTime() : undefined),
+    shareLimiter: limit("share"),
     firstRun: new FirstRun(db, instance, announce, setupCode),
     mailer: mailer !== undefined ? mailer : config.smtp ? smtpMailer(config.smtp) : null,
     passwordTokens: new PasswordTokens(db, now),
@@ -151,7 +155,8 @@ export async function buildApp({
     mcpSettings: new McpSettings(db),
     oauthClients: new OAuthClients(db, fetchClientMetadata, clock),
     oauthGrants: new OAuthGrants(db, config.sessionSecret, clock),
-    registerLimiter: new LoginLimiter(now ? () => now().getTime() : undefined),
+    registerLimiter: limit("register"),
+    mcpBudget: limit("mcp", { windowMs: 60_000, max: 300 }),
     teamEdits: new TeamEdits(instance),
   };
   await context.firstRun.start(config.initialAdmin);
