@@ -1,4 +1,5 @@
-import { MCP_SCOPE_LABELS, MCP_SCOPES, ROLES, TWO_FACTOR_REQUIREMENTS, type McpConnectionDto, type McpScope, type Role, type TwoFactorRequirement, type UserDto } from "@ganttlines/protocol";
+import { MCP_SCOPE_LABELS, MCP_SCOPES, ROLES, TWO_FACTOR_REQUIREMENTS } from "@ganttlines/protocol/constants";
+import type { McpConnectionDto, McpScope, Role, TwoFactorRequirement, UserDto } from "@ganttlines/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { errorMessage, latestError } from "../api/client";

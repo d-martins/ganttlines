@@ -13,10 +13,28 @@ import { today } from "./format";
 import { useBoard } from "./board-context";
 import { useCollapsed } from "./collapse";
 import { ListHeader, ListRows, useListKeys } from "./list/task-list";
-import { DetailsPanel } from "./panel/details-panel";
 import { useSelection } from "./selection";
 import { boardModel, type CompareMode } from "./model";
 import { useBoardView } from "./view-store";
+
+type DetailsPanelType = typeof import("./panel/details-panel").DetailsPanel;
+/** The details panel brings the rich-text editor along: a separate download, fetched once a board is shown. */
+let loadedPanel: DetailsPanelType | null = null;
+function useDetailsPanel(): DetailsPanelType | null {
+  const [panel, setPanel] = useState(() => loadedPanel);
+  useEffect(() => {
+    if (panel) return;
+    let current = true;
+    void import("./panel/details-panel").then((module) => {
+      loadedPanel = module.DetailsPanel;
+      if (current) setPanel(() => module.DetailsPanel);
+    });
+    return () => {
+      current = false;
+    };
+  }, [panel]);
+  return panel;
+}
 
 const HEADER_HEIGHT = 48;
 /** how far inside the chart's left edge a revealed bar starts */
@@ -74,6 +92,7 @@ export function Board({
   }, [state, calendar, dragCommand]);
   const model = useMemo(() => boardModel(displayed, calendar, baseline, query, collapsed), [displayed, calendar, baseline, query, collapsed]);
   const { selectedId, select, centerRequest } = useSelection();
+  const DetailsPanel = useDetailsPanel();
   const onListKey = useListKeys(model.rows);
   const todayDay = today();
   const highlightDays = useMemo(() => highlights.map((highlight) => ({ day: toDay(highlight.date), highlight })), [highlights]);
@@ -267,7 +286,7 @@ export function Board({
         </div>
         {model.rows.length === 0 ? <p className="absolute top-16 left-4 text-sm text-muted">No tasks yet.</p> : null}
       </div>
-      <DetailsPanel numbers={model.numbers} />
+      {DetailsPanel ? <DetailsPanel numbers={model.numbers} /> : null}
     </div>
   );
 }

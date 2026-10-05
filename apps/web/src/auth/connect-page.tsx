@@ -1,4 +1,5 @@
-import { MCP_SCOPE_LABELS, type McpScope } from "@ganttlines/protocol";
+import { MCP_SCOPE_LABELS } from "@ganttlines/protocol/constants";
+import type { McpScope } from "@ganttlines/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { Navigate, useSearch } from "@tanstack/react-router";
 import { useState } from "react";

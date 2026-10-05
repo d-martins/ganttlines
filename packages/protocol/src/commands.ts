@@ -1,11 +1,9 @@
 import { MAX_DATE, MAX_DURATION, MAX_OFFSET, MIN_DATE, TASK_COLORS, type Command } from "@ganttlines/engine";
 import { z } from "zod";
+import { COMMAND_LIMITS } from "./constants";
 
-export const COMMAND_LIMITS = {
-  titleMax: 500,
-  descriptionMax: 20_000,
-  deleteRowsMax: 5_000,
-} as const;
+export { COMMAND_LIMITS };
+
 
 const id = z.uuid();
 const date = z.iso.date().refine((value) => value >= MIN_DATE && value <= MAX_DATE, `Dates must be between ${MIN_DATE} and ${MAX_DATE}`);

@@ -1,7 +1,9 @@
 import { MAX_DATE, MIN_DATE, type RowChange } from "@ganttlines/engine";
 import { z } from "zod";
+import { BOARD_LIMITS } from "./constants";
 
-export const BOARD_LIMITS = { commentMax: 10_000, commentsPerTask: 1000, highlightLabelMax: 100, baselineNameMax: 100, activityPageMax: 100, commentPageMax: 100 } as const;
+export { BOARD_LIMITS };
+
 
 const date = z.iso.date().refine((value) => value >= MIN_DATE && value <= MAX_DATE, `Dates must be between ${MIN_DATE} and ${MAX_DATE}`);
 const body = z.string().trim().min(1).max(BOARD_LIMITS.commentMax);

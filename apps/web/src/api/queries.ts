@@ -44,7 +44,7 @@ export const keys = {
   providers: ["providers"] as const,
   about: ["about"] as const,
   me: ["me"] as const,
-  projects: (archived: boolean) => ["projects", { archived }] as const,
+  projects: ["projects"] as const,
   users: ["users"] as const,
   calendar: ["calendar"] as const,
   resources: ["resources"] as const,
@@ -84,10 +84,14 @@ export const currentUser = queryOptions({
   },
 });
 
+const unarchived = (projects: ProjectDto[]) => projects.filter((project) => !project.archived);
+
+/** Projects, archived ones included or not — one request either way (the list is shared). */
 export const projectList = (includeArchived: boolean) =>
   queryOptions({
-    queryKey: keys.projects(includeArchived),
-    queryFn: async () => (await api<{ projects: ProjectDto[] }>("GET", `/api/projects${includeArchived ? "?archived=true" : ""}`)).projects,
+    queryKey: keys.projects,
+    queryFn: async () => (await api<{ projects: ProjectDto[] }>("GET", "/api/projects?archived=true")).projects,
+    ...(includeArchived ? {} : { select: unarchived }),
   });
 
 export const userList = queryOptions({

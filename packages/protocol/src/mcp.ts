@@ -1,22 +1,8 @@
 import { z } from "zod";
+import { MCP_SCOPES, MCP_WRITE_SCOPES, MCP_SCOPE_LABELS, type McpScope } from "./constants";
 
-/**
- * What AI apps connected over MCP may do, one OAuth scope per tool group. Admins choose which the
- * server allows; people grant some of those to each app; roles still apply (viewers only read).
- */
-export const MCP_SCOPES = ["plans:read", "plans:write", "comments", "team:read", "team:write"] as const;
-export type McpScope = (typeof MCP_SCOPES)[number];
+export { MCP_SCOPES, MCP_WRITE_SCOPES, MCP_SCOPE_LABELS, type McpScope };
 
-/** Groups that change things: only editors and admins can grant them. */
-export const MCP_WRITE_SCOPES: readonly McpScope[] = ["plans:write", "team:write"];
-
-export const MCP_SCOPE_LABELS: Record<McpScope, { label: string; detail: string }> = {
-  "plans:read": { label: "Read plans", detail: "Projects, tasks, dates and history" },
-  "plans:write": { label: "Edit plans", detail: "Create projects; add, change, move and delete tasks" },
-  comments: { label: "Comments", detail: "Read and add comments" },
-  "team:read": { label: "Team calendar", detail: "Team members, locations, holidays and time off" },
-  "team:write": { label: "Edit the team calendar", detail: "Change team members, locations, holidays and time off" },
-};
 
 /** GET/PUT /api/settings/mcp (admins) */
 export interface McpSettingsDto {

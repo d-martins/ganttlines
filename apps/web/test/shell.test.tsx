@@ -13,6 +13,14 @@ describe("sidebar and top bar", () => {
     expect(screen.getByRole("link", { name: "Launch" })).toBeInTheDocument();
   });
 
+  it("loads the project list once for the sidebar, top bar and home page", async () => {
+    const api = signedIn(ADMIN, [project("p1", "Launch"), { ...project("p2", "Old"), archived: true }]);
+    renderApp("/");
+    expect(await screen.findByRole("heading", { level: 1, name: "Launch" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Old" })).not.toBeInTheDocument(); // archived ones stay folded away
+    expect(api.calls.filter((call) => call.key === "GET /api/projects")).toHaveLength(1);
+  });
+
   it("shows the account avatar in the person's own team color", async () => {
     const api = signedIn(ADMIN);
     api.on("GET /api/resources", () => ({ body: { resources: [{ id: "r1", name: ADMIN.name, avatarColor: "#e0569b", inactive: false, userId: ADMIN.id, locationId: null }] } }));

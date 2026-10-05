@@ -1,4 +1,4 @@
-import { SHARE_TOKEN_HEADER } from "@ganttlines/protocol";
+import { SHARE_TOKEN_HEADER } from "@ganttlines/protocol/constants";
 
 /** A failed API call: `code` is the server's machine-readable `error` (e.g. "unauthorized"). */
 export class ApiError extends Error {
