@@ -13,20 +13,29 @@ import type { LoginLimiter } from "../auth/login-limiter";
 import { SESSION_COOKIE, type SessionStore } from "../auth/sessions";
 import type { InstanceService } from "../calendar/instance-service";
 import type { TeamEdits } from "../calendar/team-edits";
+import type { Cluster } from "../cluster/types";
 import type { Config } from "../config";
 import type { ProjectService } from "../projects/project-service";
 import type { KeyedQueue } from "../queue";
 import type { Hub } from "../realtime/hub";
+import type { Live } from "../realtime/live";
+import type { Presence } from "../realtime/presence";
 
 /** Shared dependencies handed to every route module. */
 export interface RouteContext {
   db: Db;
   config: Config;
+  /** how copies share state (no-ops in single mode) */
+  cluster: Cluster;
   sessions: SessionStore;
   loginLimiter: LoginLimiter;
   instance: InstanceService;
   projects: ProjectService;
   hub: Hub;
+  /** what this copy tells its browsers, told to every copy */
+  live: Live;
+  /** who is viewing each board, across copies */
+  presence: Presence;
   access: AccessService;
   /** throttles guessing of share-link tokens per client IP */
   shareLimiter: LoginLimiter;

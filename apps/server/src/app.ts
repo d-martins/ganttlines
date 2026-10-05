@@ -1,6 +1,7 @@
 import cookie from "@fastify/cookie";
 import websocket from "@fastify/websocket";
 import { Prisma, type Db } from "@ganttlines/db";
+import { pendingStepOf } from "./auth/guard";
 import Fastify, { type FastifyInstance } from "fastify";
 import { AccessService } from "./auth/access";
 import { FirstRun } from "./auth/first-run";
@@ -11,6 +12,10 @@ import { smtpMailer, type Mailer } from "./mail/mailer";
 import { LoginLimiter } from "./auth/login-limiter";
 import { SESSION_COOKIE, SessionStore } from "./auth/sessions";
 import { TwoFactorPolicy } from "./auth/two-factor-policy";
+import { createCluster } from "./cluster";
+import type { Cluster } from "./cluster/types";
+import { Live } from "./realtime/live";
+import { Presence } from "./realtime/presence";
 import { mcpRoutes } from "./mcp/endpoint";
 import { TeamEdits } from "./calendar/team-edits";
 import { fetchMetadata, OAuthClients, type MetadataFetcher } from "./oauth/clients";
@@ -30,12 +35,12 @@ import { locationRoutes } from "./routes/locations";
 import { oidcRoutes } from "./routes/oidc";
 import { twoFactorRoutes } from "./routes/two-factor";
 import { authRoutes } from "./routes/auth";
-import { baselineRoutes } from "./routes/baselines";
+import { baselineRoutes, listBaselines } from "./routes/baselines";
 import { calendarRoutes } from "./routes/calendar";
 import { commandRoutes } from "./routes/commands";
-import { commentRoutes } from "./routes/comments";
+import { commentRoutes, toCommentDto } from "./routes/comments";
 import { setSessionCookie, type RouteContext } from "./routes/context";
-import { highlightRoutes } from "./routes/highlights";
+import { highlightRoutes, listHighlights } from "./routes/highlights";
 import { projectRoutes } from "./routes/projects";
 import { realtimeRoutes } from "./routes/realtime";
 import { setupRoutes } from "./routes/setup";
@@ -57,6 +62,10 @@ export interface AppOptions {
   config: Config;
   /** Clock for session expiry (tests) */
   now?: () => Date;
+  /** the shared-state pieces (tests pass their own); made from the config otherwise */
+  cluster?: Cluster;
+  /** with several copies, how often live connections are checked against the database (tests shorten it) */
+  liveRevalidateMs?: number;
   /** reads AI apps' client metadata documents (tests pass a fake) */
   fetchClientMetadata?: MetadataFetcher;
   logger?: boolean;
@@ -74,6 +83,8 @@ export async function buildApp({
   setupCode,
   mailer,
   fetchClientMetadata = fetchMetadata,
+  liveRevalidateMs = 30_000,
+  cluster: givenCluster,
 }: AppOptions): Promise<FastifyInstance> {
   const clock = now ?? (() => new Date());
   const hops = config.trustProxy;
@@ -83,24 +94,47 @@ export async function buildApp({
   await app.register(cookie);
   await app.register(websocket, { options: { maxPayload: 1024 * 1024 } });
 
-  const instance = new InstanceService(db);
-  const projects = new ProjectService(db, instance);
+  const cluster = givenCluster ?? (await createCluster(config, (message, error) => (error ? app.log.error(error, message) : app.log.warn(message))));
+  app.addHook("onClose", () => cluster.close());
+  const instance = new InstanceService(db, cluster.lock, cluster.mode === "postgres");
+  const projects = new ProjectService(db, instance, { lock: cluster.lock, shared: cluster.mode === "postgres", bus: cluster.bus });
   const hub = new Hub();
-  // Every committed change is pushed to the people looking at it.
-  projects.onApplied(({ projectId, version, commandId, actor, changes }) =>
-    hub.broadcast(projectId, { type: "patch", projectId, version, commandId, actor: { userId: actor.userId, label: actor.label }, changes }),
+  const access = new AccessService(db, config.sessionSecret, cluster.mode === "single");
+  const presence = new Presence(hub, cluster.bus);
+  presence.start();
+  // onClose hooks run in reverse order, so this goodbye goes out before the cluster closes:
+  // other copies drop this copy's viewers at once.
+  app.addHook("onClose", () => presence.stop());
+  const live = new Live(
+    hub,
+    cluster.bus,
+    presence,
+    {
+      db,
+      instance,
+      access,
+      highlights: (projectId) => listHighlights(db, projectId),
+      baselines: (projectId) => listBaselines(db, projectId),
+      comment: toCommentDto,
+    },
+    (message, error) => app.log.warn({ err: error }, message),
   );
-  projects.onMetaChange((project) => hub.broadcast(project.id, { type: "project", project }));
-  instance.onChange((snapshot) => hub.broadcastAll({ type: "instance", version: snapshot.version }));
+  // Every committed change is pushed to the people looking at it (on every copy).
+  projects.onApplied((event) => live.patch(event));
+  projects.onMetaChange((project) => live.projectMeta(project));
+  instance.onChange((snapshot) => live.instanceChanged(snapshot.version));
   const context: RouteContext = {
     db,
     config,
+    cluster,
     sessions: new SessionStore(db, config.sessionSecret, now),
     loginLimiter: new LoginLimiter(now ? () => now().getTime() : undefined),
     instance,
     projects,
     hub,
-    access: new AccessService(db, config.sessionSecret),
+    access,
+    live,
+    presence,
     boardQueue: new KeyedQueue(),
     shareLimiter: new LoginLimiter(now ? () => now().getTime() : undefined),
     firstRun: new FirstRun(db, instance, announce, setupCode),
@@ -163,8 +197,7 @@ export async function buildApp({
     if (!resolved) return;
     request.user = resolved.user;
     request.sessionToken = token;
-    if (resolved.user.mustChangePassword) request.pendingStep = "change_password";
-    else if (await context.twoFactorPolicy.mustSetUp(resolved.user, resolved.viaSso)) request.pendingStep = "set_up_two_factor";
+    request.pendingStep = await pendingStepOf(context, resolved.user, resolved.viaSso);
     if (resolved.refreshedUntil) setSessionCookie(reply, config, token, resolved.refreshedUntil);
   });
 
@@ -191,7 +224,7 @@ export async function buildApp({
   projectRoutes(app, context);
   commandRoutes(app, context);
   calendarRoutes(app, context);
-  realtimeRoutes(app, context);
+  realtimeRoutes(app, context, { revalidateMs: liveRevalidateMs });
   sharingRoutes(app, context);
   commentRoutes(app, context);
   highlightRoutes(app, context);

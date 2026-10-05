@@ -16,6 +16,7 @@ describe("loadConfig", () => {
       version: "dev",
       initialAdmin: null,
       firstAdminEmail: null,
+      cluster: "single",
       oidc: null,
       smtp: null,
     });
@@ -42,6 +43,13 @@ describe("loadConfig", () => {
     });
     expect(() => loadConfig({ ...base, OIDC_ISSUER: "https://accounts.google.com" })).toThrow("Set OIDC_ISSUER, OIDC_CLIENT_ID and OIDC_CLIENT_SECRET together");
     expect(() => loadConfig({ ...base, ...oidc, OIDC_DEFAULT_ROLE: "owner" })).toThrow("Invalid OIDC_DEFAULT_ROLE");
+  });
+
+  it("reads CLUSTER: single by default, or postgres", () => {
+    const base = { DATABASE_URL: "postgresql://db/gp", SESSION_SECRET: SECRET };
+    expect(loadConfig(base).cluster).toBe("single");
+    expect(loadConfig({ ...base, CLUSTER: "postgres" }).cluster).toBe("postgres");
+    expect(() => loadConfig({ ...base, CLUSTER: "redis" })).toThrow("Invalid CLUSTER: redis (use single or postgres)");
   });
 
   it("reads the first admin from ADMIN_*, checked like the setup form", () => {

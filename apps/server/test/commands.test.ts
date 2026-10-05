@@ -168,6 +168,11 @@ describe("robustness", () => {
     await send(editor, projectId, createTask(randomUUID()));
     await t.db.project.update({ where: { id: projectId }, data: { version: 7 } });
     const stale = await send(editor, projectId, createTask(randomUUID()));
+    if (testConfig.cluster === "postgres") {
+      // With several copies, a board is checked against the database first (and reloaded).
+      expect(stale.json().version).toBe(8);
+      return;
+    }
     expect(stale.statusCode).toBe(409);
     const retried = await send(editor, projectId, createTask(randomUUID()));
     expect(retried.json().version).toBe(8);

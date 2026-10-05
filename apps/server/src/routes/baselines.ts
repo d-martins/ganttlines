@@ -1,4 +1,4 @@
-import type { Baseline } from "@ganttlines/db";
+import type { Baseline, Db } from "@ganttlines/db";
 import { CreateBaselineBody, type BaselineDto, type BaselineTaskDto } from "@ganttlines/protocol";
 import type { FastifyInstance } from "fastify";
 import { actorOf } from "../actor";
@@ -11,17 +11,20 @@ import type { RouteContext } from "./context";
 
 export const MAX_BASELINES_PER_PROJECT = 100;
 
+/** A project's baselines, newest first (lists never load the possibly large snapshots). */
+export async function listBaselines(db: Db, projectId: string): Promise<BaselineDto[]> {
+  return (await db.baseline.findMany({ where: { projectId }, orderBy: { createdAt: "desc" }, select: BASELINE_SUMMARY })).map(toBaselineDto);
+}
+
 /**
  * Baselines: saved copies of a project's scheduled dates. Everyone who can see the board can view
  * them (to switch to or overlay); only signed-in editors create or delete them (never via links).
  */
 export function baselineRoutes(app: FastifyInstance, context: RouteContext): void {
-  const { db, projects, hub, boardQueue } = context;
+  const { db, projects, live, boardQueue } = context;
 
-  // Lists never load the (possibly large) snapshots.
-  const list = async (projectId: string) =>
-    (await db.baseline.findMany({ where: { projectId }, orderBy: { createdAt: "desc" }, select: BASELINE_SUMMARY })).map(toBaselineDto);
-  const announce = async (projectId: string) => hub.broadcast(projectId, { type: "baselines", projectId, baselines: await list(projectId) });
+  const list = (projectId: string) => listBaselines(db, projectId);
+  const announce = (projectId: string) => live.baselines(projectId);
   /** Change + re-read + broadcast one at a time per project, so the last list sent is the latest. */
   const change = <T>(projectId: string, work: () => Promise<T>) =>
     boardQueue.run(`baselines:${projectId}`, async () => {

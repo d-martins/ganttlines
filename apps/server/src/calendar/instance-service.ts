@@ -4,6 +4,8 @@ import type { CalendarDto, HolidayDto, LocationDto, ResourceDto, TimeOffDto } fr
 import { randomUUID } from "node:crypto";
 import type { Actor } from "../actor";
 import { badRequest } from "../errors";
+import { NoLock } from "../cluster/local";
+import type { ProjectLock } from "../cluster/types";
 import { KeyedQueue } from "../queue";
 
 type Tx = Prisma.TransactionClient;
@@ -28,10 +30,33 @@ export class InstanceService {
   private readonly queue = new KeyedQueue();
   private readonly listeners = new Set<InstanceListener>();
 
-  constructor(private readonly db: Db) {}
+  constructor(
+    private readonly db: Db,
+    /** several copies: changes take turns across them */
+    private readonly lock: ProjectLock = new NoLock(),
+    /** several copies: the cached calendar is checked against the database's version before use */
+    private readonly shared = false,
+  ) {}
 
-  /** The current calendar (loaded from the database on first use). */
-  current(): Promise<InstanceSnapshot> {
+  /** Forgets the cached calendar (another copy changed it); the next read loads it again. */
+  invalidate(): void {
+    this.snapshot = undefined;
+  }
+
+  /**
+   * The current calendar (loaded from the database on first use). With several copies its version
+   * is checked first, so a change another copy made is never missed (even if its notice was lost).
+   */
+  async current(): Promise<InstanceSnapshot> {
+    if (!this.shared) return this.cached();
+    const settings = await this.db.settings.findUnique({ where: { id: 1 }, select: { instanceVersion: true } });
+    const cached = await this.cached();
+    if (cached.version === (settings?.instanceVersion ?? 0)) return cached;
+    this.invalidate();
+    return this.cached();
+  }
+
+  private cached(): Promise<InstanceSnapshot> {
     if (!this.snapshot) {
       // Loaded through the queue so it can never interleave with a mutation.
       const loading = this.queue.run("instance", () => this.load());
@@ -59,38 +84,40 @@ export class InstanceService {
    * from the work's result (e.g. first-run setup, where the acting user is created by the work).
    */
   mutate<T>(actor: Actor | ((result: T) => Actor), name: string, payload: unknown, work: (tx: Tx) => Promise<T>): Promise<T> {
-    return this.queue.run("instance", async () => {
-      const { result, snapshot } = await this.db.$transaction(async (tx) => {
-        const result = await work(tx);
-        const settings = await tx.settings.upsert({ where: { id: 1 }, create: { id: 1 }, update: {} });
-        const version = settings.instanceVersion + 1;
-        const snapshot = build(await readCalendar(tx), version);
-        const by = typeof actor === "function" ? actor(result) : actor;
-        await tx.settings.update({ where: { id: 1 }, data: { instanceVersion: version } });
-        await tx.commandLog.create({
-          data: {
-            projectId: null,
-            version,
-            commandId: randomUUID(),
-            actorUserId: by.userId,
-            actorLabel: by.label,
-            name,
-            payload: payload as Prisma.InputJsonValue,
-            changes: [],
-          },
+    return this.queue.run("instance", () =>
+      this.lock.run("instance", async () => {
+        const { result, snapshot } = await this.db.$transaction(async (tx) => {
+          const result = await work(tx);
+          const settings = await tx.settings.upsert({ where: { id: 1 }, create: { id: 1 }, update: {} });
+          const version = settings.instanceVersion + 1;
+          const snapshot = build(await readCalendar(tx), version);
+          const by = typeof actor === "function" ? actor(result) : actor;
+          await tx.settings.update({ where: { id: 1 }, data: { instanceVersion: version } });
+          await tx.commandLog.create({
+            data: {
+              projectId: null,
+              version,
+              commandId: randomUUID(),
+              actorUserId: by.userId,
+              actorLabel: by.label,
+              name,
+              payload: payload as Prisma.InputJsonValue,
+              changes: [],
+            },
+          });
+          return { result, snapshot };
         });
-        return { result, snapshot };
-      });
-      this.snapshot = Promise.resolve(snapshot);
-      for (const listener of this.listeners) {
-        try {
-          listener(snapshot);
-        } catch {
-          // A failing listener must not undo a committed change.
+        this.snapshot = Promise.resolve(snapshot);
+        for (const listener of this.listeners) {
+          try {
+            listener(snapshot);
+          } catch {
+            // A failing listener must not undo a committed change.
+          }
         }
-      }
-      return result;
-    });
+        return result;
+      }),
+    );
   }
 
   /** Creates a team member; the avatar color cycles through the palette unless one is given. */

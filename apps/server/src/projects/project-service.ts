@@ -1,5 +1,6 @@
 import { Prisma, toDbColumns, type Db, type Project } from "@ganttlines/db";
 import {
+  applyChanges,
   applyCommand,
   buildTree,
   childrenOf,
@@ -18,8 +19,10 @@ import type { BaselineTaskDto, ChangesDto, CommandResultDto, ProjectDto, Project
 import { createHash } from "node:crypto";
 import { actorKey, type Actor } from "../actor";
 import type { InstanceService } from "../calendar/instance-service";
+import { NoLock } from "../cluster/local";
+import type { EventBus, ProjectLock } from "../cluster/types";
 import { toProjectDto } from "../dto";
-import { conflict, HttpError } from "../errors";
+import { conflict, HttpError, notFound } from "../errors";
 import { KeyedQueue } from "../queue";
 import { findTreeProblem, readProject, type StoredProject } from "./state";
 import { revertChanges, UndoStacks } from "./undo";
@@ -76,6 +79,8 @@ export class ProjectService {
   constructor(
     private readonly db: Db,
     private readonly instance: InstanceService,
+    /** several copies: changes take turns through `lock`, and cached boards are checked against the database */
+    private readonly cluster: { lock: ProjectLock; shared: boolean; bus?: EventBus } = { lock: new NoLock(), shared: false },
   ) {}
 
   onApplied(listener: (event: AppliedEvent) => void): () => void {
@@ -90,7 +95,7 @@ export class ProjectService {
 
   state(projectId: string): Promise<ProjectStateDto> {
     return this.queue.run(projectId, async () => {
-      const { meta, state } = await this.get(projectId);
+      const { meta, state } = await this.load(projectId);
       return { project: toProjectDto(meta), rows: Object.values(state.rows) };
     });
   }
@@ -128,7 +133,7 @@ export class ProjectService {
   /** Command-log entries after `since`, or "reload" when the client is too far behind (or ahead). */
   changesSince(projectId: string, since: number): Promise<ChangesDto> {
     return this.queue.run(projectId, async () => {
-      const { version } = (await this.get(projectId)).meta;
+      const { version } = (await this.load(projectId)).meta;
       if (version - since > MAX_CATCH_UP || since > version) return { version, reload: true };
       const entries = await this.db.commandLog.findMany({ where: { projectId, version: { gt: since } }, orderBy: { version: "asc" } });
       let total = 0;
@@ -148,8 +153,8 @@ export class ProjectService {
 
   /** Renames or (un)archives a project, keeping the cached copy in step. */
   updateMeta(projectId: string, data: { name?: string; archivedAt?: Date | null }): Promise<Project> {
-    return this.queue.run(projectId, async () => {
-      const stored = await this.get(projectId);
+    return this.locked(projectId, async () => {
+      const stored = await this.load(projectId);
       stored.meta = await this.db.project.update({ where: { id: projectId }, data });
       const dto = toProjectDto(stored.meta);
       for (const listener of this.metaListeners) notify(listener, dto);
@@ -159,13 +164,13 @@ export class ProjectService {
 
   /** Whether `rowId` is a task of the project (for attaching comments). */
   hasTask(projectId: string, rowId: string): Promise<boolean> {
-    return this.queue.run(projectId, async () => (await this.get(projectId)).state.rows[rowId]?.kind === "task");
+    return this.queue.run(projectId, async () => (await this.load(projectId)).state.rows[rowId]?.kind === "task");
   }
 
   /** The current computed dates of every scheduled task (for baselines). */
   scheduleSnapshot(projectId: string): Promise<BaselineTaskDto[]> {
     return this.queue.run(projectId, async () => {
-      const { state } = await this.get(projectId);
+      const { state } = await this.load(projectId);
       const schedule = computeSchedule(state, (await this.instance.current()).calendar);
       const tree = buildTree(state);
       const tasks: BaselineTaskDto[] = [];
@@ -190,7 +195,7 @@ export class ProjectService {
   /** Every row in board order (depth first), with the computed dates of scheduled tasks. */
   outline(projectId: string): Promise<{ project: ProjectDto; rows: OutlineRow[] }> {
     return this.queue.run(projectId, async () => {
-      const { meta, state } = await this.get(projectId);
+      const { meta, state } = await this.load(projectId);
       const schedule = computeSchedule(state, (await this.instance.current()).calendar);
       const tree = buildTree(state);
       const rows: OutlineRow[] = [];
@@ -210,8 +215,8 @@ export class ProjectService {
    * baselines and share links cascade in the database). Live projects must be archived first.
    */
   remove(projectId: string): Promise<void> {
-    return this.queue.run(projectId, async () => {
-      const stored = await this.get(projectId);
+    return this.locked(projectId, async () => {
+      const stored = await this.load(projectId);
       if (!stored.meta.archivedAt) throw conflict("Only archived projects can be deleted — archive it first");
       await this.db.project.delete({ where: { id: projectId } });
       this.cache.delete(projectId);
@@ -295,9 +300,9 @@ export class ProjectService {
 
   /** Runs `work` in the project's queue; unexpected failures drop the cached copy so the next request reloads. */
   private run<T>(projectId: string, work: (stored: StoredProject) => Promise<T>): Promise<T> {
-    return this.queue.run(projectId, async () => {
+    return this.locked(projectId, async () => {
       try {
-        return await work(await this.get(projectId));
+        return await work(await this.load(projectId));
       } catch (error) {
         if (error instanceof HttpError) throw error;
         this.cache.delete(projectId);
@@ -307,6 +312,49 @@ export class ProjectService {
         throw error;
       }
     });
+  }
+
+  /** In the project's queue and, with several copies, its lock: changes to a board take turns. */
+  private locked<T>(projectId: string, work: () => Promise<T>): Promise<T> {
+    return this.queue.run(projectId, () => this.cluster.lock.run(`project:${projectId}`, work));
+  }
+
+  /** The cached board, caught up with changes other copies made (several copies only). */
+  private async load(projectId: string): Promise<StoredProject> {
+    const stored = await this.get(projectId);
+    return this.cluster.shared ? this.catchUp(projectId, stored) : stored;
+  }
+
+  /**
+   * Brings a cached board up to the database's version by replaying the command log; reloads it
+   * when it's too far behind (or the log has gaps). Project details (name, archived) are re-read.
+   */
+  private async catchUp(projectId: string, stored: StoredProject): Promise<StoredProject> {
+    const meta = await this.db.project.findUnique({ where: { id: projectId } });
+    if (!meta) {
+      this.cache.delete(projectId);
+      throw notFound("Project");
+    }
+    const behind = meta.version - stored.meta.version;
+    if (behind === 0) {
+      stored.meta = meta;
+      return stored;
+    }
+    const entries =
+      behind > 0 && behind <= MAX_CATCH_UP
+        ? await this.db.commandLog.findMany({ where: { projectId, version: { gt: stored.meta.version, lte: meta.version } }, orderBy: { version: "asc" } })
+        : [];
+    if (entries.length !== behind) {
+      const fresh = readProject(this.db, projectId);
+      this.cache.set(projectId, fresh);
+      fresh.catch(() => this.cache.delete(projectId));
+      return fresh;
+    }
+    let state = stored.state;
+    for (const entry of entries) state = applyChanges(state, entry.changes as unknown as RowChange[]);
+    stored.state = state;
+    stored.meta = meta;
+    return stored;
   }
 
   /** Persists rows + log entry + version bump atomically, updates the cache, then notifies listeners. */
@@ -337,7 +385,11 @@ export class ProjectService {
             changes: changes as unknown as Prisma.InputJsonValue,
           },
         });
-        return tx.project.update({ where: { id: projectId, version: stored.meta.version }, data: { version } });
+        const updated = await tx.project.update({ where: { id: projectId, version: stored.meta.version }, data: { version } });
+        // Other copies hear about it exactly when (and if) it commits.
+        const notice = this.cluster.bus?.notification({ type: "patch", projectId, version });
+        if (notice) await tx.$executeRawUnsafe(notice.sql, ...notice.params);
+        return updated;
       },
       { timeout: TRANSACTION_TIMEOUT_MS },
     );

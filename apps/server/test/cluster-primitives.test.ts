@@ -1,0 +1,166 @@
+import pg from "pg";
+import { describe, expect, inject, it } from "vitest";
+import { holdModeGuard } from "../src/cluster/mode-guard";
+import { PgEventBus, PgLock } from "../src/cluster/postgres";
+import type { ClusterEvent } from "../src/cluster/types";
+
+describe("mode guard", () => {
+  const url = () => inject("databaseUrl");
+
+  it("waits a while for the other server to stop (deploys that start the new one first)", async () => {
+    const old = await holdModeGuard(url(), "single");
+    const waiting: string[] = [];
+    const next = holdModeGuard(url(), "single", { waitMs: 5000, retryMs: 100, log: (message) => waiting.push(message) });
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await old.release();
+    await (await next).release();
+    expect(waiting[0]).toMatch(/Waiting for the other GanttLines server/);
+  });
+
+  it("keeps holding the guard when its database connection drops (and doesn't crash)", async () => {
+    const guard = await holdModeGuard(url(), "single", { retryMs: 100 });
+    const admin = new pg.Client({ connectionString: url() });
+    await admin.connect();
+    await admin.query("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'ganttlines-guard'");
+    let retaken = false;
+    for (let i = 0; i < 50 && !retaken; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const { rows } = await admin.query("SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory' AND classid = 7101 AND granted");
+      retaken = rows[0].n === 1;
+    }
+    expect(retaken).toBe(true);
+    await expect(holdModeGuard(url(), "single")).rejects.toThrow("Another GanttLines server");
+    await admin.end();
+    await guard.release();
+  });
+
+  it("lets postgres-mode copies share the database, but never with a single-mode one", async () => {
+    const a = await holdModeGuard(url(), "postgres");
+    const b = await holdModeGuard(url(), "postgres");
+    await expect(holdModeGuard(url(), "single")).rejects.toThrow(
+      "Several GanttLines servers are using this database. Set CLUSTER=postgres on all of them (or run just one).",
+    );
+    await Promise.all([a.release(), b.release()]);
+
+    const single = await holdModeGuard(url(), "single");
+    await expect(holdModeGuard(url(), "single")).rejects.toThrow("Another GanttLines server is already using this database");
+    await expect(holdModeGuard(url(), "postgres")).rejects.toThrow("A GanttLines server in single mode is already using this database");
+    await single.release();
+    await (await holdModeGuard(url(), "single")).release(); // released: free again
+  });
+});
+
+const quiet = () => undefined;
+
+async function busPair() {
+  const pool = new pg.Pool({ connectionString: inject("databaseUrl"), max: 4 });
+  const a = new PgEventBus(inject("databaseUrl"), pool, quiet);
+  const b = new PgEventBus(inject("databaseUrl"), pool, quiet);
+  await Promise.all([a.start(), b.start()]);
+  const close = async () => {
+    await Promise.all([a.close(), b.close()]);
+    await pool.end();
+  };
+  return { a, b, pool, close };
+}
+
+const received = (bus: PgEventBus) => {
+  const events: { event: ClusterEvent; from: string }[] = [];
+  bus.subscribe((event, from) => events.push({ event, from }));
+  return events;
+};
+
+const until = async (check: () => boolean) => {
+  for (let i = 0; i < 100 && !check(); i++) await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(check()).toBe(true);
+};
+
+describe("event bus (postgres)", () => {
+  it("delivers each copy's events to the others, in order, never to itself", async () => {
+    const { a, b, close } = await busPair();
+    const atA = received(a);
+    const atB = received(b);
+    for (let version = 1; version <= 3; version++) await a.publish({ type: "patch", projectId: "p", version });
+    await until(() => atB.length === 3);
+    expect(atB.map(({ event }) => (event as { version: number }).version)).toEqual([1, 2, 3]);
+    expect(atB[0]!.from).toBe(a.copyId);
+    expect(atA).toEqual([]);
+    await close();
+  });
+
+  it("skips events too big for a notification", async () => {
+    const { a, b, close } = await busPair();
+    const atB = received(b);
+    await a.publish({ type: "presence", projectId: "p", viewers: Array.from({ length: 400 }, (_, i) => ({ id: `user:${i}`, name: "x".repeat(30) })) });
+    await a.publish({ type: "alive" });
+    await until(() => atB.length === 1);
+    expect(atB[0]!.event.type).toBe("alive");
+    await close();
+  });
+
+  it("reconnects when its connection drops, and asks for a resync", async () => {
+    const { a, b, pool, close } = await busPair();
+    const atB = received(b);
+    let resyncs = 0;
+    b.onResync(() => resyncs++);
+    await pool.query("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'ganttlines-listener' AND pid <> pg_backend_pid()");
+    await until(() => resyncs >= 1 && b.ready);
+    await a.publish({ type: "alive" });
+    await until(() => atB.length === 1);
+    await close();
+  });
+});
+
+describe("event bus (postgres): a listener that goes quiet", () => {
+  it("notices when its own pings stop coming back, reconnects and asks for a resync", async () => {
+    const pool = new pg.Pool({ connectionString: inject("databaseUrl"), max: 2 });
+    const bus = new PgEventBus(inject("databaseUrl"), pool, quiet, { pingMs: 100, quietMs: 400 });
+    await bus.start();
+    let resyncs = 0;
+    bus.onResync(() => resyncs++);
+    // Stop hearing anything, without the connection closing (like a network that silently drops it).
+    await (bus as unknown as { client: pg.Client }).client.query("UNLISTEN ganttlines");
+    await until(() => resyncs >= 2 && bus.ready); // once when it gave up on the quiet connection, once when back
+    await bus.close();
+    await pool.end();
+  });
+});
+
+describe("project lock (postgres)", () => {
+  it("makes work on one key take turns across lock instances, and leaves other keys free", async () => {
+    const pools = [new pg.Pool({ connectionString: inject("databaseUrl"), max: 2 }), new pg.Pool({ connectionString: inject("databaseUrl"), max: 2 })];
+    const [one, two] = pools.map((pool) => new PgLock(pool));
+    const log: string[] = [];
+    const step = (lock: PgLock, key: string, name: string) =>
+      lock.run(key, async () => {
+        log.push(`${name} in`);
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        log.push(`${name} out`);
+      });
+    await Promise.all([step(one!, "project:x", "A"), step(two!, "project:x", "B")]);
+    expect([log.slice(0, 2), log.slice(2)].map((pair) => pair[0]!.slice(0, 1) === pair[1]!.slice(0, 1))).toEqual([true, true]);
+    log.length = 0;
+    await Promise.all([step(one!, "project:x", "A"), step(two!, "project:y", "B")]);
+    expect(log.slice(0, 2).sort()).toEqual(["A in", "B in"]); // different projects don't wait
+    await Promise.all(pools.map((pool) => pool.end()));
+  });
+});
+
+describe("project lock (postgres): a dropped connection", () => {
+  it("doesn't crash the server when the database connection holding a lock drops mid-work", async () => {
+    const pool = new pg.Pool({ connectionString: inject("databaseUrl"), max: 2, application_name: "ganttlines-lock-test" });
+    pool.on("error", () => undefined);
+    const lock = new PgLock(pool);
+    const admin = new pg.Client({ connectionString: inject("databaseUrl") });
+    await admin.connect();
+    const result = await lock.run("project:z", async () => {
+      await admin.query("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'ganttlines-lock-test'");
+      await new Promise((resolve) => setTimeout(resolve, 200)); // the dropped connection reports its error meanwhile
+      return "finished";
+    });
+    expect(result).toBe("finished");
+    expect(await lock.run("project:z", async () => "again")).toBe("again"); // the broken connection was thrown away
+    await admin.end();
+    await pool.end();
+  });
+});

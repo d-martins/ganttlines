@@ -12,7 +12,7 @@ import { parseBody, parseId } from "../validation";
 import type { RouteContext } from "./context";
 
 /** Admin-only user management. New users get a temporary password they must change. */
-export function userRoutes(app: FastifyInstance, { db, config, sessions, instance, hub, mailer, passwordTokens }: RouteContext): void {
+export function userRoutes(app: FastifyInstance, { db, config, sessions, instance, live, mailer, passwordTokens }: RouteContext): void {
   app.get("/api/users", async (request) => {
     requireUser(request, "admin");
     const users = await db.user.findMany({ orderBy: { createdAt: "asc" } });
@@ -65,7 +65,7 @@ export function userRoutes(app: FastifyInstance, { db, config, sessions, instanc
       });
     });
     // Open connections carry the old role/name: make them reconnect.
-    hub.closeUser(id);
+    live.closeUser(id);
     return { user: toUserDto(updated) };
   });
 
@@ -76,7 +76,7 @@ export function userRoutes(app: FastifyInstance, { db, config, sessions, instanc
     const temporaryPassword = generateTemporaryPassword();
     await db.user.update({ where: { id }, data: { passwordHash: await hashPassword(temporaryPassword), mustChangePassword: true } });
     await sessions.revokeAllForUser(id);
-    hub.closeUser(id);
+    live.closeUser(id);
     return { temporaryPassword };
   });
 
@@ -90,7 +90,7 @@ export function userRoutes(app: FastifyInstance, { db, config, sessions, instanc
       if (user.role === "admin") await assertAnotherAdmin(tx, id);
       await tx.user.delete({ where: { id } });
     });
-    hub.closeUser(id);
+    live.closeUser(id);
     return reply.status(204).send();
   });
 

@@ -20,7 +20,7 @@ const CommentsQuery = z.object({
 export function commentRoutes(app: FastifyInstance, context: RouteContext): void {
   const { db } = context;
 
-  const announce = (comment: Comment) => announceComment(context, comment);
+  const announce = (comment: Comment) => context.live.comment(comment);
 
   app.get<{ Params: { id: string }; Querystring: Record<string, string> }>("/api/projects/:id/comments", async (request) => {
     const projectId = parseId(request.params.id, "Project");
@@ -88,15 +88,6 @@ export function commentRoutes(app: FastifyInstance, context: RouteContext): void
   }
 }
 
-/** Pushes a created/changed comment to the room, telling each viewer whether it is theirs. */
-function announceComment({ hub }: RouteContext, comment: Comment): void {
-  hub.broadcastEach(comment.projectId, (connection) => ({
-    type: "comment",
-    projectId: comment.projectId,
-    comment: toCommentDto(comment, connection.viewer?.id ?? null),
-  }));
-}
-
 /** Adds a comment to a task (of a live project) and shows it to everyone with the board open. */
 export async function postComment(context: RouteContext, projectId: string, actor: Actor, taskId: string, body: string): Promise<Comment> {
   await assertNotArchived(context.db, projectId);
@@ -104,7 +95,7 @@ export async function postComment(context: RouteContext, projectId: string, acto
   const comment = await context.db.comment.create({
     data: { projectId, taskId, authorUserId: actor.userId, authorVisitorId: actor.visitorId ?? null, authorLabel: actor.label, body },
   });
-  announceComment(context, comment);
+  context.live.comment(comment);
   return comment;
 }
 
@@ -120,7 +111,7 @@ function isAuthor(comment: Comment, actor: Actor): boolean {
 }
 
 /** `viewerKey` identifies the person the DTO is for ("user:<id>" / "visitor:<id>"). */
-function toCommentDto(comment: Comment, viewerKey: string | null): CommentDto {
+export function toCommentDto(comment: Comment, viewerKey: string | null): CommentDto {
   const author = authorKeyOf(comment);
   return {
     id: comment.id,

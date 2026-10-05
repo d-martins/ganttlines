@@ -8,7 +8,7 @@ import type { RouteContext } from "./context";
 
 /** Viewers and above see every project; guests see none (they get access through share links). */
 export function projectRoutes(app: FastifyInstance, context: RouteContext): void {
-  const { db, projects, access, hub } = context;
+  const { db, projects, live } = context;
   app.get<{ Querystring: { archived?: string } }>("/api/projects", async (request) => {
     const user = requireUser(request, "guest");
     if (user.role === "guest") return { projects: [] };
@@ -43,8 +43,7 @@ export function projectRoutes(app: FastifyInstance, context: RouteContext): void
     requireUser(request, "editor");
     const id = parseId(request.params.id, "Project");
     await projects.remove(id);
-    access.forgetProject(id);
-    hub.closeProject(id);
+    live.projectDeleted(id);
     return reply.status(204).send();
   });
 

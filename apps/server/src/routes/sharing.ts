@@ -17,7 +17,7 @@ const VISITOR_COOKIE_MAX_AGE_S = 180 * 24 * 60 * 60;
  * with a link can look it up and — for anonymous links — pick a display name.
  */
 export function sharingRoutes(app: FastifyInstance, context: RouteContext): void {
-  const { db, config, access, hub } = context;
+  const { db, config, access, live } = context;
 
   app.post<{ Params: { id: string } }>("/api/projects/:id/share-links", async (request, reply) => {
     const user = requireUser(request, "editor");
@@ -48,7 +48,7 @@ export function sharingRoutes(app: FastifyInstance, context: RouteContext): void
       where: { id },
       data: { ...(body.collaboration === undefined ? {} : { collaboration: body.collaboration }), ...(body.label === undefined ? {} : { label: body.label }) },
     });
-    access.invalidate(id); // connected visitors pick up the new collaboration setting on their next message
+    live.linkChanged(id); // connected visitors pick up the new collaboration setting on their next message
     return { link: toDto(link) };
   });
 
@@ -57,8 +57,7 @@ export function sharingRoutes(app: FastifyInstance, context: RouteContext): void
     const id = parseId(request.params.id, "Share link");
     if (!(await db.shareLink.findUnique({ where: { id } }))) throw notFound("Share link");
     await db.shareLink.update({ where: { id }, data: { revokedAt: new Date() } });
-    access.invalidate(id);
-    hub.closeLink(id);
+    live.closeLink(id);
     return reply.status(204).send();
   });
 
