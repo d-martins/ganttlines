@@ -1,6 +1,6 @@
 import type { Command } from "@ganttlines/engine";
 import type { ProjectStateDto } from "@ganttlines/protocol";
-import { waitFor, within } from "@testing-library/react";
+import { fireEvent, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ANA, CALENDAR, FakeWebSocket, PROJECT_ID, projectState, section, task } from "./board-fixtures";
 import { ADMIN, project, renderApp, screen, signedIn, VIEWER } from "./utils";
@@ -38,6 +38,16 @@ describe("editing the task list", () => {
     vi.setSystemTime(new Date(2026, 8, 29, 12));
   });
   afterEach(() => vi.useRealTimers());
+
+  it("scrolls the list while a row is dragged near its bottom edge", async () => {
+    await editableBoard();
+    const scroller = screen.getByTestId("board-scroller");
+    scroller.getBoundingClientRect = () => ({ top: 0, bottom: 400, left: 0, right: 1200, width: 1200, height: 400, x: 0, y: 0, toJSON: () => ({}) });
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Move “ui”" }), { button: 0, clientY: 60 });
+    fireEvent.pointerMove(window, { clientY: 395 });
+    await waitFor(() => expect(scroller.scrollTop).toBeGreaterThan(0));
+    fireEvent.pointerUp(window, { clientY: 395 });
+  });
 
   it("renames on Enter and starts the next row", async () => {
     const { user } = await editableBoard();

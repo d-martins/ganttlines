@@ -31,7 +31,6 @@ export const CommandSchema = z.discriminatedUnion("type", [
   cmd("updateTitle", { id, title }),
   cmd("setDescription", { id, description: z.string().max(COMMAND_LIMITS.descriptionMax) }),
   cmd("setColor", { id, color: z.enum(TASK_COLORS) }),
-  cmd("toggleCollapsed", { id, collapsed: z.boolean() }),
   cmd("setAssignee", { id, resourceId: id.nullable() }),
   cmd("moveTask", { id, start: date, half }),
   cmd("resizeTask", { id, edge: z.enum(["start", "end"]), date, half }),

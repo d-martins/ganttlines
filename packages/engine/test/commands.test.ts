@@ -85,17 +85,16 @@ describe("assignees with a stretch of time off longer than the scan limit", () =
 });
 
 describe("field edits", () => {
-  it("updates title, description, color, collapse and assignee", () => {
+  it("updates title, description, color and assignee", () => {
     const state = run(
       project(task("a")),
       cal,
       { type: "updateTitle", id: "a", title: "Hooks" },
       { type: "setDescription", id: "a", description: "notes" },
       { type: "setColor", id: "a", color: "purple" },
-      { type: "toggleCollapsed", id: "a", collapsed: true },
       { type: "setAssignee", id: "a", resourceId: "ana" },
     );
-    expect(taskIn(state, "a")).toMatchObject({ title: "Hooks", description: "notes", color: "purple", collapsed: true, resourceId: "ana" });
+    expect(taskIn(state, "a")).toMatchObject({ title: "Hooks", description: "notes", color: "purple", resourceId: "ana" });
   });
 
   it("reports missing rows", () => {

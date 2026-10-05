@@ -4,11 +4,11 @@ import { act } from "@testing-library/react";
 
 /** Row ids are UUIDs on the wire; these readable ones are enough for the client. */
 export function task(id: string, fields: Partial<TaskRow> = {}): TaskRow {
-  return { ...TASK_DEFAULTS, id, kind: "task", title: id, parentId: null, position: "a0", collapsed: false, ...fields };
+  return { ...TASK_DEFAULTS, id, kind: "task", title: id, parentId: null, position: "a0", ...fields };
 }
 
 export function section(id: string, fields: Partial<SectionRow> = {}): SectionRow {
-  return { id, kind: "section", title: id, parentId: null, position: "a0", collapsed: false, ...fields };
+  return { id, kind: "section", title: id, parentId: null, position: "a0", ...fields };
 }
 
 export const PROJECT_ID = "11111111-1111-4111-8111-111111111111";

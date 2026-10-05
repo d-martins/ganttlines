@@ -11,7 +11,7 @@ import { Shading } from "./chart/shading";
 import { chartRange, DAY_WIDTH, Timeline } from "./chart/timeline";
 import { today } from "./format";
 import { useBoard } from "./board-context";
-import { useCollapsed } from "./collapse";
+import { useCollapse, useCollapsed } from "./collapse";
 import { ListColumnHeaders, ListHeader, ListRows, useListKeys } from "./list/task-list";
 import { useSelection } from "./selection";
 import { boardModel, type CompareMode } from "./model";
@@ -83,6 +83,10 @@ export function Board({
   const [query, setQuery] = useState("");
   const { canEdit, canEditCalendar, sync } = useBoard();
   const collapsed = useCollapsed(sync.projectId);
+  // Collapsed rows deleted since are forgotten (once the board has rows to compare with).
+  useEffect(() => {
+    if (Object.keys(state.rows).length > 0) useCollapse.getState().prune(sync.projectId, (id) => id in state.rows);
+  }, [state.rows, sync.projectId]);
   // While a bar is dragged, show the board as the drop would leave it (successors pushed and all).
   const dragCommand = useChartDrag((store) => store.drag?.command ?? null);
   const displayed = useMemo(() => {

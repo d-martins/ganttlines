@@ -6,7 +6,7 @@ import { BoardSync, type SocketLike } from "../src/sync/board-sync";
 const PROJECT = "11111111-1111-4111-8111-111111111111";
 
 export function task(id: string, fields: Partial<TaskRow> = {}): TaskRow {
-  return { ...TASK_DEFAULTS, id, kind: "task", title: id, parentId: null, position: "a0", collapsed: false, ...fields };
+  return { ...TASK_DEFAULTS, id, kind: "task", title: id, parentId: null, position: "a0", ...fields };
 }
 
 function stateDto(version: number, rows = [task("a")]): ProjectStateDto {

@@ -12,6 +12,7 @@ import { formatDays } from "../chart/bars";
 import type { BoardRow } from "../model";
 import { useSelection } from "../selection";
 import { addAtEnd, addRowBelow, addSubtask, deleteRow, dropMove, parseDays, setActualDays, setWorkingDays, type DropZone } from "./list-actions";
+import { AUTO_SCROLL_STEP, AUTO_SCROLL_TICK_MS, edgePush, HEADER_HEIGHT } from "../auto-scroll";
 
 /**
  * Column template shared by the header and the rows: # · title · assignee · WD · AWD · predecessor · row actions (show the bar, open details).
@@ -254,9 +255,22 @@ export function ListRows({
     if (!canEdit || searching) return;
     event.preventDefault();
     const grid = (event.currentTarget as HTMLElement).closest('[role="treegrid"]') as HTMLElement;
+    const scroller = grid.closest('[data-testid="board-scroller"]') as HTMLElement | null;
     let target: DragState["target"] = null;
+    let last: PointerEvent | null = null;
     setDrag({ id, target });
+    // Near or past the list's top or bottom, keep scrolling that way.
+    const autoScroll = setInterval(() => {
+      if (!last || !scroller) return;
+      const bounds = scroller.getBoundingClientRect();
+      const dy = edgePush(last.clientY, bounds.top + HEADER_HEIGHT, bounds.bottom) * AUTO_SCROLL_STEP;
+      if (!dy) return;
+      const before = scroller.scrollTop;
+      scroller.scrollTop += dy;
+      if (scroller.scrollTop !== before) move(last);
+    }, AUTO_SCROLL_TICK_MS);
     const move = (moveEvent: PointerEvent) => {
+      last = moveEvent;
       const y = moveEvent.clientY - grid.getBoundingClientRect().top;
       const index = Math.min(Math.max(Math.floor(y / rowHeight), 0), allRows.length - 1);
       const fraction = y / rowHeight - index;
@@ -264,6 +278,7 @@ export function ListRows({
       setDrag({ id, target });
     };
     const up = () => {
+      clearInterval(autoScroll);
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       setDrag(null);

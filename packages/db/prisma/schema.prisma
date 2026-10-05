@@ -122,7 +122,6 @@ model Row {
   title         String
   parentId      String? @db.Uuid
   position      String
-  collapsed     Boolean @default(false)
   // task-only fields (defaults for sections)
   userStart     String?
   /// placed on the afternoon of userStart

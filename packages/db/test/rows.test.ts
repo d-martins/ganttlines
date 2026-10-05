@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { TASK_DEFAULTS, type SectionRow, type TaskRow } from "@ganttlines/engine";
 import { toDbColumns, toEngineRow } from "../src/rows";
 
-const section: SectionRow = { id: "11111111-1111-4111-8111-111111111111", kind: "section", title: "Phase", parentId: null, position: "a0", collapsed: true };
+const section: SectionRow = { id: "11111111-1111-4111-8111-111111111111", kind: "section", title: "Phase", parentId: null, position: "a0" };
 const task: TaskRow = {
   ...TASK_DEFAULTS,
   id: "22222222-2222-4222-8222-222222222222",
@@ -10,7 +10,6 @@ const task: TaskRow = {
   title: "Build",
   parentId: section.id,
   position: "a0",
-  collapsed: false,
   userStart: "2026-10-05",
   duration: 3,
   resourceId: "33333333-3333-4333-8333-333333333333",

@@ -107,13 +107,18 @@ describe("board", () => {
 
   it("hides the children of rows collapsed in this browser", async () => {
     localStorage.setItem(`gp.collapsed:${PROJECT_ID}`, JSON.stringify(["parent"]));
-    // A collapsed flag stored on the server has no effect: collapsing is a per-browser view.
-    await joinedBoard(ROWS.map((row) => (row.id === "design" ? { ...row, collapsed: true } : row)));
+    await joinedBoard();
     const list = within(screen.getByRole("treegrid", { name: "Tasks" }));
     expect(list.queryByText("child", { exact: true })).not.toBeInTheDocument();
     expect(list.getByText("hooks", { exact: true })).toBeInTheDocument();
     expect(listRow("parent")).toHaveAttribute("aria-expanded", "false");
     expect(within(listRow("ms")).getByText("5")).toBeInTheDocument();
+  });
+
+  it("forgets collapsed rows that no longer exist", async () => {
+    localStorage.setItem(`gp.collapsed:${PROJECT_ID}`, JSON.stringify(["parent", "deleted-long-ago"]));
+    await joinedBoard();
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(`gp.collapsed:${PROJECT_ID}`)!)).toEqual(["parent"]));
   });
 
   it("applies live patches and rejoins after a missed one", async () => {
