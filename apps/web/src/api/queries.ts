@@ -1,12 +1,7 @@
 import type {
   LocationBody,
-  LocationDto,
-  PublicHolidayDto,
   AboutDto,
   ActivityDto,
-  BaselineDto,
-  BaselineSnapshotDto,
-  CalendarDto,
   CommentDto,
   CommentCountsDto,
   CommentsDto,
@@ -16,10 +11,8 @@ import type {
   CreateResourceBody,
   CreateUserBody,
   HighlightBody,
-  HighlightDto,
   HolidayBody,
   ProjectDto,
-  ResourceDto,
   ShareInfoDto,
   ShareLinkDto,
   TimeOffBody,
@@ -38,6 +31,7 @@ import type {
 } from "@ganttlines/protocol";
 import { infiniteQueryOptions, queryOptions, useMutation, useQueryClient, type InfiniteData, type QueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "./client";
+import { workspace } from "../workspace";
 
 export const keys = {
   setup: ["setup"] as const,
@@ -91,42 +85,23 @@ const unarchived = (projects: ProjectDto[]) => projects.filter((project) => !pro
 export const projectList = (includeArchived: boolean) =>
   queryOptions({
     queryKey: keys.projects,
-    queryFn: async () => (await api<{ projects: ProjectDto[] }>("GET", "/api/projects?archived=true")).projects,
+    queryFn: () => workspace().listProjects(),
     ...(includeArchived ? {} : { select: unarchived }),
   });
-
 export const userList = queryOptions({
   queryKey: keys.users,
   queryFn: async () => (await api<{ users: UserDto[] }>("GET", "/api/users")).users,
 });
 
-export const calendar = queryOptions({ queryKey: keys.calendar, queryFn: () => api<CalendarDto>("GET", "/api/calendar") });
-
-export const resourceList = queryOptions({
-  queryKey: keys.resources,
-  queryFn: async () => (await api<{ resources: ResourceDto[] }>("GET", "/api/resources")).resources,
-});
-
+export const calendar = queryOptions({ queryKey: keys.calendar, queryFn: () => workspace().calendar() });
+export const resourceList = queryOptions({ queryKey: keys.resources, queryFn: () => workspace().resources() });
 export const highlightList = (projectId: string) =>
-  queryOptions({
-    queryKey: keys.highlights(projectId),
-    queryFn: async () => (await api<{ highlights: HighlightDto[] }>("GET", `/api/projects/${projectId}/highlights`)).highlights,
-  });
-
+  queryOptions({ queryKey: keys.highlights(projectId), queryFn: () => workspace().highlights(projectId) });
 export const baselineList = (projectId: string) =>
-  queryOptions({
-    queryKey: keys.baselines(projectId),
-    queryFn: async () => (await api<{ baselines: BaselineDto[] }>("GET", `/api/projects/${projectId}/baselines`)).baselines,
-  });
-
+  queryOptions({ queryKey: keys.baselines(projectId), queryFn: () => workspace().baselines(projectId) });
 /** A saved baseline's dates. They never change, so they are fetched once. */
 export const baselineSnapshot = (projectId: string, baselineId: string) =>
-  queryOptions({
-    queryKey: keys.baseline(projectId, baselineId),
-    queryFn: () => api<BaselineSnapshotDto>("GET", `/api/baselines/${baselineId}`),
-    staleTime: Infinity,
-  });
-
+  queryOptions({ queryKey: keys.baseline(projectId, baselineId), queryFn: () => workspace().baselineSnapshot(projectId, baselineId), staleTime: Infinity });
 /** A mutation that refreshes the given queries when it succeeds. */
 function useApiMutation<TInput, TResult>(run: (input: TInput) => Promise<TResult>, invalidate: (client: QueryClient) => unknown) {
   const client = useQueryClient();
@@ -181,10 +156,8 @@ export const useLogout = () => {
 export const useChangePassword = () =>
   useApiMutation((body: { currentPassword: string; newPassword: string }) => api<void>("POST", "/api/auth/password", body), refreshAuth);
 
-export const useCreateProject = () => useApiMutation((body: CreateProjectBody) => api<{ project: ProjectDto }>("POST", "/api/projects", body), refreshProjects);
-export const useUpdateProject = () =>
-  useApiMutation(({ id, ...body }: UpdateProjectBody & { id: string }) => api<{ project: ProjectDto }>("PATCH", `/api/projects/${id}`, body), refreshProjects);
-
+export const useCreateProject = () => useApiMutation((body: CreateProjectBody) => workspace().createProject(body), refreshProjects);
+export const useUpdateProject = () => useApiMutation(({ id, ...body }: UpdateProjectBody & { id: string }) => workspace().updateProject(id, body), refreshProjects);
 const refreshUsers = (client: QueryClient) =>
   Promise.all([
     client.invalidateQueries({ queryKey: keys.users }),
@@ -253,54 +226,43 @@ export const useDisconnectApp = () =>
 /** Approving (or declining) an AI app's request; answers where to send the browser back to the app. */
 export const useOAuthConsent = () => useMutation({ mutationFn: (body: OAuthConsentBody) => api<{ redirect: string }>("POST", "/api/oauth/consent", body) });
 
-export const useSetWorkingWeekdays = () =>
-  useApiMutation((workingWeekdays: number[]) => api<CalendarDto>("PUT", "/api/calendar/working-weekdays", { workingWeekdays }), refreshCalendar);
-export const useCreateResource = () => useApiMutation((body: CreateResourceBody) => api<{ resource: ResourceDto }>("POST", "/api/resources", body), refreshCalendar);
-export const useUpdateResource = () =>
-  useApiMutation(({ id, ...body }: UpdateResourceBody & { id: string }) => api<{ resource: ResourceDto }>("PATCH", `/api/resources/${id}`, body), refreshCalendar);
-export const useSaveHoliday = () =>
-  useApiMutation(({ id, ...body }: HolidayBody & { id?: string }) => (id ? api("PUT", `/api/holidays/${id}`, body) : api("POST", "/api/holidays", body)), refreshCalendar);
-export const useDeleteHoliday = () => useApiMutation((id: string) => api<void>("DELETE", `/api/holidays/${id}`), refreshCalendar);
-export const useSaveTimeOff = () =>
-  useApiMutation(({ id, ...body }: TimeOffBody & { id?: string }) => (id ? api("PUT", `/api/time-off/${id}`, body) : api("POST", "/api/time-off", body)), refreshCalendar);
-export const useSaveLocation = () =>
+export const useSetWorkingWeekdays = () => useApiMutation((workingWeekdays: number[]) => workspace().setWorkingWeekdays(workingWeekdays), refreshCalendar);
+export const useCreateResource = () => useApiMutation((body: CreateResourceBody) => workspace().createResource(body), refreshCalendar);
+export const useUpdateResource = () => useApiMutation(({ id, ...body }: UpdateResourceBody & { id: string }) => workspace().updateResource(id, body), refreshCalendar);
+export const useSaveHoliday = () => useApiMutation(({ id, ...body }: HolidayBody & { id?: string }) => workspace().saveHoliday(body, id), refreshCalendar);
+export const useDeleteHoliday = () => useApiMutation((id: string) => workspace().deleteHoliday(id), refreshCalendar);
+export const useSaveTimeOff = () => useApiMutation(({ id, ...body }: TimeOffBody & { id?: string }) => workspace().saveTimeOff(body, id), refreshCalendar);
+export const useSaveLocation = () => useApiMutation(({ id, ...body }: LocationBody & { id?: string }) => workspace().saveLocation(body, id), refreshCalendar);
+export const useDeleteLocation = () => useApiMutation((id: string) => workspace().deleteLocation(id), refreshCalendar);
+export const useImportHolidays = () =>
   useApiMutation(
-    ({ id, ...body }: LocationBody & { id?: string }) => (id ? api<{ location: LocationDto }>("PUT", `/api/locations/${id}`, body) : api<{ location: LocationDto }>("POST", "/api/locations", body)),
+    async ({ id, holidays }: { id: string; holidays: { name: string; startDate: string; endDate: string }[] }) => ({ added: await workspace().importHolidays(id, holidays) }),
     refreshCalendar,
   );
-export const useDeleteLocation = () => useApiMutation((id: string) => api<void>("DELETE", `/api/locations/${id}`), refreshCalendar);
-export const useImportHolidays = () =>
-  useApiMutation(({ id, holidays }: { id: string; holidays: { name: string; startDate: string; endDate: string }[] }) => api<{ added: number }>("POST", `/api/locations/${id}/holidays`, { holidays }), refreshCalendar);
 /** Countries (and their regions) with public holiday data. */
 export const holidayCountries = queryOptions({
   queryKey: ["public-holidays", "countries"],
-  queryFn: () => api<{ countries: { code: string; name: string }[] }>("GET", "/api/public-holidays/countries"),
+  queryFn: async () => ({ countries: await workspace().holidayCountries() }),
   staleTime: Infinity,
 });
 export const holidayRegions = (country: string) =>
   queryOptions({
     queryKey: ["public-holidays", "regions", country],
-    queryFn: () => api<{ regions: { code: string; name: string }[] }>("GET", `/api/public-holidays/countries/${country}/regions`),
+    queryFn: async () => ({ regions: await workspace().holidayRegions(country) }),
     staleTime: Infinity,
   });
 /** A location's public holidays for a year, marking those already added. */
 export const locationPublicHolidays = (id: string, year: number) =>
   queryOptions({
     queryKey: [...keys.calendar, "public-holidays", id, year],
-    queryFn: () => api<{ holidays: PublicHolidayDto[] }>("GET", `/api/locations/${id}/public-holidays?year=${year}`),
+    queryFn: async () => ({ holidays: await workspace().locationPublicHolidays(id, year) }),
   });
-export const useDeleteTimeOff = () => useApiMutation((id: string) => api<void>("DELETE", `/api/time-off/${id}`), refreshCalendar);
-
+export const useDeleteTimeOff = () => useApiMutation((id: string) => workspace().deleteTimeOff(id), refreshCalendar);
 /** Highlights of one project (the server broadcasts the new list; the refetch covers a missed one). */
 const refreshHighlights = (projectId: string) => (client: QueryClient) => client.invalidateQueries({ queryKey: keys.highlights(projectId) });
 export const useSaveHighlight = (projectId: string) =>
-  useApiMutation(
-    ({ id, ...body }: HighlightBody & { id?: string }) =>
-      id ? api<{ highlight: HighlightDto }>("PUT", `/api/highlights/${id}`, body) : api<{ highlight: HighlightDto }>("POST", `/api/projects/${projectId}/highlights`, body),
-    refreshHighlights(projectId),
-  );
-export const useDeleteHighlight = (projectId: string) => useApiMutation((id: string) => api<void>("DELETE", `/api/highlights/${id}`), refreshHighlights(projectId));
-
+  useApiMutation(({ id, ...body }: HighlightBody & { id?: string }) => workspace().saveHighlight(projectId, body, id), refreshHighlights(projectId));
+export const useDeleteHighlight = (projectId: string) => useApiMutation((id: string) => workspace().deleteHighlight(projectId, id), refreshHighlights(projectId));
 const PAGE = 20;
 
 /** A task's comments, newest first, a page at a time. */
@@ -401,19 +363,15 @@ export const useRevokeShareLink = (projectId: string) => useApiMutation((id: str
 export const useDeleteProject = () => {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api<void>("DELETE", `/api/projects/${id}`),
+    mutationFn: (id: string) => workspace().deleteProject(id),
     onSuccess: (_result, id) => {
       client.removeQueries({ queryKey: keys.project(id) });
       return client.invalidateQueries({ queryKey: ["projects"] });
     },
   });
 };
-
 /** Saves the board's current dates as a baseline (the server broadcasts the new list). */
 export const useCreateBaseline = (projectId: string) =>
-  useApiMutation(
-    (name: string) => api<{ baseline: BaselineDto }>("POST", `/api/projects/${projectId}/baselines`, { name }),
-    (client) => client.invalidateQueries({ queryKey: keys.baselines(projectId) }),
-  );
+  useApiMutation((name: string) => workspace().createBaseline(projectId, name), (client) => client.invalidateQueries({ queryKey: keys.baselines(projectId) }));
 export const useDeleteBaseline = (projectId: string) =>
-  useApiMutation((id: string) => api<void>("DELETE", `/api/baselines/${id}`), (client) => client.invalidateQueries({ queryKey: keys.baselines(projectId) }));
+  useApiMutation((id: string) => workspace().deleteBaseline(projectId, id), (client) => client.invalidateQueries({ queryKey: keys.baselines(projectId) }));
