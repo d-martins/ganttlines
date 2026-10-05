@@ -1,5 +1,5 @@
 import type { Comment } from "@ganttlines/db";
-import { BOARD_LIMITS, CommentBody, EditCommentBody, type CommentDto } from "@ganttlines/protocol";
+import { BOARD_LIMITS, CommentBody, EditCommentBody, type CommentCountsDto, type CommentDto } from "@ganttlines/protocol";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { actorKey, type Actor } from "../actor";
@@ -55,6 +55,14 @@ export function commentRoutes(app: FastifyInstance, context: RouteContext): void
     const body = parseBody(CommentBody, request.body);
     const comment = await postComment(context, projectId, access.actor, body.taskId, body.body);
     return reply.status(201).send({ comment: toCommentDto(comment, actorKey(access.actor)) });
+  });
+
+  /** How many comments each task has (deleted ones aside), for the task list. */
+  app.get<{ Params: { id: string } }>("/api/projects/:id/comment-counts", async (request): Promise<CommentCountsDto> => {
+    const projectId = parseId(request.params.id, "Project");
+    await requireProjectAccess(request, context, projectId, "view");
+    const groups = await db.comment.groupBy({ by: ["taskId"], where: { projectId, deletedAt: null }, _count: { _all: true } });
+    return { counts: Object.fromEntries(groups.map((group) => [group.taskId, group._count._all])) };
   });
 
   app.patch<{ Params: { id: string } }>("/api/comments/:id", async (request) => {

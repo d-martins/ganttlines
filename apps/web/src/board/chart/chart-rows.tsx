@@ -155,6 +155,12 @@ export function ChartRows({
       setMenuFor(row.id);
     } else if (event.key === "Delete" || event.key === "Backspace") {
       deleteRow(latest.current.board, row);
+    } else if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+      // The day menu (holidays, time off, highlights), for the task's first day: as a right-click there would.
+      const target = event.currentTarget as HTMLElement;
+      const body = target.closest("[data-chart-body]") as HTMLElement;
+      const x = body.getBoundingClientRect().left + now.x(span.start) + 1;
+      target.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: x, clientY: target.getBoundingClientRect().bottom }));
     } else {
       return;
     }
@@ -173,7 +179,7 @@ export function ChartRows({
   return (
     <>
       <p id={BAR_HELP_ID} className="sr-only">
-        Arrow keys move the task, Shift with arrow keys changes its length, Enter opens its options.
+        Arrow keys move the task, Shift with arrow keys changes its length, Enter opens its options, Shift+F10 opens the menu for its first day.
       </p>
       {rows.map((entry, index) => {
         const absoluteIndex = firstRow + index;

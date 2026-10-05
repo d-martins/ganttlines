@@ -48,6 +48,11 @@ export interface HighlightDto {
   color: string;
 }
 
+/** GET /api/projects/:id/comment-counts: comments per task id (tasks without any are left out) */
+export interface CommentCountsDto {
+  counts: Record<string, number>;
+}
+
 export interface BaselineDto {
   id: string;
   name: string;

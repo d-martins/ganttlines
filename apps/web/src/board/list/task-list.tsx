@@ -1,7 +1,9 @@
 import type { Calendar, RowId } from "@ganttlines/engine";
-import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, GripVertical, LocateFixed, IndentDecrease, IndentIncrease, PanelRightOpen, Plus, Search } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, GripVertical, LocateFixed, IndentDecrease, IndentIncrease, MessageSquare, PanelRightOpen, Plus, Search } from "lucide-react";
 import { computeSchedule, CycleError } from "@ganttlines/engine";
 import { useEffect, useMemo, useRef, useState, type HTMLAttributes, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type Ref } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { commentCounts } from "../../api/queries";
 import { Avatar } from "../../ui/avatar";
 import { IconButton } from "../../ui/button";
 import { AssigneePicker } from "../assignee-picker";
@@ -221,6 +223,7 @@ export function ListRows({
   searching: boolean;
 }) {
   const board = useBoard();
+  const comments = useQuery(commentCounts(board.sync.projectId)).data;
   const { state, calendar, resources, resourceMap, canEdit, canCreateResources } = board;
   const run = useRun();
   const { selectedId, editingId, draftId, select, edit, center } = useSelection();
@@ -421,6 +424,12 @@ export function ListRows({
                     <span className={`truncate ${row.title ? "" : "text-muted italic"}`}>{row.title || "Untitled"}</span>
                   )}
                   {entry.deletedSince ? <span className="shrink-0 rounded bg-surface-2 px-1 text-[10px] text-muted">deleted since</span> : null}
+                  {comments?.[row.id] ? (
+                    <span aria-label={`${comments[row.id]} ${comments[row.id] === 1 ? "comment" : "comments"}`} className="flex shrink-0 items-center gap-0.5 text-xs font-normal text-muted">
+                      <MessageSquare aria-hidden size={11} />
+                      {comments[row.id]}
+                    </span>
+                  ) : null}
                   <span className="ml-auto flex shrink-0">
                     {canEdit ? (
                       <button

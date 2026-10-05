@@ -63,6 +63,18 @@ describe("comments", () => {
     expect(response.statusCode).toBe(409);
   });
 
+  it("counts each task's comments (not deleted ones), for the task list", async () => {
+    const { vi, projectId, taskId } = await board();
+    const post = (body: string) => t.app.inject({ method: "POST", url: `/api/projects/${projectId}/comments`, headers: { cookie: vi }, payload: { taskId, body } });
+    await post("one");
+    const second = (await post("two")).json().comment;
+    await post("three");
+    await t.app.inject({ method: "DELETE", url: `/api/comments/${second.id}`, headers: { cookie: vi } });
+    const counts = await t.app.inject({ url: `/api/projects/${projectId}/comment-counts`, headers: { cookie: vi } });
+    expect(counts.json()).toEqual({ counts: { [taskId]: 2 } });
+    expect((await t.app.inject({ url: `/api/projects/${projectId}/comment-counts` })).statusCode).toBe(401);
+  });
+
   it("only attaches comments to existing tasks", async () => {
     const { vi, projectId } = await board();
     const response = await t.app.inject({ method: "POST", url: `/api/projects/${projectId}/comments`, headers: { cookie: vi }, payload: { taskId: randomUUID(), body: "?" } });

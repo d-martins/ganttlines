@@ -61,6 +61,7 @@ export {
   type BaselineDto,
   type BaselineSnapshotDto,
   type BaselineTaskDto,
+  type CommentCountsDto,
   type CommentDto,
   type CommentsDto,
   type HighlightDto,

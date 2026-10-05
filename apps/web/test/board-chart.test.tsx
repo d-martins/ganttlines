@@ -169,6 +169,15 @@ describe("chart editing", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 
+  it("opens the day menu from the keyboard (Shift+F10 or the menu key on a bar: its first day)", async () => {
+    await chartBoard();
+    const hooks = bar(/^hooks,/);
+    hooks.focus();
+    fireEvent.keyDown(hooks, { key: "F10", shiftKey: true });
+    expect(await screen.findByRole("menuitem", { name: "Highlight this day…" })).toBeInTheDocument();
+    expect(screen.getByText(formatDay(toDay("2026-10-12")))).toBeInTheDocument();
+  });
+
   it("is read-only for viewers: bars are images, no controls, no day menu", async () => {
     await chartBoard(ROWS, VIEWER);
     expect(screen.getByRole("img", { name: /^hooks,/ })).toBeInTheDocument();

@@ -8,6 +8,7 @@ import type {
   BaselineSnapshotDto,
   CalendarDto,
   CommentDto,
+  CommentCountsDto,
   CommentsDto,
   CreatedShareLinkDto,
   CreateShareLinkBody,
@@ -54,6 +55,7 @@ export const keys = {
   baselines: (id: string) => ["project", id, "baselines"] as const,
   baseline: (id: string, baselineId: string) => ["project", id, "baseline", baselineId] as const,
   comments: (id: string, taskId: string) => ["project", id, "comments", taskId] as const,
+  commentCounts: (id: string) => ["project", id, "comment-counts"] as const,
   activity: (id: string, rowId: string) => ["project", id, "activity", rowId] as const,
   shareLinks: (id: string) => ["project", id, "share-links"] as const,
   shareInfo: (token: string) => ["share", token] as const,
@@ -313,6 +315,13 @@ export const taskComments = (projectId: string, taskId: string) =>
       api<CommentsDto>("GET", `/api/projects/${projectId}/comments?taskId=${taskId}&limit=${PAGE}${pageParam ? `&before=${pageParam}` : ""}`),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.nextBefore,
+  });
+
+/** How many comments each task has (by task id), for the task list. */
+export const commentCounts = (projectId: string) =>
+  queryOptions({
+    queryKey: keys.commentCounts(projectId),
+    queryFn: async () => (await api<CommentCountsDto>("GET", `/api/projects/${projectId}/comment-counts`)).counts,
   });
 
 /** A row's history, newest first, a page at a time. */

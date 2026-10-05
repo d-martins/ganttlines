@@ -36,6 +36,7 @@ function openBoard(rows: ProjectStateDto["rows"] = ROWS, path = `/p/${PROJECT_ID
   api.on("GET /api/resources", () => ({ body: { resources: [ANA] } }));
   api.on(`GET /api/projects/${PROJECT_ID}/highlights`, () => ({ body: { highlights: [] } }));
   api.on(`GET /api/projects/${PROJECT_ID}/baselines`, () => ({ body: { baselines: [{ id: BASELINE_ID, name: "Kick-off", createdAt: "", createdBy: "Ada" }] } }));
+  api.on(`GET /api/projects/${PROJECT_ID}/comment-counts`, () => ({ body: { counts: {} } }));
   api.on(`GET /api/baselines/${BASELINE_ID}`, () => ({
     body: {
       baseline: { id: BASELINE_ID, name: "Kick-off", createdAt: "", createdBy: "Ada" },
@@ -113,6 +114,15 @@ describe("board", () => {
     expect(list.getByText("hooks", { exact: true })).toBeInTheDocument();
     expect(listRow("parent")).toHaveAttribute("aria-expanded", "false");
     expect(within(listRow("ms")).getByText("5")).toBeInTheDocument();
+  });
+
+  it("shows how many comments a task has, and keeps it up to date", async () => {
+    const { api } = await joinedBoard();
+    expect(within(listRow("hooks")).queryByLabelText(/comments?$/)).not.toBeInTheDocument();
+    api.on(`GET /api/projects/${PROJECT_ID}/comment-counts`, () => ({ body: { counts: { hooks: 2 } } }));
+    const comment = { id: "c1", taskId: "hooks", author: { userId: null, label: "Rui" }, body: "hi", createdAt: "2026-10-01T10:00:00Z", editedAt: null, deleted: false, mine: false };
+    FakeWebSocket.last.deliver({ type: "comment", projectId: PROJECT_ID, comment });
+    expect(await within(listRow("hooks")).findByLabelText("2 comments")).toHaveTextContent("2");
   });
 
   it("forgets collapsed rows that no longer exist", async () => {
