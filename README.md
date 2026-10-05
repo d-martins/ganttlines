@@ -231,7 +231,9 @@ For no downtime during updates, or on platforms that run several instances (Kube
 DigitalOcean App Platform, Fly …), GanttLines can run as several copies sharing one database:
 
 - **Compose:** `docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d` runs two
-  copies (`GL_REPLICAS` for more) behind a small Caddy proxy on the usual port.
+  copies (`GL_REPLICAS` for more) behind a small Caddy proxy on the usual port. Put it straight on
+  the network (or let Caddy do HTTPS): behind another proxy of yours, every visitor would look like
+  that proxy to the rate limits — there, use your proxy to balance the copies instead.
 - **Elsewhere:** set `CLUSTER=postgres` on **every** copy, run as many as you like behind your load
   balancer (no sticky sessions needed; WebSockets must be allowed), and use `/api/health` as the
   health check — it answers 503 while a copy is starting, stopping or can't reach the database.
