@@ -176,6 +176,17 @@ export class BoardSync {
     this.drain();
   }
 
+  /** Starts the connection again at once (the server reads who's connecting — e.g. a visitor's new name — when it opens). */
+  reconnect(): void {
+    const socket = this.socket;
+    if (this.stopped || !socket) return;
+    socket.onclose = null;
+    socket.onmessage = null;
+    socket.close();
+    this.retries = 0;
+    this.closed(1000);
+  }
+
   private connect(): void {
     const socket = this.options.openSocket();
     this.socket = socket;

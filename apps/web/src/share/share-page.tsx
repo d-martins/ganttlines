@@ -13,6 +13,7 @@ import { ThemeToggle } from "../app/theme-toggle";
 import { BoardTools } from "../board/board-tools";
 import { Button } from "../ui/button";
 import { ErrorText, Field } from "../ui/field";
+import { FormDialog } from "../ui/form-dialog";
 import { Toaster } from "../ui/toast";
 
 /** A person who can see boards without a link: signed in, not a guest, password in order. */
@@ -47,7 +48,12 @@ export function SharePage() {
   if (link.access === "anonymous" && !isMember(me.data) && !link.visitor) return <ChooseName token={token} link={link} />;
   return (
     <div className="flex h-full flex-col">
-      <LinkHeader link={link} viewer={isMember(me.data) || link.access === "authenticated" ? (me.data?.name ?? null) : link.visitor ? `${link.visitor.name} (anonymous)` : null} />
+      <LinkHeader
+        token={token}
+        link={link}
+        viewer={isMember(me.data) || link.access === "authenticated" ? (me.data?.name ?? null) : link.visitor ? `${link.visitor.name} (anonymous)` : null}
+        visitor={!isMember(me.data) && link.access === "anonymous" ? (link.visitor?.name ?? null) : null}
+      />
       <main className="min-h-0 flex-1">
         <BoardScreen projectId={link.project.id} share={{ token, collaboration: link.collaboration }} />
       </main>
@@ -135,10 +141,44 @@ function ChooseName({ token, link }: { token: string; link: ShareInfoDto }) {
   );
 }
 
+/** An anonymous visitor renames themselves (the board reconnects, so others see the new name). */
+function ChangeName({ token, name, onChanged }: { token: string; name: string; onChanged: () => void }) {
+  const save = useVisitorName(token);
+  const [draft, setDraft] = useState<string | null>(null);
+  return (
+    <>
+      <button type="button" onClick={() => setDraft(name)} className="shrink-0 text-xs text-muted underline-offset-2 hover:text-text hover:underline">
+        Change your name
+      </button>
+      <FormDialog
+        open={draft !== null}
+        onOpenChange={(open) => (open ? undefined : setDraft(null))}
+        title="Change your name"
+        description="Others see it as “Name (anonymous)”."
+        submitLabel="Save"
+        pending={save.isPending}
+        error={save.error ? errorMessage(save.error) : null}
+        onSubmit={() => {
+          const next = draft?.trim() ?? "";
+          if (!next || next === name) return setDraft(null);
+          save.mutate(next, {
+            onSuccess: () => {
+              setDraft(null);
+              onChanged();
+            },
+          });
+        }}
+      >
+        <Field label="Your name" value={draft ?? ""} required maxLength={60} autoFocus onChange={(event) => setDraft(event.target.value)} />
+      </FormDialog>
+    </>
+  );
+}
+
 /** Stand-in store while the board is loading (hooks can't be skipped). */
 const EMPTY = createStore<{ project?: { name: string } } | null>(() => null);
 
-function LinkHeader({ link, viewer }: { link: ShareInfoDto; viewer: string | null }) {
+function LinkHeader({ token, link, viewer, visitor }: { token: string; link: ShareInfoDto; viewer: string | null; visitor: string | null }) {
   const board = useActiveBoard((state) => state.sync);
   const shown = board && board.projectId === link.project.id ? board : null;
   const name = useStore(shown?.store ?? EMPTY, (state) => state?.project?.name) ?? link.project.name;
@@ -148,6 +188,7 @@ function LinkHeader({ link, viewer }: { link: ShareInfoDto; viewer: string | nul
         <h1 className="max-w-64 min-w-12 shrink-0 truncate text-sm font-semibold">{name}</h1>
         {shown ? <BoardTools sync={shown} /> : <span className="flex-1" />}
         {viewer ? <span className="shrink-0 text-xs text-muted">{viewer}</span> : null}
+        {visitor !== null ? <ChangeName token={token} name={visitor} onChanged={() => shown?.reconnect()} /> : null}
         <ThemeToggle />
       </div>
       <p role="status" className="flex items-center gap-1.5 border-t border-border bg-accent-soft px-4 py-1 text-xs">

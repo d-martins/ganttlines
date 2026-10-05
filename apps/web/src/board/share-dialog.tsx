@@ -9,6 +9,7 @@ import { Button, IconButton } from "../ui/button";
 import { ConfirmButton } from "../ui/confirm";
 import { ErrorText, Field } from "../ui/field";
 import { fullTime } from "./format";
+import { NameInput } from "../ui/name-input";
 
 const ACCESS_LABEL: Record<LinkAccess, string> = {
   anonymous: "Anyone with the link",
@@ -153,8 +154,15 @@ function LinkRow({ projectId, link }: { projectId: string; link: ShareLinkDto })
   return (
     <li className="flex flex-col gap-1 rounded-md border border-border px-3 py-2 text-sm">
       <div className="flex items-center gap-2">
-        <span className="font-medium">{link.label || ACCESS_LABEL[link.access]}</span>
-        {link.label ? <span className="text-xs text-muted">{ACCESS_LABEL[link.access]}</span> : null}
+        <NameInput
+          label="Link label"
+          value={link.label}
+          placeholder={ACCESS_LABEL[link.access]}
+          allowEmpty
+          onCommit={(label, revert) => update.mutate({ id: link.id, label }, { onError: revert })}
+          className="min-w-0 flex-1 font-medium placeholder:text-text"
+        />
+        {link.label ? <span className="shrink-0 text-xs text-muted">{ACCESS_LABEL[link.access]}</span> : null}
         <span className="ml-auto">
           <ConfirmButton
             label="Turn off"

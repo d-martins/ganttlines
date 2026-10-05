@@ -1,6 +1,6 @@
 import type { HolidayBody, HolidayDto, LocationDto, ResourceDto, TimeOffBody, TimeOffDto, UserDto } from "@ganttlines/protocol";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { errorMessage, latestError } from "../api/client";
 import {
   calendar,
@@ -28,6 +28,7 @@ import { ConfirmButton } from "../ui/confirm";
 import { ErrorText, Field } from "../ui/field";
 import { SearchSelect, type SearchOption } from "../ui/search-select";
 import { Section } from "../ui/section";
+import { NameInput } from "../ui/name-input";
 
 const canEdit = (user: UserDto | null | undefined) => user?.role === "editor" || user?.role === "admin";
 
@@ -57,37 +58,6 @@ export function TeamPage() {
         )}
       </QueryState>
     </div>
-  );
-}
-
-/** A name edited in place: saved on Enter or when leaving it; Escape (or a failed save) puts it back. */
-function NameInput({ label, value, onCommit, className }: { label: string; value: string; onCommit: (name: string, revert: () => void) => void; className: string }) {
-  const [draft, setDraft] = useState(value);
-  const cancelled = useRef(false);
-  useEffect(() => setDraft(value), [value]);
-  return (
-    <input
-      aria-label={label}
-      value={draft}
-      onChange={(event) => setDraft(event.target.value)}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") event.currentTarget.blur();
-        if (event.key === "Escape") {
-          cancelled.current = true;
-          event.currentTarget.blur();
-        }
-      }}
-      onBlur={() => {
-        const name = draft.trim();
-        if (cancelled.current || !name || name === value) {
-          cancelled.current = false;
-          setDraft(value);
-          return;
-        }
-        onCommit(name, () => setDraft(value));
-      }}
-      className={`rounded border border-transparent bg-transparent px-1 py-0.5 hover:border-border focus:border-accent ${className}`}
-    />
   );
 }
 
