@@ -212,11 +212,12 @@ describe("closing connections", () => {
     });
     const app = await testApp({ db: t.db, config: testConfig, logger: { level: "info", stream } });
     try {
-      for (const url of ["/api/share/SECRET-ONE", "/api/share/SECRET-TWO/visitor", "/ws?share=SECRET-THREE", "/s/SECRET-FOUR", "/reset-password?token=SECRET-FIVE&x=1"]) {
+      for (const url of ["/api/share/SECRET-ONE", "/api/share/SECRET-TWO/visitor", "/ws?share=SECRET-THREE", "/s/SECRET-FOUR", "/reset-password?token=SECRET-FIVE&x=1", "/api/auth/oidc/callback?code=SECRET-SIX&state=SECRET-SEVEN", "/connect?request=SECRET-EIGHT", "/api/oauth/request?request=SECRET-NINE"]) {
         await app.inject({ url });
       }
       const logged = lines.join("\n");
       expect(logged).toContain("/api/share/");
+      expect(logged).toContain("/api/auth/oidc/callback?code=[redacted]");
       expect(logged).not.toMatch(/SECRET/);
     } finally {
       await app.close();

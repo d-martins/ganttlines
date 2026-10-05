@@ -293,12 +293,33 @@ export async function buildApp({
   return app;
 }
 
-/** Share-link and password-reset tokens travel in addresses; the request log shows them as [redacted]. */
+/** Query parameters that never carry secrets; every other value is logged as [redacted]. */
+const LOGGED_QUERY_PARAMS = new Set(["archived", "since", "year", "all", "limit", "before", "rowId"]);
+
+/**
+ * Tokens travel in addresses (share links, password resets, sign-on codes, AI-app requests); the
+ * request log shows the share-link path segment and every query value it doesn't know as [redacted].
+ */
 export function redactUrl(url: string): string {
   const [path = "", query] = url.split("?", 2);
   const safePath = path.replace(/^\/(api\/share|s)\/[^/]+/, "/$1/[redacted]");
-  const safeQuery = query?.replace(/(^|&)(share|token)=[^&]*/g, "$1$2=[redacted]");
-  return safeQuery === undefined ? safePath : `${safePath}?${safeQuery}`;
+  if (query === undefined) return safePath;
+  const safeQuery = query
+    .split("&")
+    .map((pair) => {
+      const name = pair.split("=", 1)[0] ?? "";
+      return pair.includes("=") && !LOGGED_QUERY_PARAMS.has(decodeURIComponentSafe(name)) ? `${name}=[redacted]` : pair;
+    })
+    .join("&");
+  return `${safePath}?${safeQuery}`;
+}
+
+function decodeURIComponentSafe(text: string): string {
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
 }
 
 function withRedactedUrls(logger: LoggerOption): LoggerOption {
