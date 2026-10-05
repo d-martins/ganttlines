@@ -54,6 +54,13 @@ describe("anonymous links", () => {
     expect((await t.app.inject({ url: `/api/share/${token}`, headers: { cookie: visitor } })).json().visitor).toEqual({ name: "Rudy" });
   });
 
+  it("forget a visitor after 180 days (the server checks, not just the browser)", async () => {
+    const { token } = await projectWithLink({ access: "anonymous" });
+    const visitor = await visit(token, "Rudy");
+    t.clock.now = new Date(t.clock.now.getTime() + 181 * 24 * 60 * 60 * 1000);
+    expect((await t.app.inject({ url: `/api/share/${token}`, headers: { cookie: visitor } })).json().visitor).toBeNull();
+  });
+
   it("require a display name, then show the board read-only", async () => {
     const { projectId, token } = await projectWithLink({ access: "anonymous" });
     const anonymous = await t.app.inject({ url: `/api/projects/${projectId}/state`, headers: viaLink(token) });

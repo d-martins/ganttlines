@@ -92,6 +92,9 @@ export function commentRoutes(app: FastifyInstance, context: RouteContext): void
 export async function postComment(context: RouteContext, projectId: string, actor: Actor, taskId: string, body: string): Promise<Comment> {
   await assertNotArchived(context.db, projectId);
   if (!(await context.projects.hasTask(projectId, taskId))) throw notFound("Task");
+  if ((await context.db.comment.count({ where: { projectId, taskId, deletedAt: null } })) >= BOARD_LIMITS.commentsPerTask) {
+    throw conflict(`A task can have at most ${BOARD_LIMITS.commentsPerTask} comments — delete some first`);
+  }
   const comment = await context.db.comment.create({
     data: { projectId, taskId, authorUserId: actor.userId, authorVisitorId: actor.visitorId ?? null, authorLabel: actor.label, body },
   });

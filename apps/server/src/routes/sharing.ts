@@ -3,14 +3,14 @@ import { CreateShareLinkBody, UpdateShareLinkBody, VisitorBody, type ShareInfoDt
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { randomUUID } from "node:crypto";
 import { actorOf } from "../actor";
-import { VISITOR_COOKIE } from "../auth/access";
+import { VISITOR_COOKIE, VISITOR_TTL_MS } from "../auth/access";
 import { requireUser } from "../auth/guard";
 import { credentialsOf, throttleShareTokens } from "../auth/request-access";
 import { badRequest, HttpError, notFound } from "../errors";
 import { parseBody, parseId } from "../validation";
 import type { RouteContext } from "./context";
 
-const VISITOR_COOKIE_MAX_AGE_S = 180 * 24 * 60 * 60;
+const VISITOR_COOKIE_MAX_AGE_S = VISITOR_TTL_MS / 1000;
 
 /**
  * Share links. Editors create, list, change and revoke links for a project; anyone

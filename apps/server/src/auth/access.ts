@@ -5,6 +5,8 @@ import { HttpError, notFound, unauthorized } from "../errors";
 import { pendingStepError, type PendingStep } from "./guard";
 
 export const VISITOR_COOKIE = "gp_visitor";
+/** How long a visitor's chosen name (and identity) lasts; then they pick it again. */
+export const VISITOR_TTL_MS = 180 * 24 * 60 * 60 * 1000;
 
 export interface Visitor {
   id: string;
@@ -55,6 +57,7 @@ export class AccessService {
      * cached link working here, so every lookup reads the database.
      */
     private readonly cacheLinks = true,
+    private readonly now: () => number = Date.now,
   ) {}
 
   newToken(): { token: string; tokenHash: string } {
@@ -115,8 +118,9 @@ export class AccessService {
     this.linksByHash.clear();
   }
 
+  /** A signed visitor cookie, valid for VISITOR_TTL_MS. */
   signVisitor(visitor: Visitor): string {
-    const payload = Buffer.from(JSON.stringify(visitor)).toString("base64url");
+    const payload = Buffer.from(JSON.stringify({ ...visitor, exp: this.now() + VISITOR_TTL_MS })).toString("base64url");
     return `${payload}.${this.visitorSignature(payload)}`;
   }
 
@@ -128,7 +132,9 @@ export class AccessService {
     const given = Buffer.from(signature);
     if (expected.length !== given.length || !timingSafeEqual(expected, given)) return null;
     try {
-      const value = JSON.parse(Buffer.from(payload, "base64url").toString()) as Partial<Visitor>;
+      const value = JSON.parse(Buffer.from(payload, "base64url").toString()) as Partial<Visitor> & { exp?: unknown };
+      // (cookies from before expiry was recorded have none: their visitors pick a name again)
+      if (typeof value.exp !== "number" || value.exp <= this.now()) return null;
       return typeof value.id === "string" && typeof value.name === "string" ? { id: value.id, name: value.name } : null;
     } catch {
       return null;

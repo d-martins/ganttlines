@@ -202,6 +202,27 @@ describe("closing connections", () => {
     expect(lines.filter((line) => /"level":(40|50|60)/.test(line))).toEqual([]);
   });
 
+  it("keeps link and reset tokens out of the request log", async () => {
+    const lines: string[] = [];
+    const stream = new Writable({
+      write(chunk: Buffer, _encoding, done) {
+        lines.push(chunk.toString());
+        done();
+      },
+    });
+    const app = await testApp({ db: t.db, config: testConfig, logger: { level: "info", stream } });
+    try {
+      for (const url of ["/api/share/SECRET-ONE", "/api/share/SECRET-TWO/visitor", "/ws?share=SECRET-THREE", "/s/SECRET-FOUR", "/reset-password?token=SECRET-FIVE&x=1"]) {
+        await app.inject({ url });
+      }
+      const logged = lines.join("\n");
+      expect(logged).toContain("/api/share/");
+      expect(logged).not.toMatch(/SECRET/);
+    } finally {
+      await app.close();
+    }
+  });
+
   it("closes a session's sockets on logout", async () => {
     const { ana } = await team();
     const a = await connect(t.app, ana.cookie);

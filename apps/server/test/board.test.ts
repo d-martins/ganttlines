@@ -1,3 +1,4 @@
+import { BOARD_LIMITS } from "@ganttlines/protocol";
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { createUser, setupAdmin, useTestApp } from "./helpers";
@@ -51,6 +52,15 @@ describe("comments", () => {
     const { admin, vi, projectId, taskId } = await board();
     const comment = (await t.app.inject({ method: "POST", url: `/api/projects/${projectId}/comments`, headers: { cookie: vi }, payload: { taskId, body: "spam" } })).json().comment;
     expect((await t.app.inject({ method: "DELETE", url: `/api/comments/${comment.id}`, headers: { cookie: admin } })).statusCode).toBe(204);
+  });
+
+  it("keeps at most BOARD_LIMITS.commentsPerTask comments on a task", async () => {
+    const { vi, projectId, taskId } = await board();
+    await t.db.comment.createMany({
+      data: Array.from({ length: BOARD_LIMITS.commentsPerTask }, () => ({ projectId, taskId, authorUserId: null, authorLabel: "Bot", body: "spam" })),
+    });
+    const response = await t.app.inject({ method: "POST", url: `/api/projects/${projectId}/comments`, headers: { cookie: vi }, payload: { taskId, body: "one more" } });
+    expect(response.statusCode).toBe(409);
   });
 
   it("only attaches comments to existing tasks", async () => {

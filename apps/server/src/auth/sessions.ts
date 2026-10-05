@@ -32,7 +32,7 @@ export class SessionStore {
 
   async resolve(token: string): Promise<ResolvedSession | null> {
     const id = this.digest(token);
-    const session = await this.db.session.findUnique({ where: { id }, include: { user: true } });
+    const session = (await this.db.session.findUnique({ where: { id }, include: { user: true } })) ?? (await this.upgrade(token));
     if (!session) return null;
     const now = this.now();
     if (session.expiresAt <= now) {
@@ -51,7 +51,7 @@ export class SessionStore {
 
   /** The live sessions among `tokens` (read only: checking doesn't extend them), in one query. */
   async check(tokens: string[]): Promise<Map<string, ResolvedSession>> {
-    const byDigest = new Map(tokens.map((token) => [this.digest(token), token]));
+    const byDigest = new Map(tokens.flatMap((token) => [[this.digest(token), token] as const, [this.olderDigest(token), token] as const]));
     const sessions = await this.db.session.findMany({ where: { id: { in: [...byDigest.keys()] }, expiresAt: { gt: this.now() } }, include: { user: true } });
     return new Map(sessions.map((session) => [byDigest.get(session.id)!, { user: session.user, viaSso: session.viaSso, refreshedUntil: null }]));
   }
@@ -63,16 +63,26 @@ export class SessionStore {
   }
 
   async revoke(token: string): Promise<void> {
-    await this.db.session.deleteMany({ where: { id: this.digest(token) } });
+    await this.db.session.deleteMany({ where: { id: { in: [this.digest(token), this.olderDigest(token)] } } });
   }
 
   /** Revokes every session of the user, optionally keeping the one identified by `exceptToken`. */
   async revokeAllForUser(userId: string, exceptToken?: string): Promise<void> {
-    const keep = exceptToken === undefined ? undefined : this.digest(exceptToken);
-    await this.db.session.deleteMany({ where: { userId, ...(keep ? { NOT: { id: keep } } : {}) } });
+    const keep = exceptToken === undefined ? [] : [this.digest(exceptToken), this.olderDigest(exceptToken)];
+    await this.db.session.deleteMany({ where: { userId, id: { notIn: keep } } });
   }
 
   private digest(token: string): string {
+    return createHmac("sha256", this.secret).update(`session:${token}`).digest("hex");
+  }
+
+  /** How sessions were stored before (no "session:" prefix); still accepted, they move on first use. */
+  private olderDigest(token: string): string {
     return createHmac("sha256", this.secret).update(token).digest("hex");
+  }
+
+  private async upgrade(token: string) {
+    const { count } = await this.db.session.updateMany({ where: { id: this.olderDigest(token) }, data: { id: this.digest(token) } });
+    return count === 0 ? null : this.db.session.findUnique({ where: { id: this.digest(token) }, include: { user: true } });
   }
 }
