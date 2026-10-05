@@ -8,6 +8,7 @@ import {
   spanOfHalves,
   spanStart,
   toDay,
+  TASK_DEFAULTS,
   type Calendar,
   type ProjectState,
   type RowId,
@@ -37,6 +38,10 @@ export interface BoardRow extends ListRow {
   actualDays: number | null;
   /** single tasks with actual days: the span those days cover from its start, and how they compare with the plan */
   actual: { span: Span; versusPlan: "over" | "under" | "even" } | null;
+  /** drawn from a baseline (switched to it): its dates, not today's plan */
+  fromBaseline?: boolean;
+  /** in the baseline, but deleted since (only shown when switched to it) */
+  deletedSince?: boolean;
 }
 
 /** Actual days of a row: a task's own, or the sum over the tasks inside it (null when none recorded). */
@@ -99,7 +104,7 @@ export function boardModel(
     if (switched) {
       const ghost = saved.get(row.id);
       const span = row.kind === "section" ? (sectionSpans!.get(row.id) ?? null) : (ghost?.span ?? null);
-      return { ...entry, span, kind: ghost?.kind ?? liveKind, violation: false, ghost: null, actualDays, actual: null };
+      return { ...entry, span, kind: ghost?.kind ?? liveKind, violation: false, ghost: null, actualDays, actual: null, fromBaseline: true };
     }
     const span = computed?.span ?? null;
     const single = row.kind === "task" && liveKind === "task";
@@ -120,6 +125,29 @@ export function boardModel(
       actual,
     };
   });
+  if (switched && !needle) {
+    // Tasks the baseline had that were deleted since: shown at the end, as they were.
+    for (const task of baseline.tasks) {
+      if (state.rows[task.rowId]) continue;
+      const row = { ...TASK_DEFAULTS, id: task.rowId, kind: "task" as const, title: task.title, parentId: null, position: "", collapsed: false, duration: 0 };
+      rows.push({
+        row,
+        number: 0,
+        depth: 0,
+        hasChildren: false,
+        isParent: false,
+        collapsed: false,
+        span: saved.get(task.rowId)!.span,
+        kind: task.kind,
+        violation: false,
+        ghost: null,
+        actualDays: null,
+        actual: null,
+        fromBaseline: true,
+        deletedSince: true,
+      });
+    }
+  }
   return { rows, numbers, cycle: schedule === null };
 }
 

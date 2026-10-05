@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
+import { HttpError } from "../errors";
 import type { ClusterEvent, EventBus, ProjectLock } from "./types";
 
 const CHANNEL = "ganttlines";
@@ -149,9 +150,23 @@ export class PgEventBus implements EventBus {
   }
 }
 
-/** Advisory locks held on a pooled session for the length of the work (closing it releases them). */
+/** Postgres' "lock_not_available": a lock wait ran past lock_timeout. */
+const LOCK_NOT_AVAILABLE = "55P03";
+
+/**
+ * Advisory locks held on a pooled session for the length of the work (closing it releases them).
+ * Waiting for one gives up after `waitMs` with a "busy" answer, so work stuck elsewhere doesn't
+ * pile up requests (and connections) behind it.
+ */
 export class PgLock implements ProjectLock {
-  constructor(private readonly pool: pg.Pool) {}
+  private readonly waitMs: number;
+
+  constructor(
+    private readonly pool: pg.Pool,
+    { waitMs = 30_000 }: { waitMs?: number } = {},
+  ) {
+    this.waitMs = Math.round(waitMs);
+  }
 
   async run<T>(key: string, work: () => Promise<T>): Promise<T> {
     const client = await this.pool.connect();
@@ -163,7 +178,9 @@ export class PgLock implements ProjectLock {
     };
     client.on("error", broken);
     try {
+      await client.query(`SET lock_timeout = ${this.waitMs}`);
       await client.query("SELECT pg_advisory_lock($1, hashtext($2))", [LOCK_NAMESPACE, key]).catch((error: unknown) => {
+        if ((error as { code?: string }).code === LOCK_NOT_AVAILABLE) throw new HttpError(503, "busy", "This is busy right now — try again in a moment");
         healthy = false;
         throw error;
       });

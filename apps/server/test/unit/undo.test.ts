@@ -11,7 +11,6 @@ const task = (id: string, fields: Partial<TaskRow> = {}): TaskRow => ({
   title: id,
   parentId: null,
   position: "a0",
-  collapsed: false,
   ...fields,
 });
 const state = (...rows: TaskRow[]): ProjectState => ({ rows: Object.fromEntries(rows.map((row) => [row.id, row])) });

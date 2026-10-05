@@ -43,7 +43,7 @@ export class Live {
     bus.onResync(() => {
       presence.reset();
       sources.instance.invalidate();
-      sources.access.invalidate("*");
+      sources.access.forgetAll();
       hub.closeAll(CLOSE_RECONNECT, "Reconnect");
     });
   }

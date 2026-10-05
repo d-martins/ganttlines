@@ -64,6 +64,14 @@ describe("share links", () => {
     await joined();
     expect(screen.getByText("Viewing via a shared link.")).toBeInTheDocument();
     expect(screen.getByText("Sam (anonymous)")).toBeInTheDocument();
+    // the name can be changed from the board (the connection starts again, so others see it)
+    const sockets = FakeWebSocket.instances.length;
+    await user.click(screen.getByRole("button", { name: "Change your name" }));
+    const rename = await screen.findByRole("dialog", { name: "Change your name" });
+    await user.clear(within(rename).getByLabelText("Your name"));
+    await user.type(within(rename).getByLabelText("Your name"), "Samira{Enter}");
+    expect(await screen.findByText("Samira (anonymous)")).toBeInTheDocument();
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(sockets), { timeout: 2000 });
     // every request carries the link's token; the socket too
     const state = api.calls.find((call) => call.key === `GET /api/projects/${PROJECT_ID}/state`)!;
     expect(state.headers["x-share-token"]).toBe(TOKEN);
@@ -81,8 +89,8 @@ describe("share links", () => {
     await joined();
     expect(screen.getByText("Editing via a shared link — changes are saved for everyone.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add task" })).toBeInTheDocument();
-    await user.dblClick(within(screen.getAllByRole("row")[1]!).getByText("2"));
-    expect(screen.getByRole("textbox", { name: "Write a comment" })).toBeInTheDocument();
+    await user.dblClick(within(screen.getAllByRole("row")[2]!).getByText("2")); // the second task (row 0 is the header)
+    expect(await screen.findByRole("textbox", { name: "Write a comment" })).toBeInTheDocument();
     fireEvent.contextMenu(document.querySelector("[data-chart-body]")!, { clientX: 100, clientY: 5 });
     expect(await screen.findByRole("menuitem", { name: "Highlight this day…" })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Add a holiday…" })).not.toBeInTheDocument();
@@ -178,6 +186,10 @@ describe("sharing and managing a board", () => {
     expect(created).toEqual([{ access: "anonymous", collaboration: true, label: "Client" }]);
     await user.click(within(within(dialog).getAllByRole("listitem")[0]!).getByLabelText("Can edit"));
     await waitFor(() => expect(patched).toEqual([{ collaboration: true }]));
+    const label = within(within(dialog).getAllByRole("listitem")[0]!).getByRole("textbox", { name: "Link label" });
+    await user.clear(label);
+    await user.type(label, "Board review{Enter}");
+    await waitFor(() => expect(patched).toEqual([{ collaboration: true }, { label: "Board review" }]));
     await user.click(within(dialog).getAllByRole("button", { name: "Turn off" })[0]!);
     await user.click(within(await screen.findByRole("dialog", { name: "Turn this link off?" })).getByRole("button", { name: "Turn off" }));
     await waitFor(() => expect(deleted).toEqual(["l1"]));

@@ -71,6 +71,8 @@ export interface OutlineRow {
 
 export class ProjectService {
   private readonly cache = new Map<string, Promise<StoredProject>>();
+  /** when each cached board was last used */
+  private readonly lastUsed = new Map<string, number>();
   private readonly queue = new KeyedQueue();
   private readonly recent = new Map<string, Outcome>();
   private readonly undoStacks: UndoStore;
@@ -115,10 +117,8 @@ export class ProjectService {
         const result = applyCommand(stored.state, (await this.instance.current()).calendar, command);
         if (!result.ok) throw new HttpError(422, result.reason, result.message);
         if (result.changes.length === 0) return { version: stored.meta.version, changes: [] };
-        const applied = await this.commit(stored, actor, commandId, command.type, command, result.state, result.changes);
         const key = actorKey(actor);
-        if (key) await this.undoStacks.pushCommand(projectId, key, commandId);
-        return applied;
+        return this.commit(stored, actor, commandId, command.type, command, result.state, result.changes, key ? (tx) => this.undoStacks.pushCommand(projectId, key, commandId, tx) : undefined);
       });
     });
   }
@@ -223,6 +223,7 @@ export class ProjectService {
       if (!stored.meta.archivedAt) throw conflict("Only archived projects can be deleted — archive it first");
       await this.db.project.delete({ where: { id: projectId } });
       this.cache.delete(projectId);
+      this.lastUsed.delete(projectId);
       await this.undoStacks.forgetProject(projectId);
     });
   }
@@ -231,7 +232,20 @@ export class ProjectService {
   evict(projectId: string): Promise<void> {
     return this.queue.run(projectId, async () => {
       this.cache.delete(projectId);
+      this.lastUsed.delete(projectId);
     });
+  }
+
+  /** Forgets cached boards nobody used for `idleMs`, unless `inUse` says one is open somewhere. */
+  async evictIdle(idleMs: number, inUse: (projectId: string) => boolean): Promise<void> {
+    const cutoff = Date.now() - idleMs;
+    for (const [projectId, used] of [...this.lastUsed]) {
+      if (used <= cutoff && !inUse(projectId)) await this.evict(projectId);
+    }
+  }
+
+  get cachedProjects(): number {
+    return this.cache.size;
   }
 
   private revert(projectId: string, actor: Actor, commandId: string, direction: "undo" | "redo"): Promise<UndoResultDto> {
@@ -254,16 +268,16 @@ export class ProjectService {
           await this.undoStacks.pop(direction, projectId, userId);
           return error;
         };
-        let result: UndoResultDto;
+        const move = async (tx?: Tx) => {
+          await this.undoStacks.pop(direction, projectId, userId, tx);
+          if (direction === "undo") await this.undoStacks.pushUndone(projectId, userId, target, tx);
+          else await this.undoStacks.pushRedone(projectId, userId, target, tx);
+        };
         try {
-          result = await this.revertLogged(stored, actor, commandId, direction, target, userId);
+          return await this.revertLogged(stored, actor, commandId, direction, target, userId, move);
         } catch (error) {
           throw error instanceof HttpError && error.status !== 500 ? await discard(error) : error;
         }
-        await this.undoStacks.pop(direction, projectId, userId);
-        if (direction === "undo") await this.undoStacks.pushUndone(projectId, userId, target);
-        else await this.undoStacks.pushRedone(projectId, userId, target);
-        return result;
       }) as Promise<UndoResultDto>;
     });
   }
@@ -286,6 +300,8 @@ export class ProjectService {
     direction: "undo" | "redo",
     target: string,
     by: string | null,
+    /** history bookkeeping that goes with this revert */
+    bookkeeping?: (tx?: Tx) => Promise<void>,
   ): Promise<UndoResultDto> {
     const projectId = stored.meta.id;
     const logged = await this.db.commandLog.findUnique({ where: { commandId: target } });
@@ -297,7 +313,7 @@ export class ProjectService {
     }
     const changes = diffRows(stored.state, state);
     if (changes.length === 0) throw new HttpError(409, "conflict", `Nothing left to ${direction}: it was all changed since`);
-    const result = await this.commit(stored, actor, commandId, direction, { target, skipped, by }, state, changes);
+    const result = await this.commit(stored, actor, commandId, direction, { target, skipped, by }, state, changes, bookkeeping);
     return { ...result, skipped };
   }
 
@@ -369,8 +385,11 @@ export class ProjectService {
     payload: unknown,
     state: ProjectState,
     changes: RowChange[],
+    /** undo history bookkeeping: saved in the same transaction when the store can, otherwise right after */
+    bookkeeping?: (tx?: Tx) => Promise<void>,
   ): Promise<CommandResultDto> {
     const projectId = stored.meta.id;
+    const together = this.undoStacks.savesWithEdits;
     const version = stored.meta.version + 1;
     const meta = await this.db.$transaction(
       async (tx) => {
@@ -389,6 +408,7 @@ export class ProjectService {
           },
         });
         const updated = await tx.project.update({ where: { id: projectId, version: stored.meta.version }, data: { version } });
+        if (together) await bookkeeping?.(tx);
         // Other copies hear about it exactly when (and if) it commits.
         const notice = this.cluster.bus?.notification({ type: "patch", projectId, version });
         if (notice) await tx.$executeRawUnsafe(notice.sql, ...notice.params);
@@ -398,6 +418,7 @@ export class ProjectService {
     );
     stored.meta = meta;
     stored.state = state;
+    if (!together) await bookkeeping?.();
     const event: AppliedEvent = { projectId, version, commandId, actor, changes };
     for (const listener of this.appliedListeners) notify(listener, event);
     return { version, changes };
@@ -451,6 +472,7 @@ export class ProjectService {
   }
 
   private get(projectId: string): Promise<StoredProject> {
+    this.lastUsed.set(projectId, Date.now());
     let stored = this.cache.get(projectId);
     if (!stored) {
       stored = readProject(this.db, projectId);

@@ -12,11 +12,11 @@ export function calendar(data: Partial<CalendarData> = {}): Calendar {
 }
 
 export function task(id: string, fields: Partial<TaskRow> = {}): TaskRow {
-  return { ...TASK_DEFAULTS, id, kind: "task", title: id, parentId: null, position: "", collapsed: false, ...fields };
+  return { ...TASK_DEFAULTS, id, kind: "task", title: id, parentId: null, position: "", ...fields };
 }
 
 export function section(id: string, fields: Partial<SectionRow> = {}): SectionRow {
-  return { id, kind: "section", title: id, parentId: null, position: "", collapsed: false, ...fields };
+  return { id, kind: "section", title: id, parentId: null, position: "", ...fields };
 }
 
 /** Builds a project; rows without a position are ordered among their siblings as listed. */

@@ -152,6 +152,7 @@ export function RowBar({
   resources,
   shape,
   titleGap = 6,
+  visibleLeft = -Infinity,
 }: {
   entry: BoardRow;
   span: Span;
@@ -162,6 +163,8 @@ export function RowBar({
   shape?: ShapeProps | undefined;
   /** space between the shape and a title drawn beside it (room for the link bullet) */
   titleGap?: number;
+  /** the chart x at the list's edge: a roomy bar's contents slide right to stay in view */
+  visibleLeft?: number;
 }) {
   const { row } = entry;
   const kind = shapeOf(entry);
@@ -249,15 +252,18 @@ export function RowBar({
   }
   // Roomy: avatar then the title inside when it fits; otherwise the title goes to the right of the bar.
   const showAvatar = Boolean(assignee) && width >= 44;
-  const inside = 12 + (showAvatar ? 24 : 0) + (locked ? 16 : 0) + titleWidth(row.title) <= width;
+  const contentWidth = 12 + (showAvatar ? 24 : 0) + (locked ? 16 : 0) + titleWidth(row.title);
+  const inside = contentWidth <= width;
+  // When the bar starts under the list, its avatar and title move along to stay readable.
+  const shift = Math.min(Math.max(visibleLeft - left, 0), Math.max(width - (inside ? contentWidth : 36), 0));
   return (
     <>
       <Tooltip.Root>
         <Tooltip.Trigger asChild>
           <div
             {...shapeAttrs}
-            className={`absolute flex items-center gap-1.5 overflow-hidden rounded-[4px] px-1.5 text-xs font-semibold ${squareEnd} ${entry.violation ? "outline-2 outline-offset-1 outline-[var(--violation)]" : ""} ${shapeClass}`}
-            style={{ left, width, top: barTop, height: barHeight, background: fill, color: ink }}
+            className={`absolute flex items-center gap-1.5 overflow-hidden rounded-[4px] pr-1.5 text-xs font-semibold ${squareEnd} ${entry.violation ? "outline-2 outline-offset-1 outline-[var(--violation)]" : ""} ${shapeClass}`}
+            style={{ left, width, top: barTop, height: barHeight, background: fill, color: ink, paddingLeft: 6 + shift }}
           >
             {showAvatar ? <Avatar name={assignee!.name} color={assignee!.avatarColor} size={18} /> : null}
             {inside ? (

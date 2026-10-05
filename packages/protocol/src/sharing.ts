@@ -1,7 +1,9 @@
 import { z } from "zod";
+import { SHARE_TOKEN_HEADER } from "./constants";
+
+export { SHARE_TOKEN_HEADER };
 
 /** Requests made through a share link carry its token in this header (the WebSocket uses `?share=`). */
-export const SHARE_TOKEN_HEADER = "x-share-token";
 
 export const LINK_ACCESS = ["anonymous", "authenticated"] as const;
 export type LinkAccess = (typeof LINK_ACCESS)[number];

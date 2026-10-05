@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { buildApp } from "../src/app";
 import { ADMIN, SETUP_CODE, sessionCookie, setupAdmin, testConfig, useTestApp } from "./helpers";
@@ -81,6 +82,20 @@ describe("first-run setup", () => {
 });
 
 describe("login, logout and sessions", () => {
+  it("stores sessions under a session-only digest, and still accepts ones stored the older way", async () => {
+    await setupAdmin(t.app);
+    const hmac = (text: string) => createHmac("sha256", testConfig.sessionSecret).update(text).digest("hex");
+    const login = await t.app.inject({ method: "POST", url: "/api/auth/login", payload: { email: ADMIN.email, password: ADMIN.password } });
+    const token = login.cookies.find((c) => c.name === "gp_session")!.value;
+    expect(await t.db.session.count({ where: { id: hmac(`session:${token}`) } })).toBe(1);
+    // a session from before: stored under the plain HMAC of its token
+    const user = await t.db.user.findFirstOrThrow();
+    const old = "older-session-token-older-session-token-x";
+    await t.db.session.create({ data: { id: hmac(old), userId: user.id, expiresAt: new Date(t.clock.now.getTime() + 60_000_000), lastSeenAt: t.clock.now } });
+    expect((await t.app.inject({ url: "/api/auth/me", headers: { cookie: `gp_session=${old}` } })).statusCode).toBe(200);
+    expect(await t.db.session.count({ where: { id: hmac(`session:${old}`) } })).toBe(1); // moved to the new digest
+  });
+
   it("logs in with correct credentials (email is case-insensitive) and sets an httpOnly cookie", async () => {
     await setupAdmin(t.app);
     const response = await t.app.inject({
@@ -110,6 +125,16 @@ describe("login, logout and sessions", () => {
       ),
     );
     expect(responses.filter((response) => response.statusCode === 401)).toHaveLength(10);
+  });
+
+  it("a successful sign-in doesn't clear its address's failures", async () => {
+    await setupAdmin(t.app);
+    const login = (email: string, password: string) =>
+      t.app.inject({ method: "POST", url: "/api/auth/login", remoteAddress: "198.51.100.9", payload: { email, password } });
+    for (let i = 0; i < 9; i++) expect((await login(`guess${i}@example.com`, "wrong")).statusCode).toBe(401);
+    expect((await login(ADMIN.email, ADMIN.password)).statusCode).toBe(200);
+    expect((await login("guess9@example.com", "wrong")).statusCode).toBe(401);
+    expect((await login("guess10@example.com", "wrong")).statusCode).toBe(429);
   });
 
   it("blocks an account after 10 failed attempts", async () => {

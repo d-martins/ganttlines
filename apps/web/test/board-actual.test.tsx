@@ -99,7 +99,7 @@ describe("half days and actual work days", () => {
     const hooks = screen.getByRole("button", { name: /^hooks, .*\(afternoon\) – / });
     expect(width(hooks)).toBe(4 * 32 - 16);
     await user.dblClick(within(listRow("hooks")).getByRole("gridcell", { name: "Row 2" }));
-    const panel = screen.getByRole("complementary", { name: "Details of “hooks”" });
+    const panel = await screen.findByRole("complementary", { name: "Details of “hooks”" });
     const starts = within(panel).getByRole("group", { name: "Starts: morning or afternoon" });
     expect(within(starts).getByRole("button", { name: "Starts in the afternoon" })).toHaveAttribute("aria-pressed", "true");
     await user.click(within(starts).getByRole("button", { name: "Starts in the morning" }));
@@ -124,7 +124,7 @@ describe("half days and actual work days", () => {
   it("records actual days in the details panel", async () => {
     const { user } = await board();
     await user.dblClick(within(listRow("hooks")).getByRole("gridcell", { name: "Row 2" }));
-    const panel = screen.getByRole("complementary", { name: "Details of “hooks”" });
+    const panel = await screen.findByRole("complementary", { name: "Details of “hooks”" });
     const field = within(panel).getByRole("spinbutton", { name: "Actual work days" });
     await user.type(field, "4.5{Enter}");
     expect(sentCommands().at(-1)).toEqual({ type: "setActualDuration", id: "hooks", days: 4.5 });

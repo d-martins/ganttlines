@@ -14,7 +14,6 @@ describe("CommandSchema", () => {
       { type: "updateTitle", id: A, title: "x" },
       { type: "setDescription", id: A, description: "d" },
       { type: "setColor", id: A, color: "green" },
-      { type: "toggleCollapsed", id: A, collapsed: true },
       { type: "setAssignee", id: A, resourceId: null },
       { type: "moveTask", id: A, start: "2026-10-05" },
       { type: "resizeTask", id: A, edge: "end", date: "2026-10-09" },

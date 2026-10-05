@@ -55,6 +55,7 @@ function applyEvent(client: QueryClient, projectId: string, event: BoardEvent): 
     case "baselines":
       return replaceList(client, keys.baselines(projectId), event.baselines);
     case "comment":
+      void client.invalidateQueries({ queryKey: keys.commentCounts(projectId) });
       return upsertComment(client, projectId, event.comment);
     case "rejected":
       return toast(`Change not saved: ${event.message}`, { tone: "error" });

@@ -20,7 +20,7 @@ export async function webRoutes(app: FastifyInstance, webDir: string): Promise<v
     reply
       .header("Cache-Control", "no-cache")
       .header("X-Content-Type-Options", "nosniff")
-      .header("Referrer-Policy", "same-origin")
+      .header("Referrer-Policy", "no-referrer") // link and reset tokens are in page addresses
       .header("X-Frame-Options", "DENY")
       .sendFile("index.html");
   app.get("/", (_request, reply) => page(reply));

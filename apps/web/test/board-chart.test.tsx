@@ -4,6 +4,7 @@ import type { ProjectStateDto } from "@ganttlines/protocol";
 import { fireEvent, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { formatDay } from "../src/board/format";
+import { useBoardView } from "../src/board/view-store";
 import { ANA, CALENDAR, FakeWebSocket, PROJECT_ID, projectState, section, task } from "./board-fixtures";
 import { ADMIN, project, renderApp, screen, signedIn, VIEWER } from "./utils";
 
@@ -52,6 +53,25 @@ describe("chart editing", () => {
     vi.setSystemTime(new Date(2026, 8, 29, 12));
   });
   afterEach(() => vi.useRealTimers());
+
+  it("keeps a roomy bar's title in view while the bar starts under the list", async () => {
+    useBoardView.getState().setBarStyle("roomy");
+    await chartBoard();
+    const shape = bar(/^ui,/);
+    const content = () => (shape as HTMLElement).style.paddingLeft;
+    expect(content()).toBe("6px");
+    const scroller = screen.getByTestId("board-scroller");
+    scroller.scrollLeft = parseFloat((shape as HTMLElement).style.left) + 40; // the bar's first 40 px are under the list
+    fireEvent.scroll(scroller);
+    await waitFor(() => expect(content()).toBe("46px"));
+    useBoardView.getState().setBarStyle("compact");
+  });
+
+  it("names holidays in the date header (shown on hover)", async () => {
+    await chartBoard();
+    const marker = await screen.findByLabelText(/^Holiday .*Oct 5.*: Republic Day$/);
+    expect(marker).toHaveAttribute("title", "Republic Day");
+  });
 
   it("moves a bar by dragging it, snapping to half days at day zoom", async () => {
     await chartBoard();
@@ -147,6 +167,15 @@ describe("chart editing", () => {
     await user.type(screen.getByLabelText("Label (optional)"), "Demo{Enter}");
     await waitFor(() => expect(saved).toEqual([{ date: "2026-10-09", label: "Demo", color: "#e5892f" }]));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("opens the day menu from the keyboard (Shift+F10 or the menu key on a bar: its first day)", async () => {
+    await chartBoard();
+    const hooks = bar(/^hooks,/);
+    hooks.focus();
+    fireEvent.keyDown(hooks, { key: "F10", shiftKey: true });
+    expect(await screen.findByRole("menuitem", { name: "Highlight this day…" })).toBeInTheDocument();
+    expect(screen.getByText(formatDay(toDay("2026-10-12")))).toBeInTheDocument();
   });
 
   it("is read-only for viewers: bars are images, no controls, no day menu", async () => {

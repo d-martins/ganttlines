@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 import { findTreeProblem } from "../src/projects/state";
 import { randomUUID } from "node:crypto";
 import { CLOSE_PROJECT_DELETED } from "../src/realtime/hub";
+import { InstanceService } from "../src/calendar/instance-service";
+import { ProjectService } from "../src/projects/project-service";
 import { createUser, setupAdmin, useTestApp } from "./helpers";
 import { connect } from "./ws-client";
 
@@ -12,8 +14,8 @@ const t = useTestApp();
 const SECTION_ID = "11111111-1111-4111-8111-111111111111";
 const TASK_ID = "22222222-2222-4222-8222-222222222222";
 const rows: Row[] = [
-  { id: SECTION_ID, kind: "section", title: "Phase 1", parentId: null, position: "a0", collapsed: false },
-  { ...TASK_DEFAULTS, id: TASK_ID, kind: "task", title: "Build", parentId: SECTION_ID, position: "a0", collapsed: false, userStart: "2026-10-05", duration: 3 },
+  { id: SECTION_ID, kind: "section", title: "Phase 1", parentId: null, position: "a0" },
+  { ...TASK_DEFAULTS, id: TASK_ID, kind: "task", title: "Build", parentId: SECTION_ID, position: "a0", userStart: "2026-10-05", duration: 3 },
 ];
 
 describe("projects", () => {
@@ -140,5 +142,21 @@ describe("findTreeProblem", () => {
     expect(await t.db.comment.count()).toBe(0);
     expect(await t.db.shareLink.count()).toBe(0);
     expect((await remove(editor.cookie)).statusCode).toBe(404);
+  });
+});
+
+describe("the cache of boards", () => {
+  it("forgets boards nobody used for a while — whether they were opened live or only through the API", async () => {
+    const admin = await setupAdmin(t.app);
+    const { id } = (await t.app.inject({ method: "POST", url: "/api/projects", headers: { cookie: admin }, payload: { name: "Launch" } })).json().project;
+    const projects = new ProjectService(t.db, new InstanceService(t.db));
+    await projects.state(id);
+    expect(projects.cachedProjects).toBe(1);
+    await projects.evictIdle(60_000, () => false);
+    expect(projects.cachedProjects).toBe(1); // used just now
+    await projects.evictIdle(0, () => true);
+    expect(projects.cachedProjects).toBe(1); // open on a board
+    await projects.evictIdle(0, () => false);
+    expect(projects.cachedProjects).toBe(0);
   });
 });

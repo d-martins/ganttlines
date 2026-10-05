@@ -122,7 +122,6 @@ model Row {
   title         String
   parentId      String? @db.Uuid
   position      String
-  collapsed     Boolean @default(false)
   // task-only fields (defaults for sections)
   userStart     String?
   /// placed on the afternoon of userStart
@@ -209,6 +208,11 @@ model CommandLog {
   createdAt   DateTime @default(now())
 
   @@unique([projectId, version])
+  // finding a task's history (activity): changes @> [{ rowId }]
+  @@index([changes(ops: JsonbPathOps)], type: Gin)
+  // Also (not expressible here; in migration 20261005180000_command_log_indexes): versions are
+  // unique WHERE "projectId" IS NULL — team-calendar entries have no project, and NULLs are never
+  // equal in the unique above.
 }
 
 enum LinkAccess {

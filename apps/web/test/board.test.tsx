@@ -36,10 +36,14 @@ function openBoard(rows: ProjectStateDto["rows"] = ROWS, path = `/p/${PROJECT_ID
   api.on("GET /api/resources", () => ({ body: { resources: [ANA] } }));
   api.on(`GET /api/projects/${PROJECT_ID}/highlights`, () => ({ body: { highlights: [] } }));
   api.on(`GET /api/projects/${PROJECT_ID}/baselines`, () => ({ body: { baselines: [{ id: BASELINE_ID, name: "Kick-off", createdAt: "", createdBy: "Ada" }] } }));
+  api.on(`GET /api/projects/${PROJECT_ID}/comment-counts`, () => ({ body: { counts: {} } }));
   api.on(`GET /api/baselines/${BASELINE_ID}`, () => ({
     body: {
       baseline: { id: BASELINE_ID, name: "Kick-off", createdAt: "", createdBy: "Ada" },
-      tasks: [{ rowId: "hooks", kind: "task", title: "hooks", start: "2026-10-01", end: "2026-10-02" }],
+      tasks: [
+        { rowId: "hooks", kind: "task", title: "hooks", start: "2026-09-30", end: "2026-10-02" },
+        { rowId: "33333333-3333-4333-8333-333333333333", kind: "task", title: "retired", start: "2026-10-06", end: "2026-10-07" }, // deleted since
+      ],
     },
   }));
   return { api, ...renderApp(path) };
@@ -74,6 +78,22 @@ describe("board", () => {
     expect(within(listRow("ui")).getByText("Ana Silva")).toBeInTheDocument();
   });
 
+  it("names the list's columns for assistive tech, and numbers its rows past the header", async () => {
+    await joinedBoard();
+    const grid = screen.getByRole("treegrid", { name: "Tasks" });
+    expect(within(grid).getAllByRole("columnheader").map((header) => header.textContent)).toEqual([
+      "Row number",
+      "Task",
+      "Assignee",
+      "Working days",
+      "Actual work days",
+      "Predecessor",
+      "Actions",
+    ]);
+    expect(grid).toHaveAttribute("aria-rowcount", String(within(grid).getAllByRole("row").length));
+    expect(within(grid).getAllByRole("row")[1]).toHaveAttribute("aria-rowindex", "2"); // the first task, after the header
+  });
+
   it("draws bars, milestones, brackets, sections and dependency arrows", async () => {
     await joinedBoard();
     expect(screen.getByLabelText(`ui, ${d("2026-09-30")} – ${d("2026-10-08")}, Ana Silva`)).toBeInTheDocument();
@@ -88,13 +108,27 @@ describe("board", () => {
 
   it("hides the children of rows collapsed in this browser", async () => {
     localStorage.setItem(`gp.collapsed:${PROJECT_ID}`, JSON.stringify(["parent"]));
-    // A collapsed flag stored on the server has no effect: collapsing is a per-browser view.
-    await joinedBoard(ROWS.map((row) => (row.id === "design" ? { ...row, collapsed: true } : row)));
+    await joinedBoard();
     const list = within(screen.getByRole("treegrid", { name: "Tasks" }));
     expect(list.queryByText("child", { exact: true })).not.toBeInTheDocument();
     expect(list.getByText("hooks", { exact: true })).toBeInTheDocument();
     expect(listRow("parent")).toHaveAttribute("aria-expanded", "false");
     expect(within(listRow("ms")).getByText("5")).toBeInTheDocument();
+  });
+
+  it("shows how many comments a task has, and keeps it up to date", async () => {
+    const { api } = await joinedBoard();
+    expect(within(listRow("hooks")).queryByLabelText(/comments?$/)).not.toBeInTheDocument();
+    api.on(`GET /api/projects/${PROJECT_ID}/comment-counts`, () => ({ body: { counts: { hooks: 2 } } }));
+    const comment = { id: "c1", taskId: "hooks", author: { userId: null, label: "Rui" }, body: "hi", createdAt: "2026-10-01T10:00:00Z", editedAt: null, deleted: false, mine: false };
+    FakeWebSocket.last.deliver({ type: "comment", projectId: PROJECT_ID, comment });
+    expect(await within(listRow("hooks")).findByLabelText("2 comments")).toHaveTextContent("2");
+  });
+
+  it("forgets collapsed rows that no longer exist", async () => {
+    localStorage.setItem(`gp.collapsed:${PROJECT_ID}`, JSON.stringify(["parent", "deleted-long-ago"]));
+    await joinedBoard();
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(`gp.collapsed:${PROJECT_ID}`)!)).toEqual(["parent"]));
   });
 
   it("applies live patches and rejoins after a missed one", async () => {
@@ -148,8 +182,13 @@ describe("board", () => {
   it("switches to a baseline: its dates, read-only, with a way back", async () => {
     const { user, router } = await joinedBoard(ROWS, `/p/${PROJECT_ID}?baseline=${BASELINE_ID}&compare=switch`);
     expect(await screen.findByText(/Viewing baseline/)).toHaveTextContent("Viewing baseline Kick-off (read-only)");
-    expect(screen.getByLabelText(`hooks, ${d("2026-10-01")} – ${d("2026-10-02")}`)).toBeInTheDocument();
+    expect(screen.getByLabelText(`hooks, ${d("2026-09-30")} – ${d("2026-10-02")}`)).toBeInTheDocument();
     expect(screen.queryByLabelText(/^ui,/)).not.toBeInTheDocument();
+    // The working days are the baseline's (3, Wed–Fri), not today's plan (2).
+    expect(within(listRow("hooks")).getByRole("gridcell", { name: "3 working days" })).toBeInTheDocument();
+    // Tasks deleted since the baseline are still shown, as they were.
+    expect(within(listRow("retired")).getByText("deleted since")).toBeInTheDocument();
+    expect(screen.getByLabelText(`retired, ${d("2026-10-06")} – ${d("2026-10-07")}`)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Back to the live plan" }));
     expect(router.state.location.search).toEqual({});
   });

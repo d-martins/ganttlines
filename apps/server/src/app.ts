@@ -2,7 +2,10 @@ import cookie from "@fastify/cookie";
 import websocket from "@fastify/websocket";
 import { Prisma, type Db } from "@ganttlines/db";
 import { pendingStepOf } from "./auth/guard";
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyLoggerOptions, type FastifyRequest } from "fastify";
+import type { PinoLoggerOptions } from "fastify/types/logger";
+
+type LoggerOption = boolean | (FastifyLoggerOptions & PinoLoggerOptions);
 import { AccessService } from "./auth/access";
 import { FirstRun } from "./auth/first-run";
 import { OidcSignIn } from "./auth/oidc";
@@ -76,7 +79,7 @@ export interface AppOptions {
   liveRevalidateMs?: number;
   /** reads AI apps' client metadata documents (tests pass a fake) */
   fetchClientMetadata?: MetadataFetcher;
-  logger?: boolean;
+  logger?: LoggerOption;
 }
 
 const SESSION_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
@@ -98,7 +101,7 @@ export async function buildApp({
   const hops = config.trustProxy;
   // A hop count N means "trust the N closest proxies" (proxy-addr trust function: hop 0 = direct peer).
   const trustProxy = typeof hops === "number" ? (_address: string, hop: number) => hop < hops : hops;
-  const app = Fastify({ logger, trustProxy });
+  const app = Fastify({ logger: withRedactedUrls(logger), trustProxy });
   await app.register(cookie);
   await app.register(websocket, {
     options: { maxPayload: 1024 * 1024 },
@@ -120,7 +123,8 @@ export async function buildApp({
     undo: cluster.mode === "postgres" ? new PgUndoStore(db) : new MemoryUndoStore(),
   });
   const hub = new Hub();
-  const access = new AccessService(db, config.sessionSecret, cluster.mode === "single");
+  const nowMs = now ? () => now().getTime() : Date.now;
+  const access = new AccessService(db, config.sessionSecret, cluster.mode === "single", nowMs);
   const presence = new Presence(hub, cluster.bus);
   presence.start();
   // onClose hooks run in reverse order, so this goodbye goes out before the cluster closes:
@@ -145,9 +149,8 @@ export async function buildApp({
   projects.onMetaChange((project) => live.projectMeta(project));
   instance.onChange((snapshot) => live.instanceChanged(snapshot.version));
   // Rate limits: in memory with one copy; counted in the database (hashed keys) with several.
-  const nowMs = now ? () => now().getTime() : Date.now;
   const limit = (name: string, options?: LimitOptions) =>
-    cluster.mode === "postgres" ? new PgLimiter(db, name, options, nowMs) : new MemoryLimiter(nowMs, options);
+    cluster.mode === "postgres" ? new PgLimiter(db, config.sessionSecret, name, options, nowMs) : new MemoryLimiter(nowMs, options);
   const twoFactor = new TwoFactor(config.sessionSecret, now ? () => now().getTime() : undefined);
   const context: RouteContext = {
     db,
@@ -172,7 +175,7 @@ export async function buildApp({
     oauthClients: new OAuthClients(db, fetchClientMetadata, clock),
     oauthGrants: new OAuthGrants(db, config.sessionSecret, clock),
     registerLimiter: limit("register"),
-    mcpBudget: limit("mcp", { windowMs: 60_000, max: 300 }),
+    mcpBudget: limit("mcp", { windowMs: 60_000, max: 300, sliding: true }),
     teamEdits: new TeamEdits(instance),
   };
   await context.firstRun.start(config.initialAdmin);
@@ -285,5 +288,47 @@ export async function buildApp({
   mcpRoutes(app, context);
   oidcRoutes(app, context, config.oidc ? new OidcSignIn(config.oidc, new URL("/api/auth/oidc/callback", config.publicUrl).toString(), config.sessionSecret) : null);
   if (config.webDir) await webRoutes(app, config.webDir);
+  // (Fastify's own would log the address, tokens and all)
+  else app.setNotFoundHandler((_request, reply) => reply.status(404).send({ error: "not_found", message: "Not found" }));
   return app;
+}
+
+/** Query parameters that never carry secrets; every other value is logged as [redacted]. */
+const LOGGED_QUERY_PARAMS = new Set(["archived", "since", "year", "all", "limit", "before", "rowId"]);
+
+/**
+ * Tokens travel in addresses (share links, password resets, sign-on codes, AI-app requests); the
+ * request log shows the share-link path segment and every query value it doesn't know as [redacted].
+ */
+export function redactUrl(url: string): string {
+  const [path = "", query] = url.split("?", 2);
+  const safePath = path.replace(/^\/(api\/share|s)\/[^/]+/, "/$1/[redacted]");
+  if (query === undefined) return safePath;
+  const safeQuery = query
+    .split("&")
+    .map((pair) => {
+      const name = pair.split("=", 1)[0] ?? "";
+      return pair.includes("=") && !LOGGED_QUERY_PARAMS.has(decodeURIComponentSafe(name)) ? `${name}=[redacted]` : pair;
+    })
+    .join("&");
+  return `${safePath}?${safeQuery}`;
+}
+
+function decodeURIComponentSafe(text: string): string {
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+}
+
+function withRedactedUrls(logger: LoggerOption): LoggerOption {
+  if (!logger) return logger;
+  const serializers = {
+    req: (request: FastifyRequest) => {
+      const port = request.socket?.remotePort;
+      return { method: request.method, url: redactUrl(request.url), host: request.host, remoteAddress: request.ip, ...(port === undefined ? {} : { remotePort: port }) };
+    },
+  };
+  return logger === true ? { serializers } : { ...logger, serializers: { ...logger.serializers, ...serializers } };
 }

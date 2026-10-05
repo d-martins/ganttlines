@@ -1,7 +1,9 @@
 import type { Calendar, RowId } from "@ganttlines/engine";
-import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, GripVertical, LocateFixed, IndentDecrease, IndentIncrease, PanelRightOpen, Plus, Search } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, GripVertical, LocateFixed, IndentDecrease, IndentIncrease, MessageSquare, PanelRightOpen, Plus, Search } from "lucide-react";
 import { computeSchedule, CycleError } from "@ganttlines/engine";
 import { useEffect, useMemo, useRef, useState, type HTMLAttributes, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type Ref } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { commentCounts } from "../../api/queries";
 import { Avatar } from "../../ui/avatar";
 import { IconButton } from "../../ui/button";
 import { AssigneePicker } from "../assignee-picker";
@@ -12,6 +14,7 @@ import { formatDays } from "../chart/bars";
 import type { BoardRow } from "../model";
 import { useSelection } from "../selection";
 import { addAtEnd, addRowBelow, addSubtask, deleteRow, dropMove, parseDays, setActualDays, setWorkingDays, type DropZone } from "./list-actions";
+import { AUTO_SCROLL_STEP, AUTO_SCROLL_TICK_MS, edgePush, HEADER_HEIGHT } from "../auto-scroll";
 
 /**
  * Column template shared by the header and the rows: # · title · assignee · WD · AWD · predecessor · row actions (show the bar, open details).
@@ -62,7 +65,7 @@ export function ListHeader({ query, onQuery }: { query: string; onQuery: (query:
           <ChevronsDownUp size={13} />
         </IconButton>
       </div>
-      {/* Visual column headings; each row's cells carry their own labels for assistive tech. */}
+      {/* Visual column headings; assistive tech gets ListColumnHeaders inside the grid instead. */}
       <div aria-hidden className={`${COLUMNS} h-6 px-1 text-xs font-semibold text-muted`}>
         <span className="pr-2 text-right">#</span>
         <span>Task</span>
@@ -86,11 +89,15 @@ export function ListHeader({ query, onQuery }: { query: string; onQuery: (query:
 export function durations(entry: BoardRow, calendar: Calendar): { working: string; actual: string } {
   const { row, span } = entry;
   const actual = entry.actualDays === null ? "" : formatDays(entry.actualDays);
-  if (row.kind === "task" && !entry.isParent) return { working: formatDays(row.duration), actual };
+  if (row.kind === "task" && !entry.isParent && !entry.fromBaseline) return { working: formatDays(row.duration), actual };
   if (!span) return { working: "–", actual };
+  if (entry.kind === "milestone") return { working: "0", actual };
+  // Across its dates: the baseline's for a task (its person's days, in halves), team days for the rest.
+  const resourceId = row.kind === "task" && !entry.isParent ? row.resourceId : null;
   let working = 0;
-  for (let day = span.start; day <= span.end; day++) if (calendar.isWorkingDay(day, null)) working++;
-  return { working: String(working), actual };
+  for (let day = span.start; day <= span.end; day++) if (calendar.isWorkingDay(day, resourceId)) working++;
+  if (row.kind === "task" && !entry.isParent) working -= (span.startsAfternoon ? 0.5 : 0) + (span.endsMidday ? 0.5 : 0);
+  return { working: row.kind === "task" && !entry.isParent ? formatDays(working) : String(working), actual };
 }
 
 /** Actual work days against the plan: red when over, green when under (single tasks). */
@@ -185,6 +192,19 @@ interface DragState {
   target: { index: number; zone: DropZone } | null;
 }
 
+/** The list's column headers for assistive tech (the visible headings sit outside the grid, in the sticky header). */
+export function ListColumnHeaders() {
+  return (
+    <div role="row" aria-rowindex={1} className="sr-only">
+      {["Row number", "Task", "Assignee", "Working days", "Actual work days", "Predecessor", "Actions"].map((name) => (
+        <span key={name} role="columnheader">
+          {name}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export function ListRows({
   rows,
   allRows,
@@ -203,6 +223,7 @@ export function ListRows({
   searching: boolean;
 }) {
   const board = useBoard();
+  const comments = useQuery(commentCounts(board.sync.projectId)).data;
   const { state, calendar, resources, resourceMap, canEdit, canCreateResources } = board;
   const run = useRun();
   const { selectedId, editingId, draftId, select, edit, center } = useSelection();
@@ -237,9 +258,22 @@ export function ListRows({
     if (!canEdit || searching) return;
     event.preventDefault();
     const grid = (event.currentTarget as HTMLElement).closest('[role="treegrid"]') as HTMLElement;
+    const scroller = grid.closest('[data-testid="board-scroller"]') as HTMLElement | null;
     let target: DragState["target"] = null;
+    let last: PointerEvent | null = null;
     setDrag({ id, target });
+    // Near or past the list's top or bottom, keep scrolling that way.
+    const autoScroll = setInterval(() => {
+      if (!last || !scroller) return;
+      const bounds = scroller.getBoundingClientRect();
+      const dy = edgePush(last.clientY, bounds.top + HEADER_HEIGHT, bounds.bottom) * AUTO_SCROLL_STEP;
+      if (!dy) return;
+      const before = scroller.scrollTop;
+      scroller.scrollTop += dy;
+      if (scroller.scrollTop !== before) move(last);
+    }, AUTO_SCROLL_TICK_MS);
     const move = (moveEvent: PointerEvent) => {
+      last = moveEvent;
       const y = moveEvent.clientY - grid.getBoundingClientRect().top;
       const index = Math.min(Math.max(Math.floor(y / rowHeight), 0), allRows.length - 1);
       const fraction = y / rowHeight - index;
@@ -247,6 +281,7 @@ export function ListRows({
       setDrag({ id, target });
     };
     const up = () => {
+      clearInterval(autoScroll);
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       setDrag(null);
@@ -277,6 +312,7 @@ export function ListRows({
           <div
             key={row.id}
             role="row"
+            aria-rowindex={firstRow + index + 2 /* after the header row */}
             aria-level={entry.depth + 1}
             aria-selected={selected}
             aria-expanded={entry.hasChildren ? !entry.collapsed : undefined}
@@ -298,12 +334,12 @@ export function ListRows({
                   aria-label={`Move “${row.title || "Untitled"}”`}
                   tabIndex={-1}
                   onPointerDown={(event) => startDrag(event, row.id)}
-                  className="absolute top-1/2 left-0 -translate-y-1/2 cursor-grab touch-none text-muted opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                  className="absolute top-1/2 left-0 -translate-y-1/2 cursor-grab touch-none text-muted opacity-0 group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100"
                 >
                   <GripVertical size={14} />
                 </button>
               ) : null}
-              {entry.number}
+              {entry.deletedSince ? "" : entry.number}
             </span>
             <span role="gridcell" className={`flex min-w-0 items-center gap-1 ${weight}`} style={{ paddingLeft: entry.depth * INDENT }}>
               {entry.hasChildren ? (
@@ -387,6 +423,13 @@ export function ListRows({
                   ) : (
                     <span className={`truncate ${row.title ? "" : "text-muted italic"}`}>{row.title || "Untitled"}</span>
                   )}
+                  {entry.deletedSince ? <span className="shrink-0 rounded bg-surface-2 px-1 text-[10px] text-muted">deleted since</span> : null}
+                  {comments?.[row.id] ? (
+                    <span aria-label={`${comments[row.id]} ${comments[row.id] === 1 ? "comment" : "comments"}`} className="flex shrink-0 items-center gap-0.5 text-xs font-normal text-muted">
+                      <MessageSquare aria-hidden size={11} />
+                      {comments[row.id]}
+                    </span>
+                  ) : null}
                   <span className="ml-auto flex shrink-0">
                     {canEdit ? (
                       <button
@@ -397,7 +440,7 @@ export function ListRows({
                           event.stopPropagation();
                           addSubtask(board, state, row);
                         }}
-                        className="rounded p-0.5 text-muted opacity-0 group-hover:opacity-100 hover:bg-surface-2 hover:text-text focus-visible:opacity-100"
+                        className="rounded p-0.5 text-muted opacity-0 group-hover:opacity-100 hover:bg-surface-2 hover:text-text focus-visible:opacity-100 pointer-coarse:opacity-100"
                       >
                         <Plus size={14} />
                       </button>
@@ -426,7 +469,7 @@ export function ListRows({
                           <span className="truncate">{assignee.name}</span>
                         </>
                       ) : (
-                        <span className="text-muted opacity-0 group-hover:opacity-100">Assign…</span>
+                        <span className="text-muted opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100">Assign…</span>
                       )}
                     </button>
                   }
@@ -583,7 +626,7 @@ function CellButton({
       onClick={onEdit}
       className="block h-6 w-full truncate rounded px-1 text-right hover:bg-surface-2"
     >
-      {children || <span className="text-muted opacity-0 group-hover:opacity-100">–</span>}
+      {children || <span className="text-muted opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100">–</span>}
     </button>
   );
 }

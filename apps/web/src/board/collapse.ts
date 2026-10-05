@@ -9,6 +9,8 @@ interface Collapse {
   /** collapsed row ids per project, once read from (or written to) this browser's storage */
   byProject: Record<string, readonly string[]>;
   set: (projectId: string, ids: Iterable<string>, collapsed: boolean) => void;
+  /** Forgets rows that no longer exist (deleted since they were collapsed). */
+  prune: (projectId: string, exists: (id: string) => boolean) => void;
 }
 
 const stored = (state: Collapse, projectId: string) => state.byProject[projectId] ?? readPref(prefKey(projectId), [], isIdList);
@@ -29,6 +31,14 @@ export const useCollapse = create<Collapse>((set) => ({
       const list = [...next];
       writePref(prefKey(projectId), list);
       return { byProject: { ...state.byProject, [projectId]: list } };
+    }),
+  prune: (projectId, exists) =>
+    set((state) => {
+      const current = stored(state, projectId);
+      const kept = current.filter(exists);
+      if (kept.length === current.length) return state;
+      writePref(prefKey(projectId), kept);
+      return { byProject: { ...state.byProject, [projectId]: kept } };
     }),
 }));
 

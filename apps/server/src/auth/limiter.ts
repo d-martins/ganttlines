@@ -1,5 +1,5 @@
 import type { Db } from "@ganttlines/db";
-import { createHash } from "node:crypto";
+import { createHmac } from "node:crypto";
 
 /**
  * Counts failures (or calls) per key; blocks a key once it reaches the limit within the window.
@@ -15,6 +15,8 @@ export interface Limiter {
   attempt(keys: string[]): Promise<boolean>;
   isBlocked(keys: string[]): Promise<boolean>;
   recordFailure(keys: string[]): Promise<void>;
+  /** Takes back one counted attempt (one that succeeded and shouldn't count against these keys). */
+  refund(keys: string[]): Promise<void>;
   reset(keys: string[]): Promise<void>;
   /** Forgets counts that can no longer block anyone. */
   deleteOld(): Promise<void>;
@@ -23,6 +25,12 @@ export interface Limiter {
 export interface LimitOptions {
   windowMs: number;
   max: number;
+  /**
+   * With several copies: count the previous window only as far as it still overlaps the last
+   * `windowMs` (a budget for calls, not halved at each window start) instead of in full (strict:
+   * nothing can straddle a boundary — for guesses).
+   */
+  sliding?: boolean;
 }
 
 const DEFAULT: LimitOptions = { windowMs: 15 * 60 * 1000, max: 10 };
@@ -58,6 +66,10 @@ export class MemoryLimiter implements Limiter {
 
   async recordFailure(keys: string[]): Promise<void> {
     this.count(keys);
+  }
+
+  async refund(keys: string[]): Promise<void> {
+    for (const key of keys) this.failures.get(key)?.pop();
   }
 
   async reset(keys: string[]): Promise<void> {
@@ -104,12 +116,13 @@ export class MemoryLimiter implements Limiter {
 }
 
 /**
- * Several copies: counts per hashed key in fixed windows, in a table (emails and IPs aren't stored).
- * A key is blocked while its current and previous windows together reach the limit — so attempts
- * can't straddle a window boundary to get twice as many (a lockout lasts one to two windows).
- * Counting is one statement per key, so copies and parallel requests can't overtake each other. The
- * table stays bounded: old windows are pruned regularly, and beyond `maxKeys` non-account keys are
- * dropped, least recently tried first.
+ * Several copies: counts per key in fixed windows, in a table (keys are stored as HMACs with the
+ * server's secret, so emails and IPs can't be read back). A key's count is the current window's plus
+ * the previous one's — in full, so attempts can't straddle a boundary to get twice as many (a lockout
+ * lasts one to two windows), or with `sliding`, weighted by how much of it still overlaps the last
+ * `windowMs`. Counting is one statement per key, so copies and parallel requests can't overtake each
+ * other. The table stays bounded: old windows are pruned regularly, and beyond
+ * `maxKeys` non-account keys are dropped, least recently tried first.
  */
 export class PgLimiter implements Limiter {
   private sincePrune = 0;
@@ -118,6 +131,8 @@ export class PgLimiter implements Limiter {
 
   constructor(
     private readonly db: Db,
+    /** keys are HMACs with it */
+    private readonly secret: string,
     /** keeps different limits' keys apart */
     private readonly name: string,
     private readonly options: LimitOptions = DEFAULT,
@@ -135,16 +150,22 @@ export class PgLimiter implements Limiter {
 
   async isBlocked(keys: string[]): Promise<boolean> {
     const current = this.window();
-    const rows = await this.db.rateCounter.findMany({
-      where: { key: { in: keys.map((key) => this.hash(key)) }, windowStart: { in: [current, current - BigInt(this.options.windowMs)] } },
-    });
+    const previous = current - BigInt(this.options.windowMs);
+    const rows = await this.db.rateCounter.findMany({ where: { key: { in: keys.map((key) => this.hash(key)) }, windowStart: { in: [current, previous] } } });
     const totals = new Map<string, number>();
-    for (const row of rows) totals.set(row.key, (totals.get(row.key) ?? 0) + row.count);
+    for (const row of rows) totals.set(row.key, (totals.get(row.key) ?? 0) + (row.windowStart === current ? row.count : row.count * this.overlap()));
     return [...totals.values()].some((total) => total >= this.options.max);
   }
 
   async recordFailure(keys: string[]): Promise<void> {
     await this.count(keys);
+  }
+
+  async refund(keys: string[]): Promise<void> {
+    await this.db.rateCounter.updateMany({
+      where: { key: { in: keys.map((key) => this.hash(key)) }, windowStart: this.window(), count: { gt: 0 } },
+      data: { count: { decrement: 1 } },
+    });
   }
 
   async reset(keys: string[]): Promise<void> {
@@ -155,18 +176,24 @@ export class PgLimiter implements Limiter {
     await this.prune();
   }
 
-  /** Adds one to each key's current window; returns each key's total over both windows, this one included. */
+  /** How much of the previous window still lies within the last `windowMs` (1 at a window's start, 0 at its end). */
+  private overlap(): number {
+    if (!this.options.sliding) return 1;
+    return 1 - (this.now() % this.options.windowMs) / this.options.windowMs;
+  }
+
+  /** Adds one to each key's current window; returns each key's count, this attempt included. */
   private async count(keys: string[]): Promise<number[]> {
     const windowStart = this.window();
     const previous = windowStart - BigInt(this.options.windowMs);
     const totals: number[] = [];
     for (const key of keys) {
       const hashed = this.hash(key);
-      const [row] = await this.db.$queryRaw<{ total: number }[]>`
+      const [row] = await this.db.$queryRaw<{ current: number; previous: number }[]>`
         INSERT INTO "RateCounter" ("key", "windowStart", "count") VALUES (${hashed}, ${windowStart}, 1)
         ON CONFLICT ("key", "windowStart") DO UPDATE SET "count" = "RateCounter"."count" + 1
-        RETURNING "count" + COALESCE((SELECT "count" FROM "RateCounter" WHERE "key" = ${hashed} AND "windowStart" = ${previous}), 0) AS total`;
-      totals.push(Number(row!.total));
+        RETURNING "count" AS current, COALESCE((SELECT "count" FROM "RateCounter" WHERE "key" = ${hashed} AND "windowStart" = ${previous}), 0) AS previous`;
+      totals.push(Number(row!.current) + Number(row!.previous) * this.overlap());
     }
     if (++this.sincePrune >= this.pruneEvery) {
       this.sincePrune = 0;
@@ -174,7 +201,6 @@ export class PgLimiter implements Limiter {
     }
     return totals;
   }
-
   /** Drops windows that can't count any more, then the least recently tried non-account keys beyond `maxKeys`. */
   private async prune(): Promise<void> {
     const prefix = `${this.name}:`;
@@ -193,8 +219,8 @@ export class PgLimiter implements Limiter {
     return BigInt(Math.floor(this.now() / this.options.windowMs) * this.options.windowMs);
   }
 
-  /** `<name>:a:<hash>` for account keys, `<name>:-:<hash>` for the rest (so pruning can tell them apart). */
+  /** `<name>:a:<hmac>` for account keys, `<name>:-:<hmac>` for the rest (so pruning can tell them apart). */
   private hash(key: string): string {
-    return `${this.name}:${isAccountKey(key) ? "a" : "-"}:${createHash("sha256").update(key).digest("hex")}`;
+    return `${this.name}:${isAccountKey(key) ? "a" : "-"}:${createHmac("sha256", this.secret).update(key).digest("hex")}`;
   }
 }

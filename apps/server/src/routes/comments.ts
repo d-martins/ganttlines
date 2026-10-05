@@ -1,5 +1,5 @@
 import type { Comment } from "@ganttlines/db";
-import { BOARD_LIMITS, CommentBody, EditCommentBody, type CommentDto } from "@ganttlines/protocol";
+import { BOARD_LIMITS, CommentBody, EditCommentBody, type CommentCountsDto, type CommentDto } from "@ganttlines/protocol";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { actorKey, type Actor } from "../actor";
@@ -57,6 +57,14 @@ export function commentRoutes(app: FastifyInstance, context: RouteContext): void
     return reply.status(201).send({ comment: toCommentDto(comment, actorKey(access.actor)) });
   });
 
+  /** How many comments each task has (deleted ones aside), for the task list. */
+  app.get<{ Params: { id: string } }>("/api/projects/:id/comment-counts", async (request): Promise<CommentCountsDto> => {
+    const projectId = parseId(request.params.id, "Project");
+    await requireProjectAccess(request, context, projectId, "view");
+    const groups = await db.comment.groupBy({ by: ["taskId"], where: { projectId, deletedAt: null }, _count: { _all: true } });
+    return { counts: Object.fromEntries(groups.map((group) => [group.taskId, group._count._all])) };
+  });
+
   app.patch<{ Params: { id: string } }>("/api/comments/:id", async (request) => {
     const comment = await findComment(request.params.id);
     const access = await requireProjectAccess(request, context, comment.projectId, "view");
@@ -92,6 +100,9 @@ export function commentRoutes(app: FastifyInstance, context: RouteContext): void
 export async function postComment(context: RouteContext, projectId: string, actor: Actor, taskId: string, body: string): Promise<Comment> {
   await assertNotArchived(context.db, projectId);
   if (!(await context.projects.hasTask(projectId, taskId))) throw notFound("Task");
+  if ((await context.db.comment.count({ where: { projectId, taskId, deletedAt: null } })) >= BOARD_LIMITS.commentsPerTask) {
+    throw conflict(`A task can have at most ${BOARD_LIMITS.commentsPerTask} comments — delete some first`);
+  }
   const comment = await context.db.comment.create({
     data: { projectId, taskId, authorUserId: actor.userId, authorVisitorId: actor.visitorId ?? null, authorLabel: actor.label, body },
   });

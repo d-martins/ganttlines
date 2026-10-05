@@ -13,7 +13,6 @@ export type Command =
   | { type: "updateTitle"; id: RowId; title: string }
   | { type: "setDescription"; id: RowId; description: string }
   | { type: "setColor"; id: RowId; color: TaskColor }
-  | { type: "toggleCollapsed"; id: RowId; collapsed: boolean }
   | { type: "setAssignee"; id: RowId; resourceId: ResourceId | null }
   /** `half`: the half of `start` the task starts in (default the morning). */
   | { type: "moveTask"; id: RowId; start: IsoDate; half?: DayHalf }
@@ -97,8 +96,6 @@ class Execution {
       case "setColor":
         if (!TASK_COLORS.includes(command.color)) throw new Rejection("invalid", `Unknown color ${command.color}`);
         return this.patch(this.task(command.id), { color: command.color });
-      case "toggleCollapsed":
-        return this.patch(this.row(command.id), { collapsed: command.collapsed });
       case "setAssignee":
         return this.patch(this.task(command.id), { resourceId: command.resourceId });
       case "moveTask":
@@ -139,7 +136,7 @@ class Execution {
     if (this.rows[command.id]) throw new Rejection("invalid", `Row ${command.id} already exists`);
     this.assertValidParent(command.kind, command.parentId);
     const position = this.positionAfter(command.parentId, command.afterId);
-    const base = { id: command.id, title: command.title, parentId: command.parentId, position, collapsed: false };
+    const base = { id: command.id, title: command.title, parentId: command.parentId, position };
     if (command.kind === "section") {
       if (command.start !== undefined) throw new Rejection("invalid", "Sections have no dates");
       this.rows[command.id] = { ...base, kind: "section" };

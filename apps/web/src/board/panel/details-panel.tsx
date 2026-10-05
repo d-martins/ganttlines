@@ -1,5 +1,5 @@
 import { buildTree, childrenOf, computeSchedule, CycleError, fromDay, isParentTask, TASK_COLORS, type Row, type RowId, type Schedule, type TaskRow } from "@ganttlines/engine";
-import { COMMAND_LIMITS } from "@ganttlines/protocol";
+import { COMMAND_LIMITS } from "@ganttlines/protocol/constants";
 import { useQuery } from "@tanstack/react-query";
 import { Lock, Plus, UserRound, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type InputHTMLAttributes, type KeyboardEvent, type ReactNode } from "react";

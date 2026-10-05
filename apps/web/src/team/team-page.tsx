@@ -1,7 +1,7 @@
 import type { HolidayBody, HolidayDto, LocationDto, ResourceDto, TimeOffBody, TimeOffDto, UserDto } from "@ganttlines/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { errorMessage } from "../api/client";
+import { errorMessage, latestError } from "../api/client";
 import {
   calendar,
   currentUser,
@@ -28,6 +28,7 @@ import { ConfirmButton } from "../ui/confirm";
 import { ErrorText, Field } from "../ui/field";
 import { SearchSelect, type SearchOption } from "../ui/search-select";
 import { Section } from "../ui/section";
+import { NameInput } from "../ui/name-input";
 
 const canEdit = (user: UserDto | null | undefined) => user?.role === "editor" || user?.role === "admin";
 
@@ -71,11 +72,11 @@ function TeamMembers({ people, locations, editable }: { people: ResourceDto[]; l
           <li key={person.id} className="flex items-center gap-3 py-2">
             <Avatar name={person.name} color={person.avatarColor} />
             {editable ? (
-              <input
-                aria-label={`Name of ${person.name}`}
-                defaultValue={person.name}
-                onBlur={(event) => event.target.value.trim() && event.target.value !== person.name && update.mutate({ id: person.id, name: event.target.value.trim() })}
-                className="flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-sm hover:border-border focus:border-accent"
+              <NameInput
+                label={`Name of ${person.name}`}
+                value={person.name}
+                onCommit={(name, revert) => update.mutate({ id: person.id, name }, { onError: revert })}
+                className="flex-1 text-sm"
               />
             ) : (
               <span className="flex-1 text-sm">{person.name}</span>
@@ -127,7 +128,7 @@ function TeamMembers({ people, locations, editable }: { people: ResourceDto[]; l
           </Button>
         </form>
       ) : null}
-      <ErrorText>{(create.error ?? update.error) ? errorMessage(create.error ?? update.error) : null}</ErrorText>
+      <ErrorText>{latestError(create, update) ? errorMessage(latestError(create, update)) : null}</ErrorText>
     </Section>
   );
 }
@@ -151,13 +152,11 @@ function Locations({ locations, people, holidays, editable }: { locations: Locat
             <li key={location.id} className="flex flex-col gap-2 py-2 text-sm">
               <div className="flex flex-wrap items-center gap-3">
                 {editable ? (
-                  <input
-                    aria-label={`Name of ${location.name}`}
-                    defaultValue={location.name}
-                    onBlur={(event) =>
-                      event.target.value.trim() && event.target.value !== location.name && save.mutate({ ...location, name: event.target.value.trim() })
-                    }
-                    className="min-w-32 flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 hover:border-border focus:border-accent"
+                  <NameInput
+                    label={`Name of ${location.name}`}
+                    value={location.name}
+                    onCommit={(name, revert) => save.mutate({ ...location, name }, { onError: revert })}
+                    className="min-w-32 flex-1"
                   />
                 ) : (
                   <span className="flex-1">{location.name}</span>
@@ -200,7 +199,7 @@ function Locations({ locations, people, holidays, editable }: { locations: Locat
           </Button>
         </form>
       ) : null}
-      <ErrorText>{(save.error ?? remove.error) ? errorMessage(save.error ?? remove.error) : null}</ErrorText>
+      <ErrorText>{latestError(save, remove) ? errorMessage(latestError(save, remove)) : null}</ErrorText>
     </Section>
   );
 }
@@ -326,7 +325,7 @@ function PublicHolidayPicker({ location, onDone }: { location: LocationDto; onDo
         </Button>
         <Button onClick={onDone}>Cancel</Button>
       </div>
-      <ErrorText>{(suggestions.error ?? add.error) ? errorMessage(suggestions.error ?? add.error) : null}</ErrorText>
+      <ErrorText>{(suggestions.error ?? latestError(add)) ? errorMessage(suggestions.error ?? latestError(add)) : null}</ErrorText>
     </div>
   );
 }
@@ -552,7 +551,7 @@ function Holidays({ holidays, people, locations, editable }: { holidays: Holiday
           </div>
         </form>
       ) : null}
-      <ErrorText>{(save.error ?? remove.error) ? errorMessage(save.error ?? remove.error) : null}</ErrorText>
+      <ErrorText>{latestError(save, remove) ? errorMessage(latestError(save, remove)) : null}</ErrorText>
     </Section>
   );
 }
@@ -611,11 +610,14 @@ function TimeOff({ entries, people, editable }: { entries: TimeOffDto[]; people:
                 onChange={(e) => setEditing({ ...editing, resourceId: e.target.value })}
                 className="rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-text"
               >
-                {active.map((person) => (
-                  <option key={person.id} value={person.id}>
-                    {person.name}
-                  </option>
-                ))}
+                {/* active people, plus whoever this entry is for even if they've left */}
+                {people
+                  .filter((person) => !person.inactive || person.id === editing.resourceId)
+                  .map((person) => (
+                    <option key={person.id} value={person.id}>
+                      {person.inactive ? `${person.name} (inactive)` : person.name}
+                    </option>
+                  ))}
               </select>
             </label>
             <Field label="From" type="date" value={editing.startDate} onChange={(e) => setEditing({ ...editing, startDate: e.target.value })} required />
@@ -630,7 +632,7 @@ function TimeOff({ entries, people, editable }: { entries: TimeOffDto[]; people:
           </div>
         </form>
       ) : null}
-      <ErrorText>{(save.error ?? remove.error) ? errorMessage(save.error ?? remove.error) : null}</ErrorText>
+      <ErrorText>{latestError(save, remove) ? errorMessage(latestError(save, remove)) : null}</ErrorText>
     </Section>
   );
 }

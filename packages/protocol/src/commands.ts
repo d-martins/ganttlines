@@ -1,11 +1,9 @@
 import { MAX_DATE, MAX_DURATION, MAX_OFFSET, MIN_DATE, TASK_COLORS, type Command } from "@ganttlines/engine";
 import { z } from "zod";
+import { COMMAND_LIMITS } from "./constants";
 
-export const COMMAND_LIMITS = {
-  titleMax: 500,
-  descriptionMax: 20_000,
-  deleteRowsMax: 5_000,
-} as const;
+export { COMMAND_LIMITS };
+
 
 const id = z.uuid();
 const date = z.iso.date().refine((value) => value >= MIN_DATE && value <= MAX_DATE, `Dates must be between ${MIN_DATE} and ${MAX_DATE}`);
@@ -33,7 +31,6 @@ export const CommandSchema = z.discriminatedUnion("type", [
   cmd("updateTitle", { id, title }),
   cmd("setDescription", { id, description: z.string().max(COMMAND_LIMITS.descriptionMax) }),
   cmd("setColor", { id, color: z.enum(TASK_COLORS) }),
-  cmd("toggleCollapsed", { id, collapsed: z.boolean() }),
   cmd("setAssignee", { id, resourceId: id.nullable() }),
   cmd("moveTask", { id, start: date, half }),
   cmd("resizeTask", { id, edge: z.enum(["start", "end"]), date, half }),

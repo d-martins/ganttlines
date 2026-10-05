@@ -44,7 +44,7 @@ export function describeChange(change: RowChange, names: Names): string | null {
     case "parentId":
     case "position":
       return "moved it in the list";
-    case "collapsed":
+    case "collapsed": // (older history: collapsing used to be stored)
       return null;
     default:
       return `changed ${field}`;

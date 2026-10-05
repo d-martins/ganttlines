@@ -11,24 +11,11 @@ import { BarMenu } from "./bar-menu";
 import { ActualTrack, BAR_HEIGHT, barDetails, extent, GhostBar, ROW_HEIGHT, RowBar } from "./bars";
 import { dragCommand, edgeAt, startAt, stepHalf, useChartDrag, type ChartDrag, type DragKind } from "./drag";
 import type { Timeline } from "./timeline";
+import { AUTO_SCROLL_STEP, AUTO_SCROLL_TICK_MS, edgePush, HEADER_HEIGHT } from "../auto-scroll";
 
 const BAR_HELP_ID = "gp-bar-help";
 /** pixels the pointer must travel before a press on a bar becomes a drag (a smaller movement is a click) */
 const DRAG_THRESHOLD = 3;
-/** dragging within this many pixels of the chart's visible edge (or past it) scrolls the chart */
-const AUTO_SCROLL_EDGE = 40;
-/** fastest auto-scroll, in pixels per tick (reached at the edge and beyond) */
-const AUTO_SCROLL_STEP = 24;
-const AUTO_SCROLL_TICK_MS = 16;
-/** height of the sticky timeline header above the rows */
-const HEADER_HEIGHT = 48;
-
-/** How hard to scroll for a pointer at `position` given the visible range [start, end]: -1…1. */
-export function edgePush(position: number, start: number, end: number): number {
-  if (position > end - AUTO_SCROLL_EDGE) return Math.min((position - (end - AUTO_SCROLL_EDGE)) / AUTO_SCROLL_EDGE, 1);
-  if (position < start + AUTO_SCROLL_EDGE) return -Math.min((start + AUTO_SCROLL_EDGE - position) / AUTO_SCROLL_EDGE, 1);
-  return 0;
-}
 
 /**
  * The chart's rows as interactive strips: bars move, resize and link by dragging (previewed live
@@ -168,6 +155,12 @@ export function ChartRows({
       setMenuFor(row.id);
     } else if (event.key === "Delete" || event.key === "Backspace") {
       deleteRow(latest.current.board, row);
+    } else if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+      // The day menu (holidays, time off, highlights), for the task's first day: as a right-click there would.
+      const target = event.currentTarget as HTMLElement;
+      const body = target.closest("[data-chart-body]") as HTMLElement;
+      const x = body.getBoundingClientRect().left + now.x(span.start) + 1;
+      target.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: x, clientY: target.getBoundingClientRect().bottom }));
     } else {
       return;
     }
@@ -186,7 +179,7 @@ export function ChartRows({
   return (
     <>
       <p id={BAR_HELP_ID} className="sr-only">
-        Arrow keys move the task, Shift with arrow keys changes its length, Enter opens its options.
+        Arrow keys move the task, Shift with arrow keys changes its length, Enter opens its options, Shift+F10 opens the menu for its first day.
       </p>
       {rows.map((entry, index) => {
         const absoluteIndex = firstRow + index;
@@ -222,6 +215,7 @@ export function ChartRows({
                 style={style}
                 resources={resourceMap}
                 titleGap={editable ? 18 : 6}
+                visibleLeft={visibleLeft}
                 shape={
                   editable
                     ? {

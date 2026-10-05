@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { InstanceService } from "../src/calendar/instance-service";
 import { createUser, setupAdmin, useTestApp } from "./helpers";
 
 const t = useTestApp();
@@ -165,5 +166,38 @@ describe("team calendar", () => {
     const after = (await t.app.inject({ url: "/api/calendar", headers: { cookie: editor } })).json().instanceVersion;
     expect(after).toBe(before + 1);
     expect(await t.db.commandLog.findFirst({ where: { projectId: null, version: after } })).toMatchObject({ name: "createHoliday", actorLabel: "Ed" });
+  });
+});
+
+describe("team calendar history", () => {
+  it("never has two entries with the same version", async () => {
+    const entry = (commandId: string) => ({ projectId: null, version: 999, commandId, actorUserId: null, actorLabel: "x", name: "test", payload: {}, changes: [] });
+    await t.db.commandLog.create({ data: entry("00000000-0000-4000-8000-000000000001") });
+    await expect(t.db.commandLog.create({ data: entry("00000000-0000-4000-8000-000000000002") })).rejects.toThrow(/Unique constraint/);
+  });
+});
+
+describe("command history lookups", () => {
+  it("can find a task's changes through an index (the activity panel on long histories)", async () => {
+    const plan = await t.db.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe("SET LOCAL enable_seqscan = off");
+      return tx.$queryRawUnsafe<{ "QUERY PLAN": string }[]>(`EXPLAIN SELECT id FROM "CommandLog" WHERE changes @> '[{"rowId": "x"}]'`);
+    });
+    expect(plan.map((line) => line["QUERY PLAN"]).join("\n")).toContain("CommandLog_changes_idx");
+  });
+});
+
+describe("team calendar changes", () => {
+  it("roll back entirely when they'd leave an invalid calendar (even ones that skip request checks)", async () => {
+    const instance = new InstanceService(t.db);
+    const before = await t.db.commandLog.count({ where: { projectId: null } });
+    const failed = await instance
+      .mutate({ userId: null, label: "test" }, "breakCalendar", {}, async (tx) => {
+        await tx.settings.upsert({ where: { id: 1 }, create: { id: 1, workingWeekdays: [] }, update: { workingWeekdays: [] } });
+      })
+      .catch((error: unknown) => error);
+    expect(failed).toMatchObject({ status: 400 });
+    expect((await t.db.settings.findUnique({ where: { id: 1 } }))?.workingWeekdays ?? [1, 2, 3, 4, 5]).not.toEqual([]);
+    expect(await t.db.commandLog.count({ where: { projectId: null } })).toBe(before);
   });
 });

@@ -97,7 +97,7 @@ function ProjectItem({ project, manage }: { project: ProjectDto; manage: boolean
       {manage ? (
         <Menu
           trigger={
-            <button type="button" aria-label={`Actions for ${project.name}`} className="mr-1 rounded p-1 text-muted opacity-0 hover:text-text focus:opacity-100 group-hover:opacity-100">
+            <button type="button" aria-label={`Actions for ${project.name}`} className="mr-1 rounded p-1 text-muted opacity-0 group-hover:opacity-100 hover:text-text focus:opacity-100 pointer-coarse:opacity-100">
               <MoreHorizontal size={16} />
             </button>
           }

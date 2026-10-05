@@ -36,6 +36,7 @@ export function ChartHeader({
   zoom,
   days,
   highlights,
+  holidays,
   todayDay,
   stickyLeft,
 }: {
@@ -44,6 +45,8 @@ export function ChartHeader({
   /** the visible days in the viewport (plus overscan) */
   days: readonly DayNum[];
   highlights: readonly { day: DayNum; highlight: HighlightDto }[];
+  /** holiday names by day */
+  holidays: ReadonlyMap<DayNum, readonly string[]>;
   todayDay: DayNum;
   /** where the chart starts on screen: long labels stay readable there while their cell scrolls */
   stickyLeft: number;
@@ -86,6 +89,20 @@ export function ChartHeader({
             {cell.label}
           </div>
         );
+      })}
+      {days.flatMap((day) => {
+        const names = holidays.get(day);
+        if (!names) return [];
+        const label = names.join(", ");
+        return [
+          <div
+            key={`holiday-${day}`}
+            title={label}
+            aria-label={`Holiday ${formatDay(day)}: ${label}`}
+            className="absolute top-6 h-1 bg-[var(--holiday-stripe)]"
+            style={{ left: timeline.x(day), width: timeline.xEnd(day) - timeline.x(day) }}
+          />,
+        ];
       })}
       {highlights.map(({ day, highlight }) => (
         <div

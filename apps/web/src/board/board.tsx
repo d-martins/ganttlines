@@ -11,12 +11,30 @@ import { Shading } from "./chart/shading";
 import { chartRange, DAY_WIDTH, Timeline } from "./chart/timeline";
 import { today } from "./format";
 import { useBoard } from "./board-context";
-import { useCollapsed } from "./collapse";
-import { ListHeader, ListRows, useListKeys } from "./list/task-list";
-import { DetailsPanel } from "./panel/details-panel";
+import { useCollapse, useCollapsed } from "./collapse";
+import { ListColumnHeaders, ListHeader, ListRows, useListKeys } from "./list/task-list";
 import { useSelection } from "./selection";
 import { boardModel, type CompareMode } from "./model";
 import { useBoardView } from "./view-store";
+
+type DetailsPanelType = typeof import("./panel/details-panel").DetailsPanel;
+/** The details panel brings the rich-text editor along: a separate download, fetched once a board is shown. */
+let loadedPanel: DetailsPanelType | null = null;
+function useDetailsPanel(): DetailsPanelType | null {
+  const [panel, setPanel] = useState(() => loadedPanel);
+  useEffect(() => {
+    if (panel) return;
+    let current = true;
+    void import("./panel/details-panel").then((module) => {
+      loadedPanel = module.DetailsPanel;
+      if (current) setPanel(() => module.DetailsPanel);
+    });
+    return () => {
+      current = false;
+    };
+  }, [panel]);
+  return panel;
+}
 
 const HEADER_HEIGHT = 48;
 /** how far inside the chart's left edge a revealed bar starts */
@@ -65,6 +83,10 @@ export function Board({
   const [query, setQuery] = useState("");
   const { canEdit, canEditCalendar, sync } = useBoard();
   const collapsed = useCollapsed(sync.projectId);
+  // Collapsed rows deleted since are forgotten (once the board has rows to compare with).
+  useEffect(() => {
+    if (Object.keys(state.rows).length > 0) useCollapse.getState().prune(sync.projectId, (id) => id in state.rows);
+  }, [state.rows, sync.projectId]);
   // While a bar is dragged, show the board as the drop would leave it (successors pushed and all).
   const dragCommand = useChartDrag((store) => store.drag?.command ?? null);
   const displayed = useMemo(() => {
@@ -74,9 +96,19 @@ export function Board({
   }, [state, calendar, dragCommand]);
   const model = useMemo(() => boardModel(displayed, calendar, baseline, query, collapsed), [displayed, calendar, baseline, query, collapsed]);
   const { selectedId, select, centerRequest } = useSelection();
+  const DetailsPanel = useDetailsPanel();
   const onListKey = useListKeys(model.rows);
   const todayDay = today();
   const highlightDays = useMemo(() => highlights.map((highlight) => ({ day: toDay(highlight.date), highlight })), [highlights]);
+  // Holiday names by day, for the date header (people-specific ones say so).
+  const holidayNames = useMemo(() => {
+    const names = new Map<DayNum, string[]>();
+    for (const holiday of calendarDto.holidays) {
+      const name = holiday.target.all ? holiday.name : `${holiday.name} (some people)`;
+      for (let day = toDay(holiday.startDate); day <= toDay(holiday.endDate); day++) names.set(day, [...(names.get(day) ?? []), name]);
+    }
+    return names;
+  }, [calendarDto.holidays]);
 
   const { first, last } = useMemo(() => {
     const days: DayNum[] = highlightDays.map(({ day }) => day);
@@ -206,13 +238,13 @@ export function Board({
               <ListHeader query={query} onQuery={setQuery} />
               {divider}
             </div>
-            <ChartHeader timeline={timeline} zoom={zoom} stickyLeft={listWidth} days={days} highlights={highlightDays} todayDay={todayDay} />
+            <ChartHeader timeline={timeline} zoom={zoom} stickyLeft={listWidth} days={days} highlights={highlightDays} holidays={holidayNames} todayDay={todayDay} />
           </div>
           <div className="flex" style={{ height: bodyHeight }}>
             <div
               role="treegrid"
               aria-label="Tasks"
-              aria-rowcount={model.rows.length}
+              aria-rowcount={model.rows.length + 1}
               aria-multiselectable={false}
               // Not a Tab stop itself (its cells are); focused on row clicks so the list keys keep working.
               tabIndex={-1}
@@ -232,6 +264,7 @@ export function Board({
               className="sticky left-0 z-10 shrink-0 overflow-hidden border-r border-border bg-bg outline-none focus:outline-none focus-visible:outline-none"
               style={{ width: listWidth, height: bodyHeight, ...grid }}
             >
+              <ListColumnHeaders />
               <ListRows rows={shown} allRows={model.rows} firstRow={firstRow} rowHeight={rowHeight} numbers={model.numbers} searching={query.trim() !== ""} />
               {divider}
             </div>
@@ -267,7 +300,7 @@ export function Board({
         </div>
         {model.rows.length === 0 ? <p className="absolute top-16 left-4 text-sm text-muted">No tasks yet.</p> : null}
       </div>
-      <DetailsPanel numbers={model.numbers} />
+      {DetailsPanel ? <DetailsPanel numbers={model.numbers} /> : null}
     </div>
   );
 }

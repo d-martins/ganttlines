@@ -1,7 +1,8 @@
 import { z } from "zod";
+import { ROLES, type Role } from "./constants";
 
-export const ROLES = ["admin", "editor", "viewer", "guest"] as const;
-export type Role = (typeof ROLES)[number];
+export { ROLES, type Role };
+
 
 export const LIMITS = {
   nameMax: 100,

@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
+import { Writable } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { CLOSE_SESSION_ENDED } from "../src/realtime/hub";
-import { createUser, PUBLIC_URL, setupAdmin, useTestApp } from "./helpers";
+import { createUser, PUBLIC_URL, setupAdmin, testApp, testConfig, useTestApp } from "./helpers";
 import { connect } from "./ws-client";
 
 const t = useTestApp();
@@ -167,6 +168,60 @@ describe("closing connections", () => {
     await a.next("joined");
     for (let i = 0; i < 150; i++) a.send({ type: "command", commandId: randomUUID(), command: createTask(randomUUID()) });
     expect(await a.closed).toBe(1008);
+  });
+
+  it("closes idle sockets once their session has expired (they're checked now and then)", async () => {
+    const app = await testApp({ db: t.db, config: testConfig, liveRevalidateMs: 100, now: () => t.clock.now });
+    try {
+      const admin = await setupAdmin(app);
+      const client = await connect(app, admin);
+      t.clock.now = new Date(t.clock.now.getTime() + 31 * 24 * 60 * 60 * 1000);
+      expect(await client.closed).toBe(CLOSE_SESSION_ENDED);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("shuts down with boards open without logging warnings", async () => {
+    const lines: string[] = [];
+    const stream = new Writable({
+      write(chunk: Buffer, _encoding, done) {
+        lines.push(chunk.toString());
+        done();
+      },
+    });
+    const app = await testApp({ db: t.db, config: testConfig, logger: { level: "info", stream } });
+    const admin = await setupAdmin(app);
+    const projectId = (await app.inject({ method: "POST", url: "/api/projects", headers: { cookie: admin }, payload: { name: "Launch" } })).json().project.id;
+    for (const client of await Promise.all([connect(app, admin), connect(app, admin)])) {
+      client.send({ type: "join", projectId, version: 0 });
+      await client.next("joined");
+    }
+    await app.close();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(lines.filter((line) => /"level":(40|50|60)/.test(line))).toEqual([]);
+  });
+
+  it("keeps link and reset tokens out of the request log", async () => {
+    const lines: string[] = [];
+    const stream = new Writable({
+      write(chunk: Buffer, _encoding, done) {
+        lines.push(chunk.toString());
+        done();
+      },
+    });
+    const app = await testApp({ db: t.db, config: testConfig, logger: { level: "info", stream } });
+    try {
+      for (const url of ["/api/share/SECRET-ONE", "/api/share/SECRET-TWO/visitor", "/ws?share=SECRET-THREE", "/s/SECRET-FOUR", "/reset-password?token=SECRET-FIVE&x=1", "/api/auth/oidc/callback?code=SECRET-SIX&state=SECRET-SEVEN", "/connect?request=SECRET-EIGHT", "/api/oauth/request?request=SECRET-NINE"]) {
+        await app.inject({ url });
+      }
+      const logged = lines.join("\n");
+      expect(logged).toContain("/api/share/");
+      expect(logged).toContain("/api/auth/oidc/callback?code=[redacted]");
+      expect(logged).not.toMatch(/SECRET/);
+    } finally {
+      await app.close();
+    }
   });
 
   it("closes a session's sockets on logout", async () => {

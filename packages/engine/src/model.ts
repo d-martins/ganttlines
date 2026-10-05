@@ -12,7 +12,6 @@ interface RowBase {
   parentId: RowId | null;
   /** fractional-indexing key; siblings sort by plain string comparison */
   position: string;
-  collapsed: boolean;
 }
 
 export interface SectionRow extends RowBase {

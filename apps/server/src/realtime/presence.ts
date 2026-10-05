@@ -2,8 +2,8 @@ import type { Viewer } from "@ganttlines/protocol";
 import type { ClusterEvent, EventBus } from "../cluster/types";
 import type { Hub } from "./hub";
 
-/** At most this many viewers per project are announced to other copies (notifications are small). */
-const MAX_ANNOUNCED = 100;
+/** Room for a room's viewers in one notification to other copies (they're under 8000 bytes in all). */
+const ANNOUNCED_BYTES = 7000;
 
 /**
  * Who is viewing each board, across copies: this copy's viewers (from the hub) plus what other
@@ -13,6 +13,7 @@ const MAX_ANNOUNCED = 100;
 export class Presence {
   private readonly remote = new Map<string, { seen: number; rooms: Map<string, Viewer[]> }>();
   private timer: NodeJS.Timeout | undefined;
+  private expiry: NodeJS.Timeout | undefined;
   private readonly now: () => number;
   private readonly heartbeatMs: number;
   private readonly ttlMs: number;
@@ -40,7 +41,7 @@ export class Presence {
   /** This copy's viewers of `projectId` changed: tell its browsers and the other copies. */
   changed(projectId: string): void {
     this.hub.broadcast(projectId, { type: "presence", projectId, viewers: this.viewers(projectId) });
-    void this.bus.publish({ type: "presence", projectId, viewers: this.hub.viewers(projectId).slice(0, MAX_ANNOUNCED) });
+    void this.bus.publish({ type: "presence", projectId, viewers: this.announced(projectId) });
   }
 
   receive(event: Extract<ClusterEvent, { type: "presence" | "rooms" | "alive" | "bye" }>, from: string): void {
@@ -76,22 +77,39 @@ export class Presence {
     for (const [copyId, copy] of this.remote) if (this.now() - copy.seen > this.ttlMs) this.drop(copyId);
   }
 
-  /** Heartbeat: re-announce this copy's rooms (and that it's alive); expire quiet copies. */
+  /**
+   * Heartbeat: re-announce this copy's rooms (and that it's alive). Quiet copies are checked more
+   * often than that, so their viewers go close to `ttlMs` after their last word.
+   */
   start(): void {
     this.timer = setInterval(() => {
       void this.bus.publish({ type: "alive" });
       void this.bus.publish({ type: "rooms", projectIds: this.hub.rooms() });
       for (const projectId of this.hub.rooms()) {
-        void this.bus.publish({ type: "presence", projectId, viewers: this.hub.viewers(projectId).slice(0, MAX_ANNOUNCED) });
+        void this.bus.publish({ type: "presence", projectId, viewers: this.announced(projectId) });
       }
-      this.expire();
     }, this.heartbeatMs);
     this.timer.unref();
+    this.expiry = setInterval(() => this.expire(), Math.min(5000, Math.max(50, this.ttlMs / 10)));
+    this.expiry.unref();
   }
 
   async stop(): Promise<void> {
     clearInterval(this.timer);
+    clearInterval(this.expiry);
     await this.bus.publish({ type: "bye" });
+  }
+
+  /** This copy's viewers of `projectId`, as many as fit in a notification (a crowded room is trimmed). */
+  private announced(projectId: string): Viewer[] {
+    const fitting: Viewer[] = [];
+    let bytes = 0;
+    for (const viewer of this.hub.viewers(projectId)) {
+      bytes += Buffer.byteLength(JSON.stringify(viewer)) + 1;
+      if (bytes > ANNOUNCED_BYTES) break;
+      fitting.push(viewer);
+    }
+    return fitting;
   }
 
   private drop(copyId: string): void {

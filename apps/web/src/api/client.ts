@@ -1,4 +1,4 @@
-import { SHARE_TOKEN_HEADER } from "@ganttlines/protocol";
+import { SHARE_TOKEN_HEADER } from "@ganttlines/protocol/constants";
 
 /** A failed API call: `code` is the server's machine-readable `error` (e.g. "unauthorized"). */
 export class ApiError extends Error {
@@ -43,4 +43,14 @@ export async function api<T>(method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE"
 export function errorMessage(error: unknown): string {
   if (error instanceof ApiError) return error.message;
   return "Something went wrong";
+}
+
+/**
+ * The error of the most recently started of several actions (mutations) — null once a later one
+ * works, so an old failure doesn't linger next to newer results.
+ */
+export function latestError(...actions: { error: Error | null; submittedAt: number }[]): Error | null {
+  let latest: { error: Error | null; submittedAt: number } | undefined;
+  for (const action of actions) if (action.submittedAt > 0 && (!latest || action.submittedAt >= latest.submittedAt)) latest = action;
+  return latest?.error ?? null;
 }

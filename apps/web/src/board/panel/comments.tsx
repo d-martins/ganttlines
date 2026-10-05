@@ -1,4 +1,5 @@
-import { BOARD_LIMITS, type CommentDto } from "@ganttlines/protocol";
+import { BOARD_LIMITS } from "@ganttlines/protocol/constants";
+import type { CommentDto } from "@ganttlines/protocol";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { errorMessage } from "../../api/client";

@@ -8,7 +8,6 @@ export function toEngineRow(row: DbRow): Row {
     title: row.title,
     parentId: row.parentId,
     position: row.position,
-    collapsed: row.collapsed,
   };
   if (row.kind === "section") return { ...base, kind: "section" };
   if (row.kind !== "task") throw new Error(`Row ${row.id} has unknown kind ${row.kind}`);
@@ -37,7 +36,6 @@ export function toDbColumns(row: Row): Omit<DbRow, "projectId"> {
     title: row.title,
     parentId: row.parentId,
     position: row.position,
-    collapsed: row.collapsed,
   };
   if (row.kind === "section") {
     return {

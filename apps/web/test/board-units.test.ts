@@ -50,7 +50,7 @@ describe("outline", () => {
         rows: {
           s: section("s", { position: "a0" }),
           a: task("a", { parentId: "s", position: "a0" }),
-          b: task("b", { position: "b0", collapsed: true }), // the stored flag is ignored: collapsing is per browser
+          b: task("b", { position: "b0" }),
           c: task("c", { parentId: "b", position: "a0" }),
         },
       },
@@ -154,7 +154,7 @@ describe("chart drags", () => {
 
 describe("drag auto-scroll", () => {
   it("pushes harder the closer the pointer is to (or past) an edge", async () => {
-    const { edgePush } = await import("../src/board/chart/chart-rows");
+    const { edgePush } = await import("../src/board/auto-scroll");
     expect(edgePush(500, 100, 900)).toBe(0);
     expect(edgePush(880, 100, 900)).toBe(0.5);
     expect(edgePush(1000, 100, 900)).toBe(1); // past the edge: full speed forward

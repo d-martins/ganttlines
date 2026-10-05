@@ -23,6 +23,7 @@ describe("serving the web app", async () => {
       expect(response.statusCode, url).toBe(200);
       expect(response.headers["content-type"]).toMatch(/text\/html/);
       expect(response.headers["cache-control"]).toBe("no-cache");
+      expect(response.headers["referrer-policy"], url).toBe("no-referrer"); // link and reset tokens are in page addresses
       expect(response.headers["x-frame-options"]).toBe("DENY");
       expect(response.body).toContain("GanttLines");
     }
