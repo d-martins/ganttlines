@@ -44,7 +44,7 @@ const MAX_CACHED_LINKS = 10_000;
 
 export class AccessService {
   private readonly linksByHash = new Map<string, Promise<ShareLink | null>>();
-  /** projects known to exist (projects are never deleted, so positives can be cached) */
+  /** projects known to exist (deleting one forgets it — here, and on other copies when they're told) */
   private readonly knownProjects = new Set<string>();
 
   constructor(
@@ -106,6 +106,12 @@ export class AccessService {
 
   /** Call after a link changes or is revoked. */
   invalidate(_linkId: string): void {
+    this.linksByHash.clear();
+  }
+
+  /** Call when notifications may have been missed (a deletion among them): forget everything cached. */
+  forgetAll(): void {
+    this.knownProjects.clear();
     this.linksByHash.clear();
   }
 

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { Writable } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { CLOSE_SESSION_ENDED } from "../src/realtime/hub";
 import { createUser, PUBLIC_URL, setupAdmin, testApp, testConfig, useTestApp } from "./helpers";
@@ -179,6 +180,26 @@ describe("closing connections", () => {
     } finally {
       await app.close();
     }
+  });
+
+  it("shuts down with boards open without logging warnings", async () => {
+    const lines: string[] = [];
+    const stream = new Writable({
+      write(chunk: Buffer, _encoding, done) {
+        lines.push(chunk.toString());
+        done();
+      },
+    });
+    const app = await testApp({ db: t.db, config: testConfig, logger: { level: "info", stream } });
+    const admin = await setupAdmin(app);
+    const projectId = (await app.inject({ method: "POST", url: "/api/projects", headers: { cookie: admin }, payload: { name: "Launch" } })).json().project.id;
+    for (const client of await Promise.all([connect(app, admin), connect(app, admin)])) {
+      client.send({ type: "join", projectId, version: 0 });
+      await client.next("joined");
+    }
+    await app.close();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(lines.filter((line) => /"level":(40|50|60)/.test(line))).toEqual([]);
   });
 
   it("closes a session's sockets on logout", async () => {

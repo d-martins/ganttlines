@@ -34,4 +34,27 @@ describe("presence across copies", () => {
     presence.reset();
     expect(presence.viewers("p")).toEqual([]);
   });
+
+  it("announces a crowded room's viewers trimmed to fit one notification, rather than not at all", () => {
+    const hub = new Hub();
+    const crowd = Array.from({ length: 150 }, (_, i) => ({ id: `user:${i.toString().padStart(36, "0")}`, name: `Someone With A Rather Long Display Name ${i}` }));
+    hub.viewers = () => crowd;
+    const sent = bus();
+    new Presence(hub, sent).changed("11111111-1111-4111-8111-111111111111");
+    const event = sent.sent[0] as Extract<ClusterEvent, { type: "presence" }>;
+    expect(event.viewers.length).toBeGreaterThan(50);
+    expect(Buffer.byteLength(JSON.stringify({ from: "f".repeat(36), event }))).toBeLessThanOrEqual(7900);
+  });
+
+  it("drops a quiet copy's viewers soon after it went quiet, not at the next heartbeat", async () => {
+    const presence = new Presence(new Hub(), bus(), { heartbeatMs: 60_000, ttlMs: 300 });
+    presence.start();
+    try {
+      presence.receive({ type: "presence", projectId: "p", viewers: [{ id: "user:1", name: "Ana" }] }, "copy-b");
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      expect(presence.viewers("p")).toEqual([]);
+    } finally {
+      await presence.stop();
+    }
+  });
 });

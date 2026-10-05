@@ -227,11 +227,14 @@ upgrades on `/ws`.
 
 ## Running several copies
 
-For no downtime during updates, or on platforms that run several instances (Kubernetes,
-DigitalOcean App Platform, Fly …), GanttLines can run as several copies sharing one database:
+For more capacity, for platforms that run several instances (Kubernetes, DigitalOcean App
+Platform, Fly …), or for no downtime during updates where the platform replaces copies one at a time
+(rolling updates), GanttLines can run as several copies sharing one database:
 
 - **Compose:** `docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d` runs two
-  copies (`GL_REPLICAS` for more) behind a small Caddy proxy on the usual port. Put it straight on
+  copies (`GL_REPLICAS` for more) behind a small Caddy proxy on the usual port. A copy that stops
+  loses no requests, but `docker compose up -d` replaces all copies together when updating, so an
+  update still means a short break (Compose has no rolling updates). Put it straight on
   the network (or let Caddy do HTTPS): behind another proxy of yours, every visitor would look like
   that proxy to the rate limits — there, use your proxy to balance the copies instead.
 - **Elsewhere:** set `CLUSTER=postgres` on **every** copy, run as many as you like behind your load
@@ -240,7 +243,7 @@ DigitalOcean App Platform, Fly …), GanttLines can run as several copies sharin
 
 Copies coordinate through PostgreSQL itself (no other services). Give them a **direct** database
 address: connection poolers in transaction mode (e.g. PgBouncer, as some managed databases offer
-it) don't pass the notifications copies send each other. Each copy uses about 13 more database
+it) don't pass the notifications copies send each other. Each copy uses about 12 more database
 connections than a single server.
 
 To switch an existing install: stop it, set `CLUSTER=postgres`, start the copies. A server without

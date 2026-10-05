@@ -2,7 +2,7 @@ import cookie from "@fastify/cookie";
 import websocket from "@fastify/websocket";
 import { Prisma, type Db } from "@ganttlines/db";
 import { pendingStepOf } from "./auth/guard";
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
 import { AccessService } from "./auth/access";
 import { FirstRun } from "./auth/first-run";
 import { OidcSignIn } from "./auth/oidc";
@@ -76,7 +76,7 @@ export interface AppOptions {
   liveRevalidateMs?: number;
   /** reads AI apps' client metadata documents (tests pass a fake) */
   fetchClientMetadata?: MetadataFetcher;
-  logger?: boolean;
+  logger?: FastifyServerOptions["logger"];
 }
 
 const SESSION_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;

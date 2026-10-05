@@ -165,6 +165,27 @@ describe("project lock (postgres): a dropped connection", () => {
   });
 });
 
+describe("project lock (postgres): waiting", () => {
+  it("gives up waiting after a while with a \"busy\" answer (work stuck elsewhere doesn't pile up requests)", async () => {
+    const pools = [0, 1].map(() => new pg.Pool({ connectionString: inject("databaseUrl"), max: 2 }));
+    const [one, two] = [new PgLock(pools[0]!), new PgLock(pools[1]!, { waitMs: 200 })];
+    let release!: () => void;
+    const stuck = one.run("busy-key", () => new Promise<void>((resolve) => (release = resolve)));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const started = Date.now();
+    const waited = await Promise.race([
+      two.run("busy-key", async () => "ran").catch((error: unknown) => error),
+      new Promise((resolve) => setTimeout(() => resolve("still waiting"), 3000)),
+    ]);
+    expect(waited).toMatchObject({ status: 503, code: "busy" });
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(await two.run("other-key", async () => "free")).toBe("free"); // its connection is fine afterwards
+    release();
+    await stuck;
+    await Promise.all(pools.map((pool) => pool.end()));
+  });
+});
+
 describe("project lock (postgres): try", () => {
   it("skips work another copy is already doing", async () => {
     const pools = [new pg.Pool({ connectionString: inject("databaseUrl"), max: 2 }), new pg.Pool({ connectionString: inject("databaseUrl"), max: 2 })];

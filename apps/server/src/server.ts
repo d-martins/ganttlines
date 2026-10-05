@@ -18,8 +18,11 @@ export async function startServer(config: Config): Promise<void> {
   const announce = (message: string) => console.log(`[ganttlines] ${message}`);
   const app = await buildApp({ db, config, logger: true, announce });
 
-  /** On SIGTERM/SIGINT: stop being picked, give the load balancer a moment, then close. */
+  /** On SIGTERM/SIGINT: stop being picked, give the load balancer a moment, then close (once: repeats wait for it). */
+  let stopping = false;
   const shutdown = async () => {
+    if (stopping) return;
+    stopping = true;
     app.drain();
     await new Promise((resolve) => setTimeout(resolve, config.shutdownDelayMs));
     await app.close();
