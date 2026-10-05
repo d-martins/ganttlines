@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, inject, it } from "vitest";
 import { MIGRATIONS_DIR, migrationStatus, stamp } from "../src/maintenance/maintenance";
 import { libpqEnv, pgTool, withClient } from "../src/maintenance/postgres";
+import { withStartupLock } from "../src/maintenance/startup-lock";
 
 describe("migration status", () => {
   it("has nothing pending on a migrated database", async () => {
@@ -49,5 +50,19 @@ describe("postgres tools", () => {
 
   it("stamps backups with a sortable, file-safe time", () => {
     expect(stamp(new Date("2026-09-30T18:04:05.123Z"))).toBe("2026-09-30T18-04-05Z");
+  });
+});
+
+describe("start-up lock", () => {
+  it("lets one copy at a time check and run migrations", async () => {
+    const order: string[] = [];
+    const step = (name: string) =>
+      withStartupLock(inject("databaseUrl"), async () => {
+        order.push(`${name} in`);
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        order.push(`${name} out`);
+      });
+    await Promise.all([step("A"), step("B")]);
+    expect(order[0]!.slice(0, 1)).toBe(order[1]!.slice(0, 1));
   });
 });
