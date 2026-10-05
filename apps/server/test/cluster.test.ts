@@ -147,3 +147,34 @@ describe("several copies: who's viewing", () => {
     onB.ws.close();
   });
 });
+
+describe("several copies: revocations hold even if a notification is lost", () => {
+  it("never serves a share link from a cache that another copy could have made stale", async () => {
+    const { a, b, admin, projectId } = await twoCopies();
+    const { token, link } = (await a.inject({ method: "POST", url: `/api/projects/${projectId}/share-links`, headers: { cookie: admin }, payload: { access: "anonymous" } })).json();
+    expect((await b.inject({ url: `/api/share/${token}` })).statusCode).toBe(200);
+    await t.db.shareLink.update({ where: { id: link.id }, data: { revokedAt: new Date() } }); // revoked, nobody told B
+    expect((await b.inject({ url: `/api/share/${token}` })).statusCode).toBe(410);
+  });
+
+  it("checks a live connection's person again before each command", async () => {
+    const { b, ed, projectId } = await twoCopies();
+    const onB = await connect(b, ed.cookie);
+    onB.send({ type: "join", projectId, version: 0 });
+    await onB.next("joined");
+    await t.db.user.update({ where: { email: "ed@example.com" }, data: { role: "viewer" } }); // demoted, nobody told B
+    onB.send({ type: "command", commandId: randomUUID(), command: createTask("Sneaky") });
+    expect(await onB.next("reject")).toMatchObject({ error: "forbidden" });
+  });
+
+  it("closes live connections whose session ended, within the sweep interval", async () => {
+    const config = { ...testConfig, cluster: "postgres" as const, databaseUrl: inject("databaseUrl") };
+    const b = await testApp({ db: t.db, config, liveRevalidateMs: 100 });
+    copies.push(b);
+    const admin = await setupAdmin(b);
+    const ed = await createUser(b, admin, { email: "ed@example.com", name: "Ed", role: "editor" });
+    const onB = await connect(b, ed.cookie);
+    await t.db.session.deleteMany({ where: { user: { email: "ed@example.com" } } }); // signed out elsewhere, nobody told B
+    expect(await onB.closed).toBe(CLOSE_SESSION_ENDED);
+  });
+});

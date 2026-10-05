@@ -94,6 +94,11 @@ export class Hub {
     this.closeWhere((c) => c.sessionToken !== null && sessionDigest(c.sessionToken) === digest);
   }
 
+  /** Every open connection (a copy, safe to close while iterating). */
+  all(): Connection[] {
+    return [...this.connections];
+  }
+
   /** Projects with at least one viewer on this copy. */
   rooms(): string[] {
     return [...new Set([...this.connections].flatMap((c) => (c.projectId && c.viewer ? [c.projectId] : [])))];

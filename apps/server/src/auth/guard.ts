@@ -2,6 +2,7 @@ import type { User } from "@ganttlines/db";
 import type { Role } from "@ganttlines/protocol";
 import type { FastifyRequest } from "fastify";
 import { forbidden, HttpError, unauthorized } from "../errors";
+import type { TwoFactorPolicy } from "./two-factor-policy";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -40,4 +41,11 @@ export function requireUser(
   if (step === "set_up_two_factor" && !allowTwoFactorSetup) throw pendingStepError(step);
   if (RANK[user.role] < RANK[minRole]) throw forbidden();
   return user;
+}
+
+/** What a signed-in user must do before anything else: choose a password, or set up required two-factor. */
+export async function pendingStepOf(policy: { twoFactorPolicy: TwoFactorPolicy }, user: User, viaSso: boolean): Promise<PendingStep | null> {
+  if (user.mustChangePassword) return "change_password";
+  if (await policy.twoFactorPolicy.mustSetUp(user, viaSso)) return "set_up_two_factor";
+  return null;
 }

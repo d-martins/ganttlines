@@ -2,10 +2,10 @@ import { ClientMessage, toEngineCommand } from "@ganttlines/protocol";
 import type { FastifyInstance } from "fastify";
 import type { RawData } from "ws";
 import type { ProjectAccess } from "../auth/access";
-import { requireUser } from "../auth/guard";
+import { pendingStepOf, requireUser } from "../auth/guard";
 import { credentialsOf, requireInstanceRead } from "../auth/request-access";
 import { HttpError } from "../errors";
-import type { Connection } from "../realtime/hub";
+import { CLOSE_SESSION_ENDED, type Connection } from "../realtime/hub";
 import type { RouteContext } from "./context";
 
 /** Cached projects nobody has open are dropped after this long. */
@@ -19,8 +19,42 @@ const CLOSE_POLICY_VIOLATION = 1008;
  * The live-editing WebSocket. Signed-in viewers (and above) join one project at a time, get
  * caught up, then receive every patch; editors send commands and undo/redo through it.
  */
-export function realtimeRoutes(app: FastifyInstance, context: RouteContext): void {
-  const { projects, instance, hub, access, presence } = context;
+export function realtimeRoutes(app: FastifyInstance, context: RouteContext, { revalidateMs }: { revalidateMs: number }): void {
+  const { projects, instance, hub, access, presence, sessions, cluster } = context;
+  const shared = cluster.mode === "postgres";
+
+  /**
+   * With several copies, a sign-out or demotion on another copy reaches this one as a notification —
+   * which could be lost. So a connection's person is read again from the database (closing it when
+   * the session is gone); returns false when it was closed.
+   */
+  const refresh = async (connection: Connection): Promise<boolean> => {
+    if (!shared || !connection.sessionToken) return true;
+    const session = await sessions.resolve(connection.sessionToken);
+    if (!session) {
+      hub.close(connection, CLOSE_SESSION_ENDED, "Session ended");
+      return false;
+    }
+    connection.credentials = { ...connection.credentials, user: session.user, pendingStep: await pendingStepOf(context, session.user, session.viaSso) };
+    return true;
+  };
+
+  // …and every connection is checked now and then, so ones nobody uses don't outlive their session or link.
+  if (shared) {
+    const sweep = setInterval(() => {
+      for (const connection of hub.all()) {
+        if (connection.closed) continue;
+        void (async () => {
+          const role = connection.credentials.user?.role;
+          if (!(await refresh(connection))) return;
+          const link = connection.credentials.shareToken ? await access.find(connection.credentials.shareToken) : null;
+          if (connection.credentials.user?.role !== role || link?.revokedAt) hub.close(connection, CLOSE_SESSION_ENDED, "Access changed");
+        })().catch((error: unknown) => app.log.error(error));
+      }
+    }, revalidateMs);
+    sweep.unref();
+    app.addHook("onClose", async () => clearInterval(sweep));
+  }
   const announcePresence = (projectId: string) => {
     presence.changed(projectId);
     if (hub.roomSize(projectId) === 0) {
@@ -50,6 +84,7 @@ export function realtimeRoutes(app: FastifyInstance, context: RouteContext): voi
     const message = parsed.data;
 
     if (message.type === "leave") return leave(connection);
+    if (!(await refresh(connection))) return;
 
     if (message.type === "join") {
       leave(connection);

@@ -1,6 +1,7 @@
 import cookie from "@fastify/cookie";
 import websocket from "@fastify/websocket";
 import { Prisma, type Db } from "@ganttlines/db";
+import { pendingStepOf } from "./auth/guard";
 import Fastify, { type FastifyInstance } from "fastify";
 import { AccessService } from "./auth/access";
 import { FirstRun } from "./auth/first-run";
@@ -60,6 +61,8 @@ export interface AppOptions {
   config: Config;
   /** Clock for session expiry (tests) */
   now?: () => Date;
+  /** with several copies, how often live connections are checked against the database (tests shorten it) */
+  liveRevalidateMs?: number;
   /** reads AI apps' client metadata documents (tests pass a fake) */
   fetchClientMetadata?: MetadataFetcher;
   logger?: boolean;
@@ -77,6 +80,7 @@ export async function buildApp({
   setupCode,
   mailer,
   fetchClientMetadata = fetchMetadata,
+  liveRevalidateMs = 30_000,
 }: AppOptions): Promise<FastifyInstance> {
   const clock = now ?? (() => new Date());
   const hops = config.trustProxy;
@@ -91,7 +95,7 @@ export async function buildApp({
   const instance = new InstanceService(db, cluster.lock);
   const projects = new ProjectService(db, instance, { lock: cluster.lock, shared: cluster.mode === "postgres" });
   const hub = new Hub();
-  const access = new AccessService(db, config.sessionSecret);
+  const access = new AccessService(db, config.sessionSecret, cluster.mode === "single");
   const presence = new Presence(hub, cluster.bus);
   presence.start();
   // onClose hooks run in reverse order, so this goodbye goes out before the cluster closes:
@@ -189,8 +193,7 @@ export async function buildApp({
     if (!resolved) return;
     request.user = resolved.user;
     request.sessionToken = token;
-    if (resolved.user.mustChangePassword) request.pendingStep = "change_password";
-    else if (await context.twoFactorPolicy.mustSetUp(resolved.user, resolved.viaSso)) request.pendingStep = "set_up_two_factor";
+    request.pendingStep = await pendingStepOf(context, resolved.user, resolved.viaSso);
     if (resolved.refreshedUntil) setSessionCookie(reply, config, token, resolved.refreshedUntil);
   });
 
@@ -217,7 +220,7 @@ export async function buildApp({
   projectRoutes(app, context);
   commandRoutes(app, context);
   calendarRoutes(app, context);
-  realtimeRoutes(app, context);
+  realtimeRoutes(app, context, { revalidateMs: liveRevalidateMs });
   sharingRoutes(app, context);
   commentRoutes(app, context);
   highlightRoutes(app, context);

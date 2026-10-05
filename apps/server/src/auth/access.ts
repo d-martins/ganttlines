@@ -50,6 +50,11 @@ export class AccessService {
   constructor(
     private readonly db: Db,
     private readonly secret: string,
+    /**
+     * Cache link lookups (one copy). With several copies a revoke on another copy could leave a
+     * cached link working here, so every lookup reads the database.
+     */
+    private readonly cacheLinks = true,
   ) {}
 
   newToken(): { token: string; tokenHash: string } {
@@ -74,6 +79,7 @@ export class AccessService {
   find(token: string): Promise<ShareLink | null> {
     if (token.length > 100) return Promise.resolve(null);
     const hash = this.hashToken(token);
+    if (!this.cacheLinks) return this.db.shareLink.findUnique({ where: { tokenHash: hash } });
     let lookup = this.linksByHash.get(hash);
     if (!lookup) {
       if (this.linksByHash.size >= MAX_CACHED_LINKS) this.linksByHash.clear();
