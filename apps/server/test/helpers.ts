@@ -6,8 +6,12 @@ import type { Config } from "../src/config";
 
 export const PUBLIC_URL = "http://localhost:3000";
 
+/** TEST_CLUSTER=postgres runs every test with copies coordinating through Postgres. */
+const testCluster = process.env["TEST_CLUSTER"] === "postgres" ? "postgres" : "single";
+
 export const testConfig: Config = {
-  databaseUrl: "",
+  // Postgres-mode copies open their own connections to the test database.
+  databaseUrl: testCluster === "postgres" ? inject("databaseUrl") : "",
   sessionSecret: "test-secret-test-secret-test-secret-000",
   publicUrl: new URL(PUBLIC_URL),
   port: 3000,
@@ -17,7 +21,7 @@ export const testConfig: Config = {
   version: "1.2.0",
   initialAdmin: null,
   firstAdminEmail: null,
-  cluster: "single",
+  cluster: testCluster,
   oidc: null,
   smtp: null,
 };

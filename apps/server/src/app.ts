@@ -11,6 +11,7 @@ import { smtpMailer, type Mailer } from "./mail/mailer";
 import { LoginLimiter } from "./auth/login-limiter";
 import { SESSION_COOKIE, SessionStore } from "./auth/sessions";
 import { TwoFactorPolicy } from "./auth/two-factor-policy";
+import { createCluster } from "./cluster";
 import { mcpRoutes } from "./mcp/endpoint";
 import { TeamEdits } from "./calendar/team-edits";
 import { fetchMetadata, OAuthClients, type MetadataFetcher } from "./oauth/clients";
@@ -83,6 +84,8 @@ export async function buildApp({
   await app.register(cookie);
   await app.register(websocket, { options: { maxPayload: 1024 * 1024 } });
 
+  const cluster = await createCluster(config, (message, error) => (error ? app.log.error(error, message) : app.log.warn(message)));
+  app.addHook("onClose", () => cluster.close());
   const instance = new InstanceService(db);
   const projects = new ProjectService(db, instance);
   const hub = new Hub();
@@ -95,6 +98,7 @@ export async function buildApp({
   const context: RouteContext = {
     db,
     config,
+    cluster,
     sessions: new SessionStore(db, config.sessionSecret, now),
     loginLimiter: new LoginLimiter(now ? () => now().getTime() : undefined),
     instance,
