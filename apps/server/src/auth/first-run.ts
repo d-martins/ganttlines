@@ -26,11 +26,18 @@ const newCode = () => Array.from({ length: 11 }, (_, i) => (i === 5 ? "-" : ALPH
  * the first admin can also be whoever signs in as ADMIN_EMAIL (or, without it, from one of
  * OIDC_ALLOWED_DOMAINS); see the single sign-on routes.
  */
+/** Encrypts the setup code for the database (with a key from SESSION_SECRET). */
+export interface Sealer {
+  encrypt(text: string): string;
+  /** null when it can't be read (e.g. SESSION_SECRET changed) */
+  decrypt(stored: string): string | null;
+}
+
 export class FirstRun {
-  /** this copy's code (fixed, or made the first time it's needed) */
+  /** the current code (fixed, or made — or, with several copies, read — the first time it's needed) */
   private code: string | null;
-  /** fixed codes (tests) aren't printed */
-  private announced: boolean;
+  /** the code this copy last printed (fixed codes, in tests, aren't printed) */
+  private announced: string | null;
 
   constructor(
     private readonly db: Db,
@@ -38,11 +45,11 @@ export class FirstRun {
     private readonly announce: (message: string) => void,
     /** a fixed code (tests); otherwise a random one is made when needed */
     fixedCode?: string,
-    /** several copies: the code's hash is shared through the database, and one copy prints it */
-    private readonly shared = false,
+    /** several copies: the code is shared through the database (encrypted), so every copy can print it */
+    private readonly shared: Sealer | null = null,
   ) {
     this.code = fixedCode ?? null;
-    this.announced = fixedCode !== undefined;
+    this.announced = fixedCode ?? null;
   }
 
   /** On start: create the configured admin when nobody has an account yet; otherwise say how to set up. */
@@ -56,41 +63,40 @@ export class FirstRun {
     await this.needsSetup();
   }
 
-  /**
-   * No accounts yet; makes (and prints) the setup code the first time it's needed. With several
-   * copies, the first to store its code's hash prints it; the others point to its log (and a copy
-   * stores its own again if the database lost it).
-   */
+  /** No accounts yet; makes (and prints) the setup code the first time it's needed. */
   async needsSetup(): Promise<boolean> {
     if ((await this.db.user.count()) > 0) return false;
-    if (this.code === null) this.code = newCode();
-    let printsCode = true;
-    if (this.shared) {
-      // Atomic: copies starting together may both get here first.
-      await this.db.$executeRaw`INSERT INTO "Settings" (id) VALUES (1) ON CONFLICT (id) DO NOTHING`;
-      const { count } = await this.db.settings.updateMany({ where: { id: 1, setupCodeHash: null }, data: { setupCodeHash: digest(this.code) } });
-      printsCode = count === 1;
-    }
-    if (!this.announced) {
-      this.announce(
-        printsCode
-          ? `No admin account yet. To create it in the browser, use this setup code: ${this.code}`
-          : "No admin account yet. The setup code is in another GanttLines copy's log.",
-      );
-      this.announced = true;
+    if (this.shared) this.code = await this.sharedCode(this.shared);
+    else if (this.code === null) this.code = newCode();
+    if (this.announced !== this.code) {
+      this.announce(`No admin account yet. To create it in the browser, use this setup code: ${this.code}`);
+      this.announced = this.code;
     }
     return true;
   }
 
   /** Whether `input` is the current setup code (spaces, dashes and case don't matter). */
   async checkCode(input: string): Promise<boolean> {
-    if (!this.shared) {
-      if (this.code === null) return false;
-      return sameDigest(digest(input), digest(this.code));
+    if (!(await this.needsSetup()) || this.code === null) return false;
+    return sameDigest(digest(input), digest(this.code));
+  }
+
+  /**
+   * The code stored in the database; if there's none yet (or it can't be read), this copy's — the
+   * first copy to store one wins. So copies agree, any of them (restarted or new) can print it, and a
+   * copy stores its own again if the database lost it.
+   */
+  private async sharedCode(sealer: Sealer): Promise<string> {
+    // Atomic: copies starting together may both get here first.
+    await this.db.$executeRaw`INSERT INTO "Settings" (id) VALUES (1) ON CONFLICT (id) DO NOTHING`;
+    for (;;) {
+      const stored = (await this.db.settings.findUnique({ where: { id: 1 }, select: { setupCode: true } }))?.setupCode ?? null;
+      const known = stored === null ? null : sealer.decrypt(stored);
+      if (known !== null) return known;
+      const mine = this.code ?? newCode();
+      const { count } = await this.db.settings.updateMany({ where: { id: 1, setupCode: stored }, data: { setupCode: sealer.encrypt(mine) } });
+      if (count === 1) return mine;
     }
-    if (!(await this.needsSetup())) return false;
-    const stored = (await this.db.settings.findUnique({ where: { id: 1 }, select: { setupCodeHash: true } }))?.setupCodeHash;
-    return stored != null && sameDigest(digest(input), stored);
   }
 
   /** Creates the first admin (and their team member) — only while there are no accounts at all. */
@@ -112,7 +118,7 @@ export class FirstRun {
       // Serialise concurrent setup attempts; only the first may create the admin.
       await tx.$executeRaw`LOCK TABLE "User" IN EXCLUSIVE MODE`;
       if ((await tx.user.count()) > 0) throw conflict("Setup has already been completed");
-      await tx.settings.updateMany({ where: { id: 1 }, data: { setupCodeHash: null } });
+      await tx.settings.updateMany({ where: { id: 1 }, data: { setupCode: null } });
       const created = await tx.user.create({ data: { ...data, role: "admin" } });
       await insertResource(tx, { name: created.name, userId: created.id });
       return created;

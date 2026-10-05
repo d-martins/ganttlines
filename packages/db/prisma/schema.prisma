@@ -155,8 +155,8 @@ model Settings {
   mcpEnabled      Boolean  @default(false)
   /// the tool groups (OAuth scopes) the server allows AI apps
   mcpScopes       String[] @default(["plans:read", "plans:write", "comments", "team:read"])
-  /// SHA-256 of the first-run setup code while no account exists (several copies share it)
-  setupCodeHash   String?
+  /// the first-run setup code while no account exists, encrypted (several copies share it)
+  setupCode       String?
 }
 
 enum TwoFactorRequirement {

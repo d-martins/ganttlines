@@ -148,6 +148,7 @@ export async function buildApp({
   const nowMs = now ? () => now().getTime() : Date.now;
   const limit = (name: string, options?: LimitOptions) =>
     cluster.mode === "postgres" ? new PgLimiter(db, name, options, nowMs) : new MemoryLimiter(nowMs, options);
+  const twoFactor = new TwoFactor(config.sessionSecret, now ? () => now().getTime() : undefined);
   const context: RouteContext = {
     db,
     config,
@@ -162,10 +163,10 @@ export async function buildApp({
     presence,
     boardQueue: new KeyedQueue(),
     shareLimiter: limit("share"),
-    firstRun: new FirstRun(db, instance, announce, setupCode, cluster.mode === "postgres"),
+    firstRun: new FirstRun(db, instance, announce, setupCode, cluster.mode === "postgres" ? twoFactor : null),
     mailer: mailer !== undefined ? mailer : config.smtp ? smtpMailer(config.smtp) : null,
     passwordTokens: new PasswordTokens(db, now),
-    twoFactor: new TwoFactor(config.sessionSecret, now ? () => now().getTime() : undefined),
+    twoFactor,
     twoFactorPolicy: new TwoFactorPolicy(db),
     mcpSettings: new McpSettings(db),
     oauthClients: new OAuthClients(db, fetchClientMetadata, clock),

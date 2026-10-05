@@ -264,22 +264,32 @@ describe("several copies: rate limits", () => {
 });
 
 describe("several copies: the setup code", () => {
-  it("is printed by one copy and accepted on any", async () => {
+  it("is printed by every copy and accepted on any", async () => {
     const config = { ...testConfig, cluster: "postgres" as const, databaseUrl: inject("databaseUrl") };
     const said: string[] = [];
-    await t.db.settings.updateMany({ data: { setupCodeHash: null } }); // the suite's own app may have stored its code
+    await t.db.settings.updateMany({ data: { setupCode: null } }); // the suite's own app may have stored its code
     const a = await buildApp({ db: t.db, config, announce: (message) => said.push(`a: ${message}`) });
     copies.push(a);
     const b = await buildApp({ db: t.db, config, announce: (message) => said.push(`b: ${message}`) });
     copies.push(b);
     await a.inject("/api/setup");
     await b.inject("/api/setup");
-    const printed = said.filter((line) => /setup code: /.test(line));
-    expect(printed).toHaveLength(1);
-    expect(said.filter((line) => /in another GanttLines copy's log/.test(line))).toHaveLength(1);
-    const code = printed[0]!.split("setup code: ")[1]!;
-    const other = printed[0]!.startsWith("a:") ? b : a;
-    expect((await other.inject({ method: "POST", url: "/api/setup", payload: { ...ADMIN, setupCode: code } })).statusCode).toBe(201);
+    const codes = said.map((line) => /setup code: (\S+)$/.exec(line)?.[1]);
+    expect(codes).toEqual([expect.any(String), codes[0]]); // the same code, from both
+    expect((await b.inject({ method: "POST", url: "/api/setup", payload: { ...ADMIN, setupCode: codes[0] } })).statusCode).toBe(201);
+  });
+
+  it("is printed again when every copy restarted before anyone set up", async () => {
+    const config = { ...testConfig, cluster: "postgres" as const, databaseUrl: inject("databaseUrl") };
+    await t.db.settings.updateMany({ data: { setupCode: null } });
+    const said: string[] = [];
+    const first = await buildApp({ db: t.db, config, announce: (message) => said.push(message) });
+    await first.close();
+    const again = await buildApp({ db: t.db, config, announce: (message) => said.push(message) });
+    copies.push(again);
+    const codes = said.map((line) => /setup code: (\S+)$/.exec(line)?.[1]);
+    expect(codes).toEqual([expect.any(String), codes[0]]);
+    expect((await again.inject({ method: "POST", url: "/api/setup", payload: { ...ADMIN, setupCode: codes[0] } })).statusCode).toBe(201);
   });
 
   it("is stored again by the copy that knows it if the database lost it", async () => {

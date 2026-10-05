@@ -1,5 +1,5 @@
 -- AlterTable
-ALTER TABLE "Settings" ADD COLUMN     "setupCodeHash" TEXT;
+ALTER TABLE "Settings" ADD COLUMN     "setupCode" TEXT;
 
 -- CreateTable
 CREATE TABLE "UndoEntry" (
