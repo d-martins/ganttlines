@@ -112,6 +112,16 @@ describe("login, logout and sessions", () => {
     expect(responses.filter((response) => response.statusCode === 401)).toHaveLength(10);
   });
 
+  it("a successful sign-in doesn't clear its address's failures", async () => {
+    await setupAdmin(t.app);
+    const login = (email: string, password: string) =>
+      t.app.inject({ method: "POST", url: "/api/auth/login", remoteAddress: "198.51.100.9", payload: { email, password } });
+    for (let i = 0; i < 9; i++) expect((await login(`guess${i}@example.com`, "wrong")).statusCode).toBe(401);
+    expect((await login(ADMIN.email, ADMIN.password)).statusCode).toBe(200);
+    expect((await login("guess9@example.com", "wrong")).statusCode).toBe(401);
+    expect((await login("guess10@example.com", "wrong")).statusCode).toBe(429);
+  });
+
   it("blocks an account after 10 failed attempts", async () => {
     await setupAdmin(t.app);
     for (let i = 0; i < 10; i++) {

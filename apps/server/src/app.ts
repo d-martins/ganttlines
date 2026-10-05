@@ -147,7 +147,7 @@ export async function buildApp({
   // Rate limits: in memory with one copy; counted in the database (hashed keys) with several.
   const nowMs = now ? () => now().getTime() : Date.now;
   const limit = (name: string, options?: LimitOptions) =>
-    cluster.mode === "postgres" ? new PgLimiter(db, name, options, nowMs) : new MemoryLimiter(nowMs, options);
+    cluster.mode === "postgres" ? new PgLimiter(db, config.sessionSecret, name, options, nowMs) : new MemoryLimiter(nowMs, options);
   const twoFactor = new TwoFactor(config.sessionSecret, now ? () => now().getTime() : undefined);
   const context: RouteContext = {
     db,
@@ -172,7 +172,7 @@ export async function buildApp({
     oauthClients: new OAuthClients(db, fetchClientMetadata, clock),
     oauthGrants: new OAuthGrants(db, config.sessionSecret, clock),
     registerLimiter: limit("register"),
-    mcpBudget: limit("mcp", { windowMs: 60_000, max: 300 }),
+    mcpBudget: limit("mcp", { windowMs: 60_000, max: 300, sliding: true }),
     teamEdits: new TeamEdits(instance),
   };
   await context.firstRun.start(config.initialAdmin);

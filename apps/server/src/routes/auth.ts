@@ -28,7 +28,10 @@ export function authRoutes(
     }
     const passwordOk = await verifyPassword(user?.passwordHash ?? (await dummyHash), body.password);
     if (!user || !passwordOk) throw invalidCredentials();
-    await loginLimiter.reset(keys);
+    // The account's count starts afresh; the address only gets this attempt back (signing in to one
+    // account mustn't clear what the address tried against others).
+    await loginLimiter.reset([keys[1]!]);
+    await loginLimiter.refund([keys[0]!]);
     // Two-factor: no session yet — the code comes next, with this proof that the password was right.
     if (user.totpEnabled) return { twoFactor: { challenge: twoFactor.challenge(user.id) } };
     const session = await sessions.create(user.id);

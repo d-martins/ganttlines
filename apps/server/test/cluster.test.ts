@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { afterEach, describe, expect, inject, it } from "vitest";
+import { createHash } from "node:crypto";
 import { PgLimiter } from "../src/auth/limiter";
 import { createCluster } from "../src/cluster";
 import { PgUndoStore } from "../src/projects/undo-store";
@@ -12,6 +13,7 @@ import { ADMIN, createUser, SETUP_CODE, setupAdmin, testApp, testConfig, useTest
 import { connect } from "./ws-client";
 
 const t = useTestApp();
+const SECRET = "limiter-test-secret";
 const copies: FastifyInstance[] = [];
 afterEach(async () => {
   await Promise.all(copies.splice(0).map((copy) => copy.close()));
@@ -305,7 +307,7 @@ describe("several copies: the setup code", () => {
 describe("several copies: rate limit safeguards", () => {
   it("can't be dodged by straddling a window boundary", async () => {
     let now = 990;
-    const limiter = new PgLimiter(t.db, "boundary", { windowMs: 1000, max: 10 }, () => now);
+    const limiter = new PgLimiter(t.db, SECRET, "boundary", { windowMs: 1000, max: 10 }, () => now);
     for (let i = 0; i < 10; i++) await limiter.recordFailure(["ip:1"]);
     expect(await limiter.isBlocked(["ip:1"])).toBe(true);
     now = 1001; // a new window has just begun
@@ -314,8 +316,26 @@ describe("several copies: rate limit safeguards", () => {
     expect(await limiter.isBlocked(["ip:1"])).toBe(false);
   });
 
+  it("counts the previous window less as the current one goes on (a budget isn't halved at each window start)", async () => {
+    let now = 0;
+    const limiter = new PgLimiter(t.db, SECRET, "sliding", { windowMs: 1000, max: 10, sliding: true }, () => now);
+    for (let i = 0; i < 8; i++) expect(await limiter.attempt(["mcp:app"])).toBe(true);
+    now = 1500; // halfway through the next window: the 8 earlier calls count as 4
+    const allowed = [];
+    for (let i = 0; i < 10; i++) allowed.push(await limiter.attempt(["mcp:app"]));
+    expect(allowed.filter(Boolean)).toHaveLength(6);
+  });
+
+  it("stores keys keyed with the server's secret (an address's plain hash isn't there)", async () => {
+    const limiter = new PgLimiter(t.db, SECRET, "keyed", { windowMs: 60_000, max: 10 });
+    await limiter.recordFailure(["ip:203.0.113.7"]);
+    const plain = createHash("sha256").update("ip:203.0.113.7").digest("hex");
+    expect(await t.db.rateCounter.count({ where: { key: { startsWith: "keyed:" } } })).toBe(1);
+    expect(await t.db.rateCounter.count({ where: { key: { contains: plain } } })).toBe(0);
+  });
+
   it("never drops an account's attempts to make room, however full the table is", async () => {
-    const limiter = new PgLimiter(t.db, "evict", { windowMs: 60_000, max: 10 }, Date.now, { maxKeys: 5, pruneEvery: 1000 });
+    const limiter = new PgLimiter(t.db, SECRET, "evict", { windowMs: 60_000, max: 10 }, Date.now, { maxKeys: 5, pruneEvery: 1000 });
     for (let k = 0; k < 8; k++) for (let i = 0; i < 9; i++) await limiter.recordFailure([`ip:flood-${k}`]); // busy keys fill the table
     for (let i = 0; i < 4; i++) await limiter.recordFailure(["user:target"]);
     await limiter.deleteOld(); // the table is over its cap: something is dropped …
@@ -324,20 +344,20 @@ describe("several copies: rate limit safeguards", () => {
   });
 
   it("keeps the table bounded when other keys are busy too", async () => {
-    const limiter = new PgLimiter(t.db, "busy", { windowMs: 60_000, max: 10 }, Date.now, { maxKeys: 5, pruneEvery: 1000 });
+    const limiter = new PgLimiter(t.db, SECRET, "busy", { windowMs: 60_000, max: 10 }, Date.now, { maxKeys: 5, pruneEvery: 1000 });
     for (let k = 0; k < 20; k++) for (let i = 0; i < 9; i++) await limiter.recordFailure([`ip:${k}`]);
     await limiter.deleteOld();
     expect(await t.db.rateCounter.count({ where: { key: { startsWith: "busy:" } } })).toBeLessThanOrEqual(5);
   });
 
   it("counts attempts as they start, so parallel ones (on any copy) can't get past the limit", async () => {
-    const limiter = new PgLimiter(t.db, "parallel", { windowMs: 60_000, max: 10 });
+    const limiter = new PgLimiter(t.db, SECRET, "parallel", { windowMs: 60_000, max: 10 });
     const allowed = await Promise.all(Array.from({ length: 30 }, () => limiter.attempt(["user:target"])));
     expect(allowed.filter(Boolean)).toHaveLength(10);
   });
 
   it("keeps the table bounded when flooded with distinct keys", async () => {
-    const limiter = new PgLimiter(t.db, "flood", { windowMs: 60_000, max: 10 }, Date.now, { maxKeys: 20, pruneEvery: 10 });
+    const limiter = new PgLimiter(t.db, SECRET, "flood", { windowMs: 60_000, max: 10 }, Date.now, { maxKeys: 20, pruneEvery: 10 });
     for (let i = 0; i < 200; i++) await limiter.recordFailure([`email:${i}@example.com`]);
     expect(await t.db.rateCounter.count({ where: { key: { startsWith: "flood:" } } })).toBeLessThanOrEqual(30);
   });
