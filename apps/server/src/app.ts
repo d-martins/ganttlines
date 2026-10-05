@@ -12,6 +12,8 @@ import { LoginLimiter } from "./auth/login-limiter";
 import { SESSION_COOKIE, SessionStore } from "./auth/sessions";
 import { TwoFactorPolicy } from "./auth/two-factor-policy";
 import { createCluster } from "./cluster";
+import { Live } from "./realtime/live";
+import { Presence } from "./realtime/presence";
 import { mcpRoutes } from "./mcp/endpoint";
 import { TeamEdits } from "./calendar/team-edits";
 import { fetchMetadata, OAuthClients, type MetadataFetcher } from "./oauth/clients";
@@ -31,12 +33,12 @@ import { locationRoutes } from "./routes/locations";
 import { oidcRoutes } from "./routes/oidc";
 import { twoFactorRoutes } from "./routes/two-factor";
 import { authRoutes } from "./routes/auth";
-import { baselineRoutes } from "./routes/baselines";
+import { baselineRoutes, listBaselines } from "./routes/baselines";
 import { calendarRoutes } from "./routes/calendar";
 import { commandRoutes } from "./routes/commands";
-import { commentRoutes } from "./routes/comments";
+import { commentRoutes, toCommentDto } from "./routes/comments";
 import { setSessionCookie, type RouteContext } from "./routes/context";
-import { highlightRoutes } from "./routes/highlights";
+import { highlightRoutes, listHighlights } from "./routes/highlights";
 import { projectRoutes } from "./routes/projects";
 import { realtimeRoutes } from "./routes/realtime";
 import { setupRoutes } from "./routes/setup";
@@ -89,12 +91,26 @@ export async function buildApp({
   const instance = new InstanceService(db, cluster.lock);
   const projects = new ProjectService(db, instance, { lock: cluster.lock, shared: cluster.mode === "postgres" });
   const hub = new Hub();
-  // Every committed change is pushed to the people looking at it.
-  projects.onApplied(({ projectId, version, commandId, actor, changes }) =>
-    hub.broadcast(projectId, { type: "patch", projectId, version, commandId, actor: { userId: actor.userId, label: actor.label }, changes }),
+  const access = new AccessService(db, config.sessionSecret);
+  const presence = new Presence(hub, cluster.bus);
+  const live = new Live(
+    hub,
+    cluster.bus,
+    presence,
+    {
+      db,
+      instance,
+      access,
+      highlights: (projectId) => listHighlights(db, projectId),
+      baselines: (projectId) => listBaselines(db, projectId),
+      comment: toCommentDto,
+    },
+    (message, error) => app.log.warn({ err: error }, message),
   );
-  projects.onMetaChange((project) => hub.broadcast(project.id, { type: "project", project }));
-  instance.onChange((snapshot) => hub.broadcastAll({ type: "instance", version: snapshot.version }));
+  // Every committed change is pushed to the people looking at it (on every copy).
+  projects.onApplied((event) => live.patch(event));
+  projects.onMetaChange((project) => live.projectMeta(project));
+  instance.onChange((snapshot) => live.instanceChanged(snapshot.version));
   const context: RouteContext = {
     db,
     config,
@@ -104,7 +120,9 @@ export async function buildApp({
     instance,
     projects,
     hub,
-    access: new AccessService(db, config.sessionSecret),
+    access,
+    live,
+    presence,
     boardQueue: new KeyedQueue(),
     shareLimiter: new LoginLimiter(now ? () => now().getTime() : undefined),
     firstRun: new FirstRun(db, instance, announce, setupCode),

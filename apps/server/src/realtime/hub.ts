@@ -1,4 +1,5 @@
 import type { ServerMessage, Viewer } from "@ganttlines/protocol";
+import { createHash } from "node:crypto";
 import type { WebSocket } from "ws";
 import type { Credentials } from "../auth/access";
 
@@ -6,6 +7,9 @@ import type { Credentials } from "../auth/access";
 export const CLOSE_SESSION_ENDED = 4001;
 /** The project was deleted: its boards close for good. */
 export const CLOSE_PROJECT_DELETED = 4004;
+
+/** A session token's digest: what copies tell each other (tokens never leave the copy). */
+export const sessionDigest = (token: string) => createHash("sha256").update(token).digest("hex");
 
 export interface Connection {
   socket: WebSocket;
@@ -77,6 +81,27 @@ export class Hub {
 
   closeSession(sessionToken: string): void {
     this.closeWhere((c) => c.sessionToken === sessionToken);
+  }
+
+  /** Closes a user's connections except those of one session (given by digest). */
+  closeUserExceptDigest(userId: string, exceptDigest: string | null): void {
+    this.closeWhere(
+      (c) => c.credentials.user?.id === userId && (exceptDigest === null || c.sessionToken === null || sessionDigest(c.sessionToken) !== exceptDigest),
+    );
+  }
+
+  closeSessionDigest(digest: string): void {
+    this.closeWhere((c) => c.sessionToken !== null && sessionDigest(c.sessionToken) === digest);
+  }
+
+  /** Projects with at least one viewer on this copy. */
+  rooms(): string[] {
+    return [...new Set([...this.connections].flatMap((c) => (c.projectId && c.viewer ? [c.projectId] : [])))];
+  }
+
+  /** Closes every connection with `code` (e.g. 1012: reconnect and catch up). */
+  closeAll(code: number, reason: string): void {
+    for (const connection of [...this.connections]) this.close(connection, code, reason);
   }
 
   /** Closes every connection that uses a (revoked) share link. */

@@ -13,7 +13,7 @@ const invalidCredentials = () => new HttpError(401, "invalid_credentials", "Wron
 
 export function authRoutes(
   app: FastifyInstance,
-  { db, config, sessions, loginLimiter, hub, mailer, passwordTokens, twoFactor, twoFactorPolicy }: RouteContext,
+  { db, config, sessions, loginLimiter, live, mailer, passwordTokens, twoFactor, twoFactorPolicy }: RouteContext,
 ): void {
   // Unknown emails are checked against this hash so they take as long as real accounts (no account probing).
   const dummyHash = hashPassword(randomBytes(16).toString("hex"));
@@ -63,7 +63,7 @@ export function authRoutes(
     if (!userId) throw new HttpError(400, "invalid_token", "This link has expired or was already used — ask for a new one");
     const user = await db.user.update({ where: { id: userId }, data: { passwordHash: await hashPassword(password), mustChangePassword: false } });
     await sessions.revokeAllForUser(user.id);
-    hub.closeUser(user.id);
+    live.closeUser(user.id);
     // An emailed link alone doesn't get past two-factor: the code step still follows.
     if (user.totpEnabled) return { twoFactor: { challenge: twoFactor.challenge(user.id) } };
     const session = await sessions.create(user.id);
@@ -74,7 +74,7 @@ export function authRoutes(
   app.post("/api/auth/logout", async (request, reply) => {
     if (request.sessionToken) {
       await sessions.revoke(request.sessionToken);
-      hub.closeSession(request.sessionToken);
+      live.closeSession(request.sessionToken);
     }
     clearSessionCookie(reply);
     return reply.status(204).send();
@@ -103,7 +103,7 @@ export function authRoutes(
       data: { passwordHash: await hashPassword(body.newPassword), mustChangePassword: false },
     });
     await sessions.revokeAllForUser(user.id, request.sessionToken ?? undefined);
-    hub.closeUser(user.id, request.sessionToken);
+    live.closeUser(user.id, request.sessionToken);
     return reply.status(204).send();
   });
 }

@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { afterEach, describe, expect, inject, it } from "vitest";
+import { CLOSE_PROJECT_DELETED, CLOSE_SESSION_ENDED } from "../src/realtime/hub";
 import { createUser, setupAdmin, testApp, testConfig, useTestApp } from "./helpers";
+import { connect } from "./ws-client";
 
 const t = useTestApp();
 const copies: FastifyInstance[] = [];
@@ -70,5 +72,61 @@ describe("several copies: team calendar", () => {
     expect(results.map((r) => r.statusCode)).toEqual(Array(10).fill(201));
     const versions = (await t.db.commandLog.findMany({ where: { projectId: null }, select: { version: true } })).map((e) => e.version);
     expect(new Set(versions).size).toBe(versions.length); // every change got its own version
+  });
+});
+
+describe("several copies: live updates", () => {
+  it("sends edits made on one copy to browsers on the other, in order", async () => {
+    const { a, b, ed, projectId } = await twoCopies();
+    const onB = await connect(b, ed.cookie);
+    onB.send({ type: "join", projectId, version: 0 });
+    await onB.next("joined");
+    for (let i = 0; i < 5; i++) await command(a, ed.cookie, projectId, createTask(`T${i}`));
+    const versions: number[] = [];
+    for (let i = 0; i < 5; i++) versions.push((await onB.next("patch")).version);
+    expect(versions).toEqual([1, 2, 3, 4, 5]);
+    onB.ws.close();
+  });
+
+  it("relays renames, team calendar changes, comments and highlights", async () => {
+    const { a, b, admin, ed, projectId } = await twoCopies();
+    const taskId = randomUUID();
+    await command(a, ed.cookie, projectId, { ...createTask("Design"), id: taskId });
+    const onB = await connect(b, ed.cookie);
+    onB.send({ type: "join", projectId, version: 1 });
+    await onB.next("joined");
+    await a.inject({ method: "PATCH", url: `/api/projects/${projectId}`, headers: { cookie: ed.cookie }, payload: { name: "Launch 2" } });
+    expect((await onB.next("project")).project.name).toBe("Launch 2");
+    await a.inject({ method: "POST", url: "/api/resources", headers: { cookie: admin }, payload: { name: "Ana" } });
+    expect((await onB.next("instance")).version).toBeGreaterThan(0);
+    expect((await b.inject({ url: "/api/resources", headers: { cookie: ed.cookie } })).json().resources.map((r: { name: string }) => r.name)).toContain("Ana");
+    await a.inject({ method: "POST", url: `/api/projects/${projectId}/comments`, headers: { cookie: ed.cookie }, payload: { taskId, body: "Hi" } });
+    expect(await onB.next("comment")).toMatchObject({ comment: { body: "Hi", mine: true } });
+    await a.inject({ method: "POST", url: `/api/projects/${projectId}/highlights`, headers: { cookie: ed.cookie }, payload: { date: "2026-10-09", color: "#ff0000" } });
+    expect((await onB.next("highlights")).highlights).toHaveLength(1);
+    onB.ws.close();
+  });
+
+  it("signs people out, and closes deleted projects, on every copy", async () => {
+    const { a, b, admin, ed, projectId } = await twoCopies();
+    const onB = await connect(b, ed.cookie);
+    const edId = (await a.inject({ url: "/api/auth/me", headers: { cookie: ed.cookie } })).json().user.id;
+    await a.inject({ method: "PATCH", url: `/api/users/${edId}`, headers: { cookie: admin }, payload: { role: "viewer" } });
+    expect(await onB.closed).toBe(CLOSE_SESSION_ENDED);
+
+    const adminOnB = await connect(b, admin);
+    adminOnB.send({ type: "join", projectId, version: 0 });
+    await adminOnB.next("joined");
+    await a.inject({ method: "PATCH", url: `/api/projects/${projectId}`, headers: { cookie: admin }, payload: { archived: true } });
+    await a.inject({ method: "DELETE", url: `/api/projects/${projectId}`, headers: { cookie: admin } });
+    expect(await adminOnB.closed).toBe(CLOSE_PROJECT_DELETED);
+    expect((await b.inject({ url: `/api/projects/${projectId}/state`, headers: { cookie: admin } })).statusCode).toBe(404);
+  });
+
+  it("asks browsers to reconnect when the copy may have missed events", async () => {
+    const { b, ed } = await twoCopies();
+    const onB = await connect(b, ed.cookie);
+    await t.db.$executeRawUnsafe("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'ganttlines-listener'");
+    expect(await onB.closed).toBe(1012);
   });
 });

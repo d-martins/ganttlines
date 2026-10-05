@@ -1,4 +1,4 @@
-import type { Highlight } from "@ganttlines/db";
+import type { Db, Highlight } from "@ganttlines/db";
 import { HighlightBody, type HighlightDto } from "@ganttlines/protocol";
 import type { FastifyInstance } from "fastify";
 import { requireProjectAccess } from "../auth/request-access";
@@ -9,13 +9,17 @@ import type { RouteContext } from "./context";
 
 export const MAX_HIGHLIGHTS_PER_PROJECT = 1_000;
 
+/** A project's highlighted days, in date order. */
+export async function listHighlights(db: Db, projectId: string): Promise<HighlightDto[]> {
+  return (await db.highlight.findMany({ where: { projectId }, orderBy: [{ date: "asc" }, { id: "asc" }] })).map(toHighlightDto);
+}
+
 /** Highlighted days: everyone who can see the board sees them; everyone who can edit it changes them. */
 export function highlightRoutes(app: FastifyInstance, context: RouteContext): void {
-  const { db, hub, boardQueue } = context;
+  const { db, live, boardQueue } = context;
 
-  const list = async (projectId: string) =>
-    (await db.highlight.findMany({ where: { projectId }, orderBy: [{ date: "asc" }, { id: "asc" }] })).map(toHighlightDto);
-  const announce = async (projectId: string) => hub.broadcast(projectId, { type: "highlights", projectId, highlights: await list(projectId) });
+  const list = (projectId: string) => listHighlights(db, projectId);
+  const announce = (projectId: string) => live.highlights(projectId);
   /** Change + re-read + broadcast one at a time per project, so the last list sent is the latest. */
   const change = <T>(projectId: string, work: () => Promise<T>) =>
     boardQueue.run(`highlights:${projectId}`, async () => {

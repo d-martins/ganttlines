@@ -18,6 +18,8 @@ import type { Config } from "../config";
 import type { ProjectService } from "../projects/project-service";
 import type { KeyedQueue } from "../queue";
 import type { Hub } from "../realtime/hub";
+import type { Live } from "../realtime/live";
+import type { Presence } from "../realtime/presence";
 
 /** Shared dependencies handed to every route module. */
 export interface RouteContext {
@@ -30,6 +32,10 @@ export interface RouteContext {
   instance: InstanceService;
   projects: ProjectService;
   hub: Hub;
+  /** what this copy tells its browsers, told to every copy */
+  live: Live;
+  /** who is viewing each board, across copies */
+  presence: Presence;
   access: AccessService;
   /** throttles guessing of share-link tokens per client IP */
   shareLimiter: LoginLimiter;
