@@ -41,6 +41,7 @@ export class Live {
   ) {
     bus.subscribe((event, from) => void this.receive(event, from).catch((error: unknown) => log(`cluster: relaying "${event.type}" failed`, error)));
     bus.onResync(() => {
+      presence.reset();
       sources.instance.invalidate();
       sources.access.invalidate("*");
       hub.closeAll(CLOSE_RECONNECT, "Reconnect");
@@ -163,6 +164,7 @@ export class Live {
         sources.access.forgetProject(event.projectId);
         return hub.closeProject(event.projectId);
       case "presence":
+      case "rooms":
       case "alive":
       case "bye":
         return this.presence.receive(event, from);

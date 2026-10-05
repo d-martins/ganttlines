@@ -15,6 +15,8 @@ export type ClusterEvent =
   | { type: "linkChanged"; linkId: string }
   | { type: "projectDeleted"; projectId: string }
   | { type: "presence"; projectId: string; viewers: Viewer[] }
+  /** heartbeat: every board the sending copy has viewers on (others are dropped) */
+  | { type: "rooms"; projectIds: string[] }
   | { type: "alive" }
   | { type: "bye" };
 

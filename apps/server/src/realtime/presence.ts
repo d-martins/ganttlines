@@ -43,15 +43,32 @@ export class Presence {
     void this.bus.publish({ type: "presence", projectId, viewers: this.hub.viewers(projectId).slice(0, MAX_ANNOUNCED) });
   }
 
-  receive(event: Extract<ClusterEvent, { type: "presence" | "alive" | "bye" }>, from: string): void {
+  receive(event: Extract<ClusterEvent, { type: "presence" | "rooms" | "alive" | "bye" }>, from: string): void {
     if (event.type === "bye") return this.drop(from);
     const copy = this.remote.get(from) ?? { seen: 0, rooms: new Map<string, Viewer[]>() };
     copy.seen = this.now();
     this.remote.set(from, copy);
     if (event.type === "alive") return;
+    if (event.type === "rooms") {
+      // Rooms it doesn't list any more emptied while their notice was lost.
+      const listed = new Set(event.projectIds);
+      for (const projectId of [...copy.rooms.keys()]) {
+        if (listed.has(projectId)) continue;
+        copy.rooms.delete(projectId);
+        this.hub.broadcast(projectId, { type: "presence", projectId, viewers: this.viewers(projectId) });
+      }
+      return;
+    }
     if (event.viewers.length) copy.rooms.set(event.projectId, event.viewers);
     else copy.rooms.delete(event.projectId);
     this.hub.broadcast(event.projectId, { type: "presence", projectId: event.projectId, viewers: this.viewers(event.projectId) });
+  }
+
+  /** Forgets other copies' viewers (after missing notices); their next heartbeat brings them back. */
+  reset(): void {
+    const rooms = new Set([...this.remote.values()].flatMap((copy) => [...copy.rooms.keys()]));
+    this.remote.clear();
+    for (const projectId of rooms) this.hub.broadcast(projectId, { type: "presence", projectId, viewers: this.viewers(projectId) });
   }
 
   /** Drops copies that went quiet (crashed without saying goodbye). */
@@ -63,6 +80,7 @@ export class Presence {
   start(): void {
     this.timer = setInterval(() => {
       void this.bus.publish({ type: "alive" });
+      void this.bus.publish({ type: "rooms", projectIds: this.hub.rooms() });
       for (const projectId of this.hub.rooms()) {
         void this.bus.publish({ type: "presence", projectId, viewers: this.hub.viewers(projectId).slice(0, MAX_ANNOUNCED) });
       }

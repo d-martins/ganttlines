@@ -23,4 +23,15 @@ describe("presence across copies", () => {
     presence.receive({ type: "bye" }, "copy-b");
     expect(presence.viewers("p")).toEqual([]);
   });
+
+  it("drops rooms a copy no longer lists (a lost 'room is empty' notice), and starts afresh after a resync", () => {
+    const presence = new Presence(new Hub(), bus());
+    presence.receive({ type: "presence", projectId: "p", viewers: [{ id: "user:1", name: "Ana" }] }, "copy-b");
+    presence.receive({ type: "presence", projectId: "q", viewers: [{ id: "user:2", name: "Bo" }] }, "copy-b");
+    presence.receive({ type: "rooms", projectIds: ["p"] }, "copy-b"); // copy-b's heartbeat: only p has viewers now
+    expect(presence.viewers("q")).toEqual([]);
+    expect(presence.viewers("p").map((v) => v.name)).toEqual(["Ana"]);
+    presence.reset();
+    expect(presence.viewers("p")).toEqual([]);
+  });
 });
