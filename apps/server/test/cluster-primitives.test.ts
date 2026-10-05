@@ -111,6 +111,21 @@ describe("event bus (postgres)", () => {
   });
 });
 
+describe("event bus (postgres): a listener that goes quiet", () => {
+  it("notices when its own pings stop coming back, reconnects and asks for a resync", async () => {
+    const pool = new pg.Pool({ connectionString: inject("databaseUrl"), max: 2 });
+    const bus = new PgEventBus(inject("databaseUrl"), pool, quiet, { pingMs: 100, quietMs: 400 });
+    await bus.start();
+    let resyncs = 0;
+    bus.onResync(() => resyncs++);
+    // Stop hearing anything, without the connection closing (like a network that silently drops it).
+    await (bus as unknown as { client: pg.Client }).client.query("UNLISTEN ganttlines");
+    await until(() => resyncs >= 2 && bus.ready); // once when it gave up on the quiet connection, once when back
+    await bus.close();
+    await pool.end();
+  });
+});
+
 describe("project lock (postgres)", () => {
   it("makes work on one key take turns across lock instances, and leaves other keys free", async () => {
     const pools = [new pg.Pool({ connectionString: inject("databaseUrl"), max: 2 }), new pg.Pool({ connectionString: inject("databaseUrl"), max: 2 })];

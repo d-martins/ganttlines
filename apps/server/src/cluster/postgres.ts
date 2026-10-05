@@ -10,8 +10,10 @@ const LOCK_NAMESPACE = 7102;
 export type Log = (message: string, error?: unknown) => void;
 
 /**
- * Postgres LISTEN/NOTIFY between copies: one listening connection per copy (reconnected when it
- * drops, then a resync is requested), notifications sent through the shared pool.
+ * Postgres LISTEN/NOTIFY between copies: one listening connection per copy, notifications sent
+ * through the shared pool. The copy pings itself through the channel: a connection that drops — or
+ * goes quiet without closing (networks that silently drop idle connections) — is replaced, and a
+ * resync is requested when it goes and again when it's back (events may have been missed).
  */
 export class PgEventBus implements EventBus {
   readonly copyId = randomUUID();
@@ -20,12 +22,21 @@ export class PgEventBus implements EventBus {
   private readonly resyncHandlers: (() => void)[] = [];
   private closing = false;
   private retryMs = 250;
+  /** when the listener last heard anything (its own pings included) */
+  private heard = Date.now();
+  private watchdog: NodeJS.Timeout | undefined;
+  private readonly pingMs: number;
+  private readonly quietMs: number;
 
   constructor(
     private readonly databaseUrl: string,
     private readonly pool: pg.Pool,
     private readonly log: Log,
-  ) {}
+    { pingMs = 20_000, quietMs = 60_000 }: { pingMs?: number; quietMs?: number } = {},
+  ) {
+    this.pingMs = pingMs;
+    this.quietMs = quietMs;
+  }
 
   get ready(): boolean {
     return this.client !== null;
@@ -33,6 +44,17 @@ export class PgEventBus implements EventBus {
 
   async start(): Promise<void> {
     await this.listen();
+    this.watchdog = setInterval(() => {
+      const client = this.client;
+      if (client && Date.now() - this.heard > this.quietMs) {
+        this.log("cluster: the listener stopped hearing anything; reconnecting");
+        this.dropped(client);
+        void client.end().catch(() => undefined);
+        return;
+      }
+      void this.pool.query("SELECT pg_notify($1, $2)", [CHANNEL, JSON.stringify({ from: this.copyId, ping: true })]).catch(() => undefined);
+    }, this.pingMs);
+    this.watchdog.unref();
   }
 
   async publish(event: ClusterEvent): Promise<void> {
@@ -55,23 +77,29 @@ export class PgEventBus implements EventBus {
 
   async close(): Promise<void> {
     this.closing = true;
+    clearInterval(this.watchdog);
     const client = this.client;
     this.client = null;
     await client?.end().catch(() => undefined);
   }
 
   private async listen(): Promise<void> {
-    const client = new pg.Client({ connectionString: this.databaseUrl, application_name: "ganttlines-listener" });
+    const client = new pg.Client({ connectionString: this.databaseUrl, application_name: "ganttlines-listener", keepAlive: true });
     client.on("notification", (message) => this.receive(message.payload));
     client.on("error", (error) => this.log("cluster: listener connection failed", error));
-    client.on("end", () => {
-      if (this.client !== client) return;
-      this.client = null;
-      this.reconnect();
-    });
+    client.on("end", () => this.dropped(client));
     await client.connect();
     await client.query(`LISTEN ${CHANNEL}`);
+    this.heard = Date.now();
     this.client = client;
+  }
+
+  /** The listener is gone: ask for a resync now (browsers catch up) and reconnect. */
+  private dropped(client: pg.Client): void {
+    if (this.client !== client) return;
+    this.client = null;
+    if (!this.closing) for (const handler of this.resyncHandlers) handler();
+    this.reconnect();
   }
 
   private reconnect(): void {
@@ -94,13 +122,14 @@ export class PgEventBus implements EventBus {
 
   private receive(payload: string | undefined): void {
     if (!payload) return;
-    let parsed: { from: string; event: ClusterEvent };
+    this.heard = Date.now();
+    let parsed: { from: string; event?: ClusterEvent; ping?: true };
     try {
-      parsed = JSON.parse(payload) as { from: string; event: ClusterEvent };
+      parsed = JSON.parse(payload) as typeof parsed;
     } catch {
       return;
     }
-    if (parsed.from === this.copyId) return;
+    if (parsed.from === this.copyId || !parsed.event) return;
     for (const handler of this.handlers) {
       try {
         handler(parsed.event, parsed.from);
