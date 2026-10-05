@@ -222,6 +222,7 @@ export function ChartRows({
                 style={style}
                 resources={resourceMap}
                 titleGap={editable ? 18 : 6}
+                visibleLeft={visibleLeft}
                 shape={
                   editable
                     ? {

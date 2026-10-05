@@ -62,7 +62,7 @@ export function ListHeader({ query, onQuery }: { query: string; onQuery: (query:
           <ChevronsDownUp size={13} />
         </IconButton>
       </div>
-      {/* Visual column headings; each row's cells carry their own labels for assistive tech. */}
+      {/* Visual column headings; assistive tech gets ListColumnHeaders inside the grid instead. */}
       <div aria-hidden className={`${COLUMNS} h-6 px-1 text-xs font-semibold text-muted`}>
         <span className="pr-2 text-right">#</span>
         <span>Task</span>
@@ -185,6 +185,19 @@ interface DragState {
   target: { index: number; zone: DropZone } | null;
 }
 
+/** The list's column headers for assistive tech (the visible headings sit outside the grid, in the sticky header). */
+export function ListColumnHeaders() {
+  return (
+    <div role="row" aria-rowindex={1} className="sr-only">
+      {["Row number", "Task", "Assignee", "Working days", "Actual work days", "Predecessor", "Actions"].map((name) => (
+        <span key={name} role="columnheader">
+          {name}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export function ListRows({
   rows,
   allRows,
@@ -277,6 +290,7 @@ export function ListRows({
           <div
             key={row.id}
             role="row"
+            aria-rowindex={firstRow + index + 2 /* after the header row */}
             aria-level={entry.depth + 1}
             aria-selected={selected}
             aria-expanded={entry.hasChildren ? !entry.collapsed : undefined}

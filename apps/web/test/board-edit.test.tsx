@@ -162,7 +162,7 @@ describe("editing the task list", () => {
   it("filters rows by search, keeping their parents", async () => {
     const { user } = await editableBoard();
     await user.type(screen.getByRole("searchbox", { name: "Search tasks" }), "hoo");
-    expect(screen.getAllByRole("row").map((row) => row.getAttribute("aria-level"))).toEqual(["1", "2"]);
+    expect(screen.getAllByRole("row").slice(1).map((row) => row.getAttribute("aria-level"))).toEqual(["1", "2"]); // (after the header row)
     expect(screen.queryByText("ui", { exact: true })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add task" })).not.toBeInTheDocument();
   });

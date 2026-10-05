@@ -74,6 +74,22 @@ describe("board", () => {
     expect(within(listRow("ui")).getByText("Ana Silva")).toBeInTheDocument();
   });
 
+  it("names the list's columns for assistive tech, and numbers its rows past the header", async () => {
+    await joinedBoard();
+    const grid = screen.getByRole("treegrid", { name: "Tasks" });
+    expect(within(grid).getAllByRole("columnheader").map((header) => header.textContent)).toEqual([
+      "Row number",
+      "Task",
+      "Assignee",
+      "Working days",
+      "Actual work days",
+      "Predecessor",
+      "Actions",
+    ]);
+    expect(grid).toHaveAttribute("aria-rowcount", String(within(grid).getAllByRole("row").length));
+    expect(within(grid).getAllByRole("row")[1]).toHaveAttribute("aria-rowindex", "2"); // the first task, after the header
+  });
+
   it("draws bars, milestones, brackets, sections and dependency arrows", async () => {
     await joinedBoard();
     expect(screen.getByLabelText(`ui, ${d("2026-09-30")} – ${d("2026-10-08")}, Ana Silva`)).toBeInTheDocument();
