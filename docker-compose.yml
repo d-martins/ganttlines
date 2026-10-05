@@ -28,6 +28,8 @@ services:
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:3000}
       TRUST_PROXY: ${TRUST_PROXY:-false}
       BACKUP_BEFORE_MIGRATE: ${BACKUP_BEFORE_MIGRATE:-true}
+      CLUSTER: ${CLUSTER:-}
+      SHUTDOWN_DELAY_MS: ${SHUTDOWN_DELAY_MS:-}
     ports:
       - "${HOST_BIND:-127.0.0.1}:${HOST_PORT:-3000}:3000"
     volumes:

@@ -1,0 +1,32 @@
+# Several GanttLines copies behind a load balancer (Caddy), sharing one database:
+#   docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d
+# Copies: GL_REPLICAS (default 2). Same .env as usual.
+services:
+  app:
+    environment:
+      CLUSTER: postgres
+    deploy:
+      replicas: ${GL_REPLICAS:-2}
+    ports: !reset []
+
+  proxy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "${HOST_BIND:-127.0.0.1}:${HOST_PORT:-3000}:3000"
+    configs:
+      - source: caddyfile
+        target: /etc/caddy/Caddyfile
+    depends_on: [app]
+
+configs:
+  caddyfile:
+    content: |
+      :3000 {
+        reverse_proxy {
+          dynamic a app 3000
+          lb_policy round_robin
+          health_uri /api/health
+          health_interval 5s
+        }
+      }

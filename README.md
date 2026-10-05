@@ -225,6 +225,25 @@ network, put it behind a reverse proxy that terminates HTTPS (Caddy, nginx, Trae
 `PUBLIC_URL` to the `https://` address and `TRUST_PROXY=1`. The proxy must pass WebSocket
 upgrades on `/ws`.
 
+## Running several copies
+
+For no downtime during updates, or on platforms that run several instances (Kubernetes,
+DigitalOcean App Platform, Fly …), GanttLines can run as several copies sharing one database:
+
+- **Compose:** `docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d` runs two
+  copies (`GL_REPLICAS` for more) behind a small Caddy proxy on the usual port.
+- **Elsewhere:** set `CLUSTER=postgres` on **every** copy, run as many as you like behind your load
+  balancer (no sticky sessions needed; WebSockets must be allowed), and use `/api/health` as the
+  health check — it answers 503 while a copy is starting, stopping or can't reach the database.
+
+Copies coordinate through PostgreSQL itself (no other services). Give them a **direct** database
+address: connection poolers in transaction mode (e.g. PgBouncer, as some managed databases offer
+it) don't pass the notifications copies send each other. Each copy uses about 13 more database
+connections than a single server.
+
+To switch an existing install: stop it, set `CLUSTER=postgres`, start the copies. A server without
+it refuses to start next to copies with it (and the other way round), so they can't clash.
+
 ## Remove it completely
 
 ```sh
