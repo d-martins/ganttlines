@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { afterEach, describe, expect, inject, it } from "vitest";
+import { createCluster } from "../src/cluster";
+import type { Cluster, EventBus } from "../src/cluster/types";
 import { CLOSE_PROJECT_DELETED, CLOSE_SESSION_ENDED } from "../src/realtime/hub";
 import { createUser, setupAdmin, testApp, testConfig, useTestApp } from "./helpers";
 import { connect } from "./ws-client";
@@ -194,5 +196,36 @@ describe("several copies: access checks on open connections", () => {
     onB.send({ type: "command", commandId: randomUUID(), command: createTask("Sneaky") });
     await onB.next("reject"); // refreshes the connection's view of Ed …
     expect(await onB.closed).toBe(CLOSE_SESSION_ENDED); // … and the sweep still closes it
+  });
+});
+
+describe("several copies: a lost notification has a backstop", () => {
+  it("uses the current team calendar even if the copy never heard it changed", async () => {
+    const { b, admin } = await twoCopies();
+    await b.inject({ url: "/api/calendar", headers: { cookie: admin } }); // B caches the calendar
+    await t.db.holiday.create({ data: { name: "Surprise day", startDate: "2026-10-09", endDate: "2026-10-09", appliesToAll: true, resourceIds: [] } });
+    await t.db.settings.update({ where: { id: 1 }, data: { instanceVersion: { increment: 1 } } }); // changed, nobody told B
+    const calendar = (await b.inject({ url: "/api/calendar", headers: { cookie: admin } })).json();
+    expect(calendar.holidays.map((h: { name: string }) => h.name)).toContain("Surprise day");
+  });
+});
+
+describe("several copies: board changes are announced by the edit's own transaction", () => {
+  it("reaches the other copies even if sending a notification afterwards fails", async () => {
+    const config = { ...testConfig, cluster: "postgres" as const, databaseUrl: inject("databaseUrl") };
+    const real = await createCluster(config, () => undefined);
+    // A copy whose notifications sent after the fact all get lost.
+    const lossy: Cluster = { ...real, bus: Object.assign(Object.create(real.bus) as EventBus, { publish: async () => undefined }) };
+    const a = await testApp({ db: t.db, config, cluster: lossy });
+    const b = await testApp({ db: t.db, config });
+    copies.push(a, b);
+    const admin = await setupAdmin(a);
+    const projectId = (await a.inject({ method: "POST", url: "/api/projects", headers: { cookie: admin }, payload: { name: "Launch" } })).json().project.id as string;
+    const onB = await connect(b, admin);
+    onB.send({ type: "join", projectId, version: 0 });
+    await onB.next("joined");
+    await command(a, admin, projectId, createTask("Design"));
+    expect((await onB.next("patch")).version).toBe(1);
+    onB.ws.close();
   });
 });

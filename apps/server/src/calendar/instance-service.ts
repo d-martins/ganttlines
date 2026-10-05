@@ -34,6 +34,8 @@ export class InstanceService {
     private readonly db: Db,
     /** several copies: changes take turns across them */
     private readonly lock: ProjectLock = new NoLock(),
+    /** several copies: the cached calendar is checked against the database's version before use */
+    private readonly shared = false,
   ) {}
 
   /** Forgets the cached calendar (another copy changed it); the next read loads it again. */
@@ -41,8 +43,20 @@ export class InstanceService {
     this.snapshot = undefined;
   }
 
-  /** The current calendar (loaded from the database on first use). */
-  current(): Promise<InstanceSnapshot> {
+  /**
+   * The current calendar (loaded from the database on first use). With several copies its version
+   * is checked first, so a change another copy made is never missed (even if its notice was lost).
+   */
+  async current(): Promise<InstanceSnapshot> {
+    if (!this.shared) return this.cached();
+    const settings = await this.db.settings.findUnique({ where: { id: 1 }, select: { instanceVersion: true } });
+    const cached = await this.cached();
+    if (cached.version === (settings?.instanceVersion ?? 0)) return cached;
+    this.invalidate();
+    return this.cached();
+  }
+
+  private cached(): Promise<InstanceSnapshot> {
     if (!this.snapshot) {
       // Loaded through the queue so it can never interleave with a mutation.
       const loading = this.queue.run("instance", () => this.load());

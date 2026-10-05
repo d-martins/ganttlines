@@ -47,9 +47,9 @@ export class Live {
     });
   }
 
+  /** A board change: other copies were told by the change's own transaction (see ProjectService). */
   patch({ projectId, version, commandId, actor, changes }: AppliedEvent): void {
     this.hub.broadcast(projectId, { type: "patch", projectId, version, commandId, actor: { userId: actor.userId, label: actor.label }, changes });
-    void this.bus.publish({ type: "patch", projectId, version });
   }
 
   projectMeta(project: ProjectDto): void {

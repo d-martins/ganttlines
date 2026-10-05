@@ -57,6 +57,10 @@ export class PgEventBus implements EventBus {
     this.watchdog.unref();
   }
 
+  notification(event: ClusterEvent): { sql: string; params: unknown[] } {
+    return { sql: "SELECT pg_notify($1, $2)", params: [CHANNEL, JSON.stringify({ from: this.copyId, event })] };
+  }
+
   async publish(event: ClusterEvent): Promise<void> {
     const payload = JSON.stringify({ from: this.copyId, event });
     if (Buffer.byteLength(payload) > MAX_PAYLOAD) return this.log(`cluster: "${event.type}" event too large to send (${payload.length} bytes)`);

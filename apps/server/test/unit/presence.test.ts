@@ -5,7 +5,7 @@ import { Presence } from "../../src/realtime/presence";
 
 const bus = (): EventBus & { sent: ClusterEvent[] } => {
   const sent: ClusterEvent[] = [];
-  return { copyId: "me", ready: true, sent, publish: async (event) => void sent.push(event), subscribe: () => undefined, onResync: () => undefined, close: async () => undefined };
+  return { copyId: "me", ready: true, sent, publish: async (event) => void sent.push(event), notification: () => null, subscribe: () => undefined, onResync: () => undefined, close: async () => undefined };
 };
 
 describe("presence across copies", () => {

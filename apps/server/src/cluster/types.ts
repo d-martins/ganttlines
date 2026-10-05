@@ -26,6 +26,11 @@ export interface EventBus {
   /** Tells the other copies (never fails the caller: problems are logged). */
   publish(event: ClusterEvent): Promise<void>;
   subscribe(handler: (event: ClusterEvent, from: string) => void): void;
+  /**
+   * The statement that announces `event` when run inside a transaction: Postgres delivers it only
+   * if (and when) that transaction commits, in commit order. Null in single mode.
+   */
+  notification(event: ClusterEvent): { sql: string; params: unknown[] } | null;
   /** Called after the bus had to reconnect (events may have been missed). */
   onResync(handler: () => void): void;
   close(): Promise<void>;

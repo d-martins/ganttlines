@@ -20,7 +20,7 @@ import { createHash } from "node:crypto";
 import { actorKey, type Actor } from "../actor";
 import type { InstanceService } from "../calendar/instance-service";
 import { NoLock } from "../cluster/local";
-import type { ProjectLock } from "../cluster/types";
+import type { EventBus, ProjectLock } from "../cluster/types";
 import { toProjectDto } from "../dto";
 import { conflict, HttpError, notFound } from "../errors";
 import { KeyedQueue } from "../queue";
@@ -80,7 +80,7 @@ export class ProjectService {
     private readonly db: Db,
     private readonly instance: InstanceService,
     /** several copies: changes take turns through `lock`, and cached boards are checked against the database */
-    private readonly cluster: { lock: ProjectLock; shared: boolean } = { lock: new NoLock(), shared: false },
+    private readonly cluster: { lock: ProjectLock; shared: boolean; bus?: EventBus } = { lock: new NoLock(), shared: false },
   ) {}
 
   onApplied(listener: (event: AppliedEvent) => void): () => void {
@@ -385,7 +385,11 @@ export class ProjectService {
             changes: changes as unknown as Prisma.InputJsonValue,
           },
         });
-        return tx.project.update({ where: { id: projectId, version: stored.meta.version }, data: { version } });
+        const updated = await tx.project.update({ where: { id: projectId, version: stored.meta.version }, data: { version } });
+        // Other copies hear about it exactly when (and if) it commits.
+        const notice = this.cluster.bus?.notification({ type: "patch", projectId, version });
+        if (notice) await tx.$executeRawUnsafe(notice.sql, ...notice.params);
+        return updated;
       },
       { timeout: TRANSACTION_TIMEOUT_MS },
     );

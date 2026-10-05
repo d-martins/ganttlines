@@ -7,6 +7,9 @@ export class LocalBus implements EventBus {
   readonly ready = true;
   async publish(_event: ClusterEvent): Promise<void> {}
   subscribe(): void {}
+  notification(): null {
+    return null;
+  }
   onResync(): void {}
   async close(): Promise<void> {}
 }

@@ -13,6 +13,7 @@ import { LoginLimiter } from "./auth/login-limiter";
 import { SESSION_COOKIE, SessionStore } from "./auth/sessions";
 import { TwoFactorPolicy } from "./auth/two-factor-policy";
 import { createCluster } from "./cluster";
+import type { Cluster } from "./cluster/types";
 import { Live } from "./realtime/live";
 import { Presence } from "./realtime/presence";
 import { mcpRoutes } from "./mcp/endpoint";
@@ -61,6 +62,8 @@ export interface AppOptions {
   config: Config;
   /** Clock for session expiry (tests) */
   now?: () => Date;
+  /** the shared-state pieces (tests pass their own); made from the config otherwise */
+  cluster?: Cluster;
   /** with several copies, how often live connections are checked against the database (tests shorten it) */
   liveRevalidateMs?: number;
   /** reads AI apps' client metadata documents (tests pass a fake) */
@@ -81,6 +84,7 @@ export async function buildApp({
   mailer,
   fetchClientMetadata = fetchMetadata,
   liveRevalidateMs = 30_000,
+  cluster: givenCluster,
 }: AppOptions): Promise<FastifyInstance> {
   const clock = now ?? (() => new Date());
   const hops = config.trustProxy;
@@ -90,10 +94,10 @@ export async function buildApp({
   await app.register(cookie);
   await app.register(websocket, { options: { maxPayload: 1024 * 1024 } });
 
-  const cluster = await createCluster(config, (message, error) => (error ? app.log.error(error, message) : app.log.warn(message)));
+  const cluster = givenCluster ?? (await createCluster(config, (message, error) => (error ? app.log.error(error, message) : app.log.warn(message))));
   app.addHook("onClose", () => cluster.close());
-  const instance = new InstanceService(db, cluster.lock);
-  const projects = new ProjectService(db, instance, { lock: cluster.lock, shared: cluster.mode === "postgres" });
+  const instance = new InstanceService(db, cluster.lock, cluster.mode === "postgres");
+  const projects = new ProjectService(db, instance, { lock: cluster.lock, shared: cluster.mode === "postgres", bus: cluster.bus });
   const hub = new Hub();
   const access = new AccessService(db, config.sessionSecret, cluster.mode === "single");
   const presence = new Presence(hub, cluster.bus);
