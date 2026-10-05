@@ -35,6 +35,20 @@ describe("settings", () => {
     await waitFor(() => expect(screen.queryByText("That email is already in use")).not.toBeInTheDocument());
   });
 
+  it("changes a user's role, and deletes a user after confirming", async () => {
+    const api = signedIn(ADMIN);
+    api.on("GET /api/users", () => ({ body: { users: [ADMIN, VIEWER] } }));
+    api.on("GET /api/calendar", () => ({ body: CALENDAR }));
+    api.on(`PATCH /api/users/${VIEWER.id}`, (body) => ({ body: { user: { ...VIEWER, ...(body as object) } } }));
+    api.on(`DELETE /api/users/${VIEWER.id}`, () => ({ status: 204 }));
+    const { user } = renderApp("/settings");
+    await user.selectOptions(await screen.findByLabelText(`Role of ${VIEWER.name}`), "editor");
+    await waitFor(() => expect(api.calls.find((call) => call.key === `PATCH /api/users/${VIEWER.id}`)?.body).toEqual({ role: "editor" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    await user.click(within(await screen.findByRole("dialog", { name: `Delete ${VIEWER.name}?` })).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(api.calls.some((call) => call.key === `DELETE /api/users/${VIEWER.id}`)).toBe(true));
+  });
+
   it("invites new users by email when it's set up, and can send a test email", async () => {
     const api = signedIn(ADMIN);
     api.on("GET /api/users", () => ({ body: { users: [ADMIN] } }));
@@ -178,6 +192,22 @@ describe("team & calendar", () => {
     const who = timeOff.getByLabelText("Who") as HTMLSelectElement;
     expect(who.value).toBe(OLD.id);
     expect(who.selectedOptions[0]?.textContent).toBe("Olga (inactive)");
+  });
+
+  it("edits someone's time off", async () => {
+    const api = signedIn(ADMIN);
+    api.on("GET /api/resources", () => ({ body: { resources: [ANA] } }));
+    api.on("GET /api/calendar", () => ({ body: { ...CALENDAR, timeOff: [{ id: "t1", resourceId: ANA.id, startDate: "2026-10-07", endDate: "2026-10-07", note: "" }] } }));
+    api.on("PUT /api/time-off/t1", (body) => ({ body: { timeOff: { id: "t1", ...(body as object) } } }));
+    const { user } = renderApp("/team");
+    const timeOff = within((await screen.findByRole("heading", { name: "Time off" })).closest("section")!);
+    await user.click(timeOff.getByRole("button", { name: "Edit" }));
+    await user.clear(timeOff.getByLabelText("To (optional)"));
+    await user.type(timeOff.getByLabelText("To (optional)"), "2026-10-09");
+    await user.click(timeOff.getByRole("button", { name: "Save time off" }));
+    await waitFor(() =>
+      expect(api.calls.find((call) => call.key === "PUT /api/time-off/t1")?.body).toEqual({ resourceId: ANA.id, startDate: "2026-10-07", endDate: "2026-10-09", note: "" }),
+    );
   });
 
   it("adds a holiday for selected people only", async () => {

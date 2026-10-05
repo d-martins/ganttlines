@@ -29,6 +29,44 @@ describe("sidebar and top bar", () => {
     await waitFor(() => expect(avatar.style.background).toBe("rgb(224, 86, 155)"));
   });
 
+  it("signs out from the account menu", async () => {
+    const api = signedIn(ADMIN);
+    let out = false;
+    api.on("POST /api/auth/logout", () => ((out = true), { status: 204 }));
+    api.on("GET /api/auth/me", () => (out ? { status: 401, body: { error: "unauthorized", message: "Please sign in" } } : { body: { user: ADMIN } }));
+    const { router, user } = renderApp("/");
+    await user.click(await screen.findByRole("button", { name: "Account menu" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Sign out" }));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
+    expect(api.calls.some((call) => call.key === "POST /api/auth/logout")).toBe(true);
+  });
+
+  it("renames and archives a project from its actions menu", async () => {
+    const projects = [project("p1", "Launch")];
+    const api = signedIn(ADMIN, projects);
+    api.on("PATCH /api/projects/p1", (body) => {
+      Object.assign(projects[0]!, body);
+      return { body: { project: projects[0] } };
+    });
+    const { user } = renderApp("/");
+    await user.click(await screen.findByRole("button", { name: "Actions for Launch" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Rename" }));
+    const name = screen.getByRole("textbox", { name: "Project name" });
+    await user.clear(name);
+    await user.type(name, "Liftoff{Enter}");
+    expect(await screen.findByRole("link", { name: "Liftoff" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Actions for Liftoff" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Archive" }));
+    expect(api.calls.filter((call) => call.key === "PATCH /api/projects/p1").map((call) => call.body)).toEqual([{ name: "Liftoff" }, { archived: true }]);
+  });
+
+  it("tells a viewer without projects how to get one", async () => {
+    signedIn(VIEWER, []);
+    renderApp("/");
+    expect(await screen.findByText(/When someone shares a project with you/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "New project" })).not.toBeInTheDocument();
+  });
+
   it("creates projects inline (editors and admins only)", async () => {
     const projects = [project("p1", "Launch")];
     const api = signedIn(ADMIN, projects);
