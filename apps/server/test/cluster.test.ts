@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { afterEach, describe, expect, inject, it } from "vitest";
 import { createCluster } from "../src/cluster";
+import { PgUndoStore } from "../src/projects/undo-store";
+import { expectUndoHistory } from "./undo-history";
 import type { Cluster, EventBus } from "../src/cluster/types";
 import { CLOSE_PROJECT_DELETED, CLOSE_SESSION_ENDED } from "../src/realtime/hub";
 import { createUser, setupAdmin, testApp, testConfig, useTestApp } from "./helpers";
@@ -227,5 +229,23 @@ describe("several copies: board changes are announced by the edit's own transact
     await command(a, admin, projectId, createTask("Design"));
     expect((await onB.next("patch")).version).toBe(1);
     onB.ws.close();
+  });
+});
+
+describe("several copies: undo", () => {
+  it("keeps the same bounded histories in the database as in memory", async () => {
+    const { projectId } = await twoCopies();
+    await expectUndoHistory(new PgUndoStore(t.db, 2), projectId);
+  });
+
+  it("undoes an edit made through the other copy", async () => {
+    const { a, b, ed, projectId } = await twoCopies();
+    await command(a, ed.cookie, projectId, createTask("Design"));
+    const undo = await b.inject({ method: "POST", url: `/api/projects/${projectId}/undo`, headers: { cookie: ed.cookie }, payload: { commandId: randomUUID() } });
+    expect(undo.statusCode).toBe(200);
+    expect((await state(a, ed.cookie, projectId)).rows).toEqual([]);
+    const redo = await a.inject({ method: "POST", url: `/api/projects/${projectId}/redo`, headers: { cookie: ed.cookie }, payload: { commandId: randomUUID() } });
+    expect(redo.statusCode).toBe(200);
+    expect((await state(b, ed.cookie, projectId)).rows.map((row) => row.title)).toEqual(["Design"]);
   });
 });

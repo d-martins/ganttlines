@@ -50,7 +50,7 @@ export function useTestApp(): TestContext {
 
   beforeEach(async () => {
     await db.$executeRawUnsafe(
-      `TRUNCATE "Comment", "Highlight", "Baseline", "ShareLink", "CommandLog", "TimeOff", "Holiday", "Settings", "Row", "Project", "Session", "Resource", "Location", "User" CASCADE`,
+      `TRUNCATE "Comment", "Highlight", "Baseline", "ShareLink", "CommandLog", "TimeOff", "Holiday", "Settings", "Row", "Project", "Session", "Resource", "Location", "User", "UndoEntry", "RateCounter" CASCADE`,
     );
     context.clock.now = new Date("2026-10-01T09:00:00Z");
     await context.app?.close();

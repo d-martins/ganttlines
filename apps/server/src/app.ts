@@ -13,6 +13,7 @@ import { LoginLimiter } from "./auth/login-limiter";
 import { SESSION_COOKIE, SessionStore } from "./auth/sessions";
 import { TwoFactorPolicy } from "./auth/two-factor-policy";
 import { createCluster } from "./cluster";
+import { MemoryUndoStore, PgUndoStore } from "./projects/undo-store";
 import type { Cluster } from "./cluster/types";
 import { Live } from "./realtime/live";
 import { Presence } from "./realtime/presence";
@@ -97,7 +98,12 @@ export async function buildApp({
   const cluster = givenCluster ?? (await createCluster(config, (message, error) => (error ? app.log.error(error, message) : app.log.warn(message))));
   app.addHook("onClose", () => cluster.close());
   const instance = new InstanceService(db, cluster.lock, cluster.mode === "postgres");
-  const projects = new ProjectService(db, instance, { lock: cluster.lock, shared: cluster.mode === "postgres", bus: cluster.bus });
+  const projects = new ProjectService(db, instance, {
+    lock: cluster.lock,
+    shared: cluster.mode === "postgres",
+    bus: cluster.bus,
+    undo: cluster.mode === "postgres" ? new PgUndoStore(db) : new MemoryUndoStore(),
+  });
   const hub = new Hub();
   const access = new AccessService(db, config.sessionSecret, cluster.mode === "single");
   const presence = new Presence(hub, cluster.bus);

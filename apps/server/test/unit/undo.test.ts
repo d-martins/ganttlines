@@ -1,6 +1,8 @@
 import { diffRows, TASK_DEFAULTS, type ProjectState, type TaskRow } from "@ganttlines/engine";
 import { describe, expect, it } from "vitest";
-import { revertChanges, UndoStacks } from "../../src/projects/undo";
+import { revertChanges } from "../../src/projects/undo";
+import { MemoryUndoStore } from "../../src/projects/undo-store";
+import { expectUndoHistory } from "../undo-history";
 
 const task = (id: string, fields: Partial<TaskRow> = {}): TaskRow => ({
   ...TASK_DEFAULTS,
@@ -47,17 +49,8 @@ describe("revertChanges", () => {
   });
 });
 
-describe("UndoStacks", () => {
-  it("keeps separate, bounded histories per user and project, and clears redo on new commands", () => {
-    const stacks = new UndoStacks(2);
-    for (const id of ["c1", "c2", "c3"]) stacks.pushCommand("p", "u1", id);
-    stacks.pushCommand("p", "u2", "other");
-    expect(stacks.popUndo("p", "u1")).toBe("c3");
-    stacks.pushUndone("p", "u1", "c3");
-    expect(stacks.popUndo("p", "u1")).toBe("c2");
-    expect(stacks.popUndo("p", "u1")).toBeUndefined(); // c1 fell off (limit 2)
-    stacks.pushCommand("p", "u1", "c4");
-    expect(stacks.popRedo("p", "u1")).toBeUndefined();
-    expect(stacks.popUndo("p", "u2")).toBe("other");
+describe("undo history (in memory)", () => {
+  it("keeps separate, bounded histories per user and project, and clears redo on new commands", async () => {
+    await expectUndoHistory(new MemoryUndoStore(2), "p");
   });
 });

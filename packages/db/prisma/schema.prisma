@@ -110,6 +110,7 @@ model Project {
   comments   Comment[]
   highlights Highlight[]
   baselines  Baseline[]
+  undoEntries UndoEntry[]
 }
 
 model Row {
@@ -154,6 +155,8 @@ model Settings {
   mcpEnabled      Boolean  @default(false)
   /// the tool groups (OAuth scopes) the server allows AI apps
   mcpScopes       String[] @default(["plans:read", "plans:write", "comments", "team:read"])
+  /// SHA-256 of the first-run setup code while no account exists (several copies share it)
+  setupCodeHash   String?
 }
 
 enum TwoFactorRequirement {
@@ -346,4 +349,26 @@ enum OAuthTokenKind {
   refresh
   /// a personal access token (made in Settings, used like an access token)
   personal
+}
+
+/// Undo/redo history of one actor on one project (several copies share it); newest last.
+model UndoEntry {
+  id        Int     @id @default(autoincrement())
+  projectId String  @db.Uuid
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  actorKey  String
+  /// "undo" (can be undone) or "redo" (was undone, can be redone)
+  kind      String
+  commandId String
+
+  @@index([projectId, actorKey, kind, id])
+}
+
+/// Rate-limit counts per hashed key and fixed time window (several copies share them).
+model RateCounter {
+  key         String
+  windowStart BigInt
+  count       Int    @default(0)
+
+  @@id([key, windowStart])
 }
