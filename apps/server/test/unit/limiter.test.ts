@@ -24,4 +24,10 @@ describe("MemoryLimiter", () => {
     for (let i = 0; i < 4; i++) await limiter.recordFailure(["email:target"]);
     expect(await limiter.isBlocked(["email:target"])).toBe(true);
   });
+
+  it("stays bounded even when keys are built up one after another (a new key is dropped before it gets halfway)", async () => {
+    const limiter = new MemoryLimiter(() => 0, { windowMs: 60_000, max: 10 }, { maxKeys: 5 });
+    for (let k = 0; k < 30; k++) for (let i = 0; i < 6; i++) await limiter.recordFailure([`email:${k}`]);
+    expect(limiter.trackedKeys).toBeLessThanOrEqual(6);
+  });
 });

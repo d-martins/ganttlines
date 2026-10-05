@@ -313,6 +313,13 @@ describe("several copies: rate limit safeguards", () => {
     expect(await limiter.isBlocked(["email:target"])).toBe(true);
   });
 
+  it("still keeps the table bounded when every key is halfway to the limit (hard cap)", async () => {
+    const limiter = new PgLimiter(t.db, "hard", { windowMs: 60_000, max: 10 }, Date.now, { maxKeys: 5, hardMaxKeys: 10, pruneEvery: 1000 });
+    for (let k = 0; k < 20; k++) for (let i = 0; i < 6; i++) await limiter.recordFailure([`email:${k}`]);
+    await limiter.deleteOld();
+    expect(await t.db.rateCounter.count({ where: { key: { startsWith: "hard:" } } })).toBeLessThanOrEqual(10);
+  });
+
   it("keeps the table bounded when flooded with distinct keys", async () => {
     const limiter = new PgLimiter(t.db, "flood", { windowMs: 60_000, max: 10 }, Date.now, { maxKeys: 20, pruneEvery: 10 });
     for (let i = 0; i < 200; i++) await limiter.recordFailure([`email:${i}@example.com`]);

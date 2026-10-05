@@ -88,6 +88,7 @@ export class MemoryLimiter implements Limiter {
 export class PgLimiter implements Limiter {
   private sincePrune = 0;
   private readonly maxKeys: number;
+  private readonly hardMaxKeys: number;
   private readonly pruneEvery: number;
 
   constructor(
@@ -96,9 +97,10 @@ export class PgLimiter implements Limiter {
     private readonly name: string,
     private readonly options: LimitOptions = DEFAULT,
     private readonly now: () => number = Date.now,
-    { maxKeys = MAX_TRACKED_KEYS, pruneEvery = 100 }: { maxKeys?: number; pruneEvery?: number } = {},
+    { maxKeys = MAX_TRACKED_KEYS, hardMaxKeys = maxKeys * 10, pruneEvery = 100 }: { maxKeys?: number; hardMaxKeys?: number; pruneEvery?: number } = {},
   ) {
     this.maxKeys = maxKeys;
+    this.hardMaxKeys = hardMaxKeys;
     this.pruneEvery = pruneEvery;
   }
 
@@ -136,18 +138,30 @@ export class PgLimiter implements Limiter {
     await this.prune();
   }
 
-  /** Drops windows that can't count any more, then the least-tried keys beyond `maxKeys`. */
+  /**
+   * Drops windows that can't count any more, then the least-tried keys beyond `maxKeys` — never ones
+   * halfway to the limit (flooding other keys can't wipe an account's count) — and, beyond the hard
+   * cap `hardMaxKeys`, any (reaching it takes hundreds of thousands of failed attempts in a window).
+   */
   private async prune(): Promise<void> {
     const prefix = `${this.name}:`;
     await this.db.rateCounter.deleteMany({ where: { key: { startsWith: prefix }, windowStart: { lt: this.window() - BigInt(this.options.windowMs) } } });
-    const excess = (await this.db.rateCounter.count({ where: { key: { startsWith: prefix } } })) - this.maxKeys;
+    const count = () => this.db.rateCounter.count({ where: { key: { startsWith: prefix } } });
+    const excess = (await count()) - this.maxKeys;
     if (excess <= 0) return;
-    // Never a count halfway to the limit or more: flooding other keys can't wipe an account's count.
     await this.db.$executeRaw`
       DELETE FROM "RateCounter" WHERE ("key", "windowStart") IN (
         SELECT "key", "windowStart" FROM "RateCounter"
         WHERE "key" LIKE ${`${prefix}%`} AND "count" < ${this.options.max / 2}
         ORDER BY "count" ASC, "windowStart" ASC LIMIT ${excess}
+      )`;
+    const beyondHardCap = (await count()) - this.hardMaxKeys;
+    if (beyondHardCap <= 0) return;
+    await this.db.$executeRaw`
+      DELETE FROM "RateCounter" WHERE ("key", "windowStart") IN (
+        SELECT "key", "windowStart" FROM "RateCounter"
+        WHERE "key" LIKE ${`${prefix}%`}
+        ORDER BY "count" ASC, "windowStart" ASC LIMIT ${beyondHardCap}
       )`;
   }
 
