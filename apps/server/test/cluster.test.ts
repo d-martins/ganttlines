@@ -319,3 +319,25 @@ describe("several copies: rate limit safeguards", () => {
     expect(await t.db.rateCounter.count({ where: { key: { startsWith: "flood:" } } })).toBeLessThanOrEqual(30);
   });
 });
+
+describe("several copies: stopping and readiness", () => {
+  it("isn't ready without its listener; when stopping it says so, then tells browsers to reconnect elsewhere", async () => {
+    const { a, ed } = await twoCopies();
+    expect((await a.inject("/api/health")).json()).toEqual({ ok: true });
+    await t.db.$executeRawUnsafe("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'ganttlines-listener'");
+    let seen503 = false;
+    for (let i = 0; i < 60; i++) {
+      const health = await a.inject("/api/health");
+      if (health.statusCode === 503) seen503 = true;
+      else if (seen503) break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    expect(seen503).toBe(true); // not ready while the listener reconnects
+    const onA = await connect(a, ed.cookie);
+    a.drain();
+    expect((await a.inject("/api/health")).json()).toEqual({ ok: false, reason: "stopping" });
+    copies.splice(copies.indexOf(a), 1);
+    await a.close();
+    expect(await onA.closed).toBe(1001);
+  });
+});

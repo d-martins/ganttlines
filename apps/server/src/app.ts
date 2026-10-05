@@ -50,6 +50,13 @@ import { userRoutes } from "./routes/users";
 import { UpdateChecker } from "./updates";
 import { webRoutes } from "./web";
 
+declare module "fastify" {
+  interface FastifyInstance {
+    /** Stops this server being picked by load balancers (health answers 503); `close()` follows. */
+    drain(): void;
+  }
+}
+
 export interface AppOptions {
   /** where first-run messages (the setup code) go; the server prints them */
   announce?: (message: string) => void;
@@ -93,7 +100,15 @@ export async function buildApp({
   const trustProxy = typeof hops === "number" ? (_address: string, hop: number) => hop < hops : hops;
   const app = Fastify({ logger, trustProxy });
   await app.register(cookie);
-  await app.register(websocket, { options: { maxPayload: 1024 * 1024 } });
+  await app.register(websocket, {
+    options: { maxPayload: 1024 * 1024 },
+    // On close, browsers get "going away": they reconnect — to another copy — and catch up.
+    preClose(this: FastifyInstance, done: () => void) {
+      for (const client of this.websocketServer.clients) client.close(1001, "Server restarting");
+      this.websocketServer.close();
+      done();
+    },
+  });
 
   const cluster = givenCluster ?? (await createCluster(config, (message, error) => (error ? app.log.error(error, message) : app.log.warn(message))));
   app.addHook("onClose", () => cluster.close());
@@ -234,7 +249,21 @@ export async function buildApp({
     return reply.status(500).send({ error: "internal", message: "Something went wrong" });
   });
 
-  app.get("/api/health", async () => ({ ok: true }));
+  let draining = false;
+  // Stop being picked by load balancers (health says 503); `close()` follows.
+  app.decorate("drain", () => {
+    draining = true;
+  });
+  app.get("/api/health", async (_request, reply) => {
+    if (draining) return reply.status(503).send({ ok: false, reason: "stopping" });
+    if (!cluster.bus.ready) return reply.status(503).send({ ok: false, reason: "not listening for other copies" });
+    try {
+      await db.$queryRaw`SELECT 1`;
+    } catch {
+      return reply.status(503).send({ ok: false, reason: "database unreachable" });
+    }
+    return { ok: true };
+  });
   setupRoutes(app, context);
   authRoutes(app, context);
   userRoutes(app, context);

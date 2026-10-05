@@ -22,6 +22,7 @@ export const testConfig: Config = {
   initialAdmin: null,
   firstAdminEmail: null,
   cluster: testCluster,
+  shutdownDelayMs: 0,
   oidc: null,
   smtp: null,
 };
