@@ -86,8 +86,8 @@ export async function buildApp({
 
   const cluster = await createCluster(config, (message, error) => (error ? app.log.error(error, message) : app.log.warn(message)));
   app.addHook("onClose", () => cluster.close());
-  const instance = new InstanceService(db);
-  const projects = new ProjectService(db, instance);
+  const instance = new InstanceService(db, cluster.lock);
+  const projects = new ProjectService(db, instance, { lock: cluster.lock, shared: cluster.mode === "postgres" });
   const hub = new Hub();
   // Every committed change is pushed to the people looking at it.
   projects.onApplied(({ projectId, version, commandId, actor, changes }) =>
