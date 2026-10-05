@@ -31,13 +31,10 @@ export function twoFactorRoutes(app: FastifyInstance, { db, config, sessions, lo
     const userId = twoFactor.readChallenge(challenge);
     if (!userId) throw new HttpError(401, "challenge_expired", "That took too long — sign in again");
     const keys = [`2fa:${userId}`];
-    if (await loginLimiter.isBlocked(keys)) throw tooMany();
+    if (!(await loginLimiter.attempt(keys))) throw tooMany();
     const user = await db.user.findUnique({ where: { id: userId } });
     const accepted = user?.totpEnabled ? accept(user, code) : null;
-    if (!user || !accepted) {
-      await loginLimiter.recordFailure(keys);
-      throw new HttpError(401, "wrong_code", "That code isn't right (or was already used)");
-    }
+    if (!user || !accepted) throw new HttpError(401, "wrong_code", "That code isn't right (or was already used)");
     await loginLimiter.reset(keys);
     await db.user.update({ where: { id: user.id }, data: accepted });
     const session = await sessions.create(user.id);
@@ -71,11 +68,9 @@ export function twoFactorRoutes(app: FastifyInstance, { db, config, sessions, lo
     const { password } = parseBody(DisableTwoFactorBody, request.body);
     if (twoFactorPolicy.covers(user, await twoFactorPolicy.requirement())) throw conflict("Two-factor sign-in is required for your account");
     const keys = [`user:${user.id}`];
-    if (await loginLimiter.isBlocked(keys)) throw tooMany();
-    if (!(await verifyPassword(user.passwordHash, password))) {
-      await loginLimiter.recordFailure(keys);
-      throw new HttpError(401, "invalid_credentials", "Wrong password");
-    }
+    if (!(await loginLimiter.attempt(keys))) throw tooMany();
+    if (!(await verifyPassword(user.passwordHash, password))) throw new HttpError(401, "invalid_credentials", "Wrong password");
+    await loginLimiter.reset(keys);
     await db.user.update({ where: { id: user.id }, data: OFF });
     return { user: toUserDto({ ...user, ...OFF }) };
   });

@@ -304,20 +304,26 @@ describe("several copies: rate limit safeguards", () => {
     expect(await limiter.isBlocked(["ip:1"])).toBe(false);
   });
 
-  it("never drops an account's attempts to make room, once they're halfway to the limit", async () => {
+  it("never drops an account's attempts to make room, however full the table is", async () => {
     const limiter = new PgLimiter(t.db, "evict", { windowMs: 60_000, max: 10 }, Date.now, { maxKeys: 5, pruneEvery: 1000 });
-    for (let i = 0; i < 6; i++) await limiter.recordFailure(["email:target"]);
-    for (let k = 0; k < 8; k++) for (let i = 0; i < 9; i++) await limiter.recordFailure([`email:flood-${k}`]); // keys with more tries
+    for (let k = 0; k < 8; k++) for (let i = 0; i < 9; i++) await limiter.recordFailure([`ip:flood-${k}`]); // busy keys fill the table
+    for (let i = 0; i < 4; i++) await limiter.recordFailure(["user:target"]);
     await limiter.deleteOld(); // the table is over its cap: something is dropped …
-    for (let i = 0; i < 4; i++) await limiter.recordFailure(["email:target"]);
-    expect(await limiter.isBlocked(["email:target"])).toBe(true);
+    for (let i = 0; i < 6; i++) await limiter.recordFailure(["user:target"]);
+    expect(await limiter.isBlocked(["user:target"])).toBe(true);
   });
 
-  it("still keeps the table bounded when every key is halfway to the limit (hard cap)", async () => {
-    const limiter = new PgLimiter(t.db, "hard", { windowMs: 60_000, max: 10 }, Date.now, { maxKeys: 5, hardMaxKeys: 10, pruneEvery: 1000 });
-    for (let k = 0; k < 20; k++) for (let i = 0; i < 6; i++) await limiter.recordFailure([`email:${k}`]);
+  it("keeps the table bounded when other keys are busy too", async () => {
+    const limiter = new PgLimiter(t.db, "busy", { windowMs: 60_000, max: 10 }, Date.now, { maxKeys: 5, pruneEvery: 1000 });
+    for (let k = 0; k < 20; k++) for (let i = 0; i < 9; i++) await limiter.recordFailure([`ip:${k}`]);
     await limiter.deleteOld();
-    expect(await t.db.rateCounter.count({ where: { key: { startsWith: "hard:" } } })).toBeLessThanOrEqual(10);
+    expect(await t.db.rateCounter.count({ where: { key: { startsWith: "busy:" } } })).toBeLessThanOrEqual(5);
+  });
+
+  it("counts attempts as they start, so parallel ones (on any copy) can't get past the limit", async () => {
+    const limiter = new PgLimiter(t.db, "parallel", { windowMs: 60_000, max: 10 });
+    const allowed = await Promise.all(Array.from({ length: 30 }, () => limiter.attempt(["user:target"])));
+    expect(allowed.filter(Boolean)).toHaveLength(10);
   });
 
   it("keeps the table bounded when flooded with distinct keys", async () => {

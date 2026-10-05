@@ -61,10 +61,9 @@ export function mcpRoutes(app: FastifyInstance, context: RouteContext): void {
     if (!access || access.user.mustChangePassword || access.user.role === "guest") return challenge(reply, "invalid_token");
     // Requests per connection per minute (an AI app working through a plan stays well under).
     const budgetKey = [access.connection.id];
-    if (await context.mcpBudget.isBlocked(budgetKey)) {
+    if (!(await context.mcpBudget.attempt(budgetKey))) {
       return reply.status(429).header("retry-after", "60").send({ error: "too_many_requests", message: "Too many requests from this app — wait a minute" });
     }
-    await context.mcpBudget.recordFailure(budgetKey);
     const forRole = scopesForRole(access.user.role);
     const scopes = access.scopes.filter((scope) => settings.scopes.includes(scope) && forRole.includes(scope));
     await oauthGrants.touch(access.connection);

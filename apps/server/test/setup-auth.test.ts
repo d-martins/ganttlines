@@ -102,6 +102,16 @@ describe("login, logout and sessions", () => {
     }
   });
 
+  it("lets no more than 10 wrong passwords through, even sent all at once", async () => {
+    await setupAdmin(t.app);
+    const responses = await Promise.all(
+      Array.from({ length: 30 }, (_, i) =>
+        t.app.inject({ method: "POST", url: "/api/auth/login", remoteAddress: `10.0.0.${i}`, payload: { email: ADMIN.email, password: "wrong" } }),
+      ),
+    );
+    expect(responses.filter((response) => response.statusCode === 401)).toHaveLength(10);
+  });
+
   it("blocks an account after 10 failed attempts", async () => {
     await setupAdmin(t.app);
     for (let i = 0; i < 10; i++) {

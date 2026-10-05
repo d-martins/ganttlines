@@ -17,17 +17,22 @@ describe("MemoryLimiter", () => {
     expect(limiter.trackedKeys).toBe(MAX_TRACKED_KEYS);
   });
 
-  it("never drops a key's failures to make room, once they're halfway to the limit", async () => {
+  it("never drops an account's failures to make room, however full the table is", async () => {
     const limiter = new MemoryLimiter(() => 0, { windowMs: 60_000, max: 10 }, { maxKeys: 5 });
-    for (let i = 0; i < 6; i++) await limiter.recordFailure(["email:target"]);
-    for (let k = 0; k < 20; k++) await limiter.recordFailure([`email:flood-${k}`]);
-    for (let i = 0; i < 4; i++) await limiter.recordFailure(["email:target"]);
-    expect(await limiter.isBlocked(["email:target"])).toBe(true);
+    for (let k = 0; k < 20; k++) for (let i = 0; i < 9; i++) await limiter.recordFailure([`ip:flood-${k}`]); // a full table of busy keys
+    for (let i = 0; i < 10; i++) await limiter.recordFailure([`ip:new-${i}`, "user:target"]);
+    expect(await limiter.isBlocked(["user:target"])).toBe(true);
   });
 
-  it("stays bounded even when keys are built up one after another (a new key is dropped before it gets halfway)", async () => {
+  it("stays bounded: other keys make room, busiest or not", async () => {
     const limiter = new MemoryLimiter(() => 0, { windowMs: 60_000, max: 10 }, { maxKeys: 5 });
-    for (let k = 0; k < 30; k++) for (let i = 0; i < 6; i++) await limiter.recordFailure([`email:${k}`]);
-    expect(limiter.trackedKeys).toBeLessThanOrEqual(6);
+    for (let k = 0; k < 30; k++) for (let i = 0; i < 9; i++) await limiter.recordFailure([`ip:${k}`]);
+    expect(limiter.trackedKeys).toBeLessThanOrEqual(5);
+  });
+
+  it("counts attempts as they start, so parallel ones can't get past the limit", async () => {
+    const limiter = new MemoryLimiter(() => 0);
+    const allowed = await Promise.all(Array.from({ length: 30 }, () => limiter.attempt(["user:target"])));
+    expect(allowed.filter(Boolean)).toHaveLength(10);
   });
 });
