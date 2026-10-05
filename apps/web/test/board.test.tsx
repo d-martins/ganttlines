@@ -39,7 +39,10 @@ function openBoard(rows: ProjectStateDto["rows"] = ROWS, path = `/p/${PROJECT_ID
   api.on(`GET /api/baselines/${BASELINE_ID}`, () => ({
     body: {
       baseline: { id: BASELINE_ID, name: "Kick-off", createdAt: "", createdBy: "Ada" },
-      tasks: [{ rowId: "hooks", kind: "task", title: "hooks", start: "2026-10-01", end: "2026-10-02" }],
+      tasks: [
+        { rowId: "hooks", kind: "task", title: "hooks", start: "2026-09-30", end: "2026-10-02" },
+        { rowId: "33333333-3333-4333-8333-333333333333", kind: "task", title: "retired", start: "2026-10-06", end: "2026-10-07" }, // deleted since
+      ],
     },
   }));
   return { api, ...renderApp(path) };
@@ -164,8 +167,13 @@ describe("board", () => {
   it("switches to a baseline: its dates, read-only, with a way back", async () => {
     const { user, router } = await joinedBoard(ROWS, `/p/${PROJECT_ID}?baseline=${BASELINE_ID}&compare=switch`);
     expect(await screen.findByText(/Viewing baseline/)).toHaveTextContent("Viewing baseline Kick-off (read-only)");
-    expect(screen.getByLabelText(`hooks, ${d("2026-10-01")} – ${d("2026-10-02")}`)).toBeInTheDocument();
+    expect(screen.getByLabelText(`hooks, ${d("2026-09-30")} – ${d("2026-10-02")}`)).toBeInTheDocument();
     expect(screen.queryByLabelText(/^ui,/)).not.toBeInTheDocument();
+    // The working days are the baseline's (3, Wed–Fri), not today's plan (2).
+    expect(within(listRow("hooks")).getByRole("gridcell", { name: "3 working days" })).toBeInTheDocument();
+    // Tasks deleted since the baseline are still shown, as they were.
+    expect(within(listRow("retired")).getByText("deleted since")).toBeInTheDocument();
+    expect(screen.getByLabelText(`retired, ${d("2026-10-06")} – ${d("2026-10-07")}`)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Back to the live plan" }));
     expect(router.state.location.search).toEqual({});
   });

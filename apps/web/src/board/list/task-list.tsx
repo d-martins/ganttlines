@@ -86,11 +86,15 @@ export function ListHeader({ query, onQuery }: { query: string; onQuery: (query:
 export function durations(entry: BoardRow, calendar: Calendar): { working: string; actual: string } {
   const { row, span } = entry;
   const actual = entry.actualDays === null ? "" : formatDays(entry.actualDays);
-  if (row.kind === "task" && !entry.isParent) return { working: formatDays(row.duration), actual };
+  if (row.kind === "task" && !entry.isParent && !entry.fromBaseline) return { working: formatDays(row.duration), actual };
   if (!span) return { working: "–", actual };
+  if (entry.kind === "milestone") return { working: "0", actual };
+  // Across its dates: the baseline's for a task (its person's days, in halves), team days for the rest.
+  const resourceId = row.kind === "task" && !entry.isParent ? row.resourceId : null;
   let working = 0;
-  for (let day = span.start; day <= span.end; day++) if (calendar.isWorkingDay(day, null)) working++;
-  return { working: String(working), actual };
+  for (let day = span.start; day <= span.end; day++) if (calendar.isWorkingDay(day, resourceId)) working++;
+  if (row.kind === "task" && !entry.isParent) working -= (span.startsAfternoon ? 0.5 : 0) + (span.endsMidday ? 0.5 : 0);
+  return { working: row.kind === "task" && !entry.isParent ? formatDays(working) : String(working), actual };
 }
 
 /** Actual work days against the plan: red when over, green when under (single tasks). */
@@ -317,7 +321,7 @@ export function ListRows({
                   <GripVertical size={14} />
                 </button>
               ) : null}
-              {entry.number}
+              {entry.deletedSince ? "" : entry.number}
             </span>
             <span role="gridcell" className={`flex min-w-0 items-center gap-1 ${weight}`} style={{ paddingLeft: entry.depth * INDENT }}>
               {entry.hasChildren ? (
@@ -401,6 +405,7 @@ export function ListRows({
                   ) : (
                     <span className={`truncate ${row.title ? "" : "text-muted italic"}`}>{row.title || "Untitled"}</span>
                   )}
+                  {entry.deletedSince ? <span className="shrink-0 rounded bg-surface-2 px-1 text-[10px] text-muted">deleted since</span> : null}
                   <span className="ml-auto flex shrink-0">
                     {canEdit ? (
                       <button
