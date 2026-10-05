@@ -23,4 +23,5 @@ export {
   type TaskRow,
 } from "./model";
 export { computeSchedule, CycleError, hasCycle, spanEnd, spanOfHalves, spanStart, type Computed, type Schedule, type Span } from "./schedule";
-export { buildTree, childrenOf, isParentTask, type Tree } from "./tree";
+export { buildTree, childrenOf, findTreeProblem, isParentTask, type Tree } from "./tree";
+export { revertChanges, type Reverted } from "./undo";
