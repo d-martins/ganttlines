@@ -20,9 +20,9 @@ const CLOSE_POLICY_VIOLATION = 1008;
  * caught up, then receive every patch; editors send commands and undo/redo through it.
  */
 export function realtimeRoutes(app: FastifyInstance, context: RouteContext): void {
-  const { projects, instance, hub, access } = context;
+  const { projects, instance, hub, access, presence } = context;
   const announcePresence = (projectId: string) => {
-    hub.broadcast(projectId, { type: "presence", projectId, viewers: hub.viewers(projectId) });
+    presence.changed(projectId);
     if (hub.roomSize(projectId) === 0) {
       setTimeout(() => {
         if (hub.roomSize(projectId) === 0) void projects.evict(projectId);
@@ -75,7 +75,7 @@ export function realtimeRoutes(app: FastifyInstance, context: RouteContext): voi
           projectId: message.projectId,
           version: catchUp.version,
           instanceVersion,
-          viewers: hub.viewers(message.projectId),
+          viewers: presence.viewers(message.projectId),
         });
         announcePresence(message.projectId);
       } catch (error) {

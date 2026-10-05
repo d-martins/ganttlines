@@ -93,6 +93,10 @@ export async function buildApp({
   const hub = new Hub();
   const access = new AccessService(db, config.sessionSecret);
   const presence = new Presence(hub, cluster.bus);
+  presence.start();
+  // onClose hooks run in reverse order, so this goodbye goes out before the cluster closes:
+  // other copies drop this copy's viewers at once.
+  app.addHook("onClose", () => presence.stop());
   const live = new Live(
     hub,
     cluster.bus,

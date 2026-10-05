@@ -130,3 +130,20 @@ describe("several copies: live updates", () => {
     expect(await onB.closed).toBe(1012);
   });
 });
+
+describe("several copies: who's viewing", () => {
+  it("shows people on both copies, and drops a copy's viewers when it stops", async () => {
+    const { a, b, admin, ed, projectId } = await twoCopies();
+    const onA = await connect(a, admin);
+    onA.send({ type: "join", projectId, version: 0 });
+    await onA.next("joined");
+    const onB = await connect(b, ed.cookie);
+    onB.send({ type: "join", projectId, version: 0 });
+    expect((await onB.next("joined")).viewers.map((v) => v.name).sort()).toEqual(["Admin", "Ed"]);
+    expect((await onA.next("presence", (m) => m.viewers.length === 2)).viewers.map((v) => v.name).sort()).toEqual(["Admin", "Ed"]);
+    copies.splice(copies.indexOf(a), 1);
+    await a.close();
+    expect((await onB.next("presence", (m) => m.viewers.length === 1)).viewers.map((v) => v.name)).toEqual(["Ed"]);
+    onB.ws.close();
+  });
+});
