@@ -29,6 +29,8 @@ export interface Config {
   firstAdminEmail: string | null;
   /** The running version (the image's APP_VERSION; "dev" otherwise) */
   version: string;
+  /** How copies share state: "single" (one process, in memory) or "postgres" (several copies, through the database) */
+  cluster: "single" | "postgres";
   /** The built web app to serve (apps/web/dist); null when it isn't built (development, tests) */
   webDir: string | null;
 }
@@ -53,6 +55,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     ...admins(env, oidc),
     oidc,
     smtp: smtpSettings(env),
+    cluster: parseCluster(env["CLUSTER"]),
   };
 }
 
@@ -80,6 +83,12 @@ function admins(env: NodeJS.ProcessEnv, oidc: OidcSettings | null): { initialAdm
 function webDir(value: string | undefined): string | null {
   const dir = value || fileURLToPath(new URL("../../web/dist", import.meta.url));
   return existsSync(join(dir, "index.html")) ? dir : null;
+}
+
+function parseCluster(value: string | undefined): "single" | "postgres" {
+  if (value === undefined || value === "" || value === "single") return "single";
+  if (value === "postgres") return "postgres";
+  throw new Error(`Invalid CLUSTER: ${value} (use single or postgres)`);
 }
 
 function parseTrustProxy(value: string | undefined): boolean | number | string {

@@ -17,6 +17,7 @@ export const testConfig: Config = {
   version: "1.2.0",
   initialAdmin: null,
   firstAdminEmail: null,
+  cluster: "single",
   oidc: null,
   smtp: null,
 };
