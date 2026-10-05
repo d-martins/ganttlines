@@ -533,6 +533,16 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@ganttlines/client@workspace:^, @ganttlines/client@workspace:packages/client":
+  version: 0.0.0-use.local
+  resolution: "@ganttlines/client@workspace:packages/client"
+  dependencies:
+    "@ganttlines/protocol": "workspace:^"
+    typescript: "npm:~5.9.3"
+    vitest: "npm:^5"
+  languageName: unknown
+  linkType: soft
+
 "@ganttlines/db@workspace:^, @ganttlines/db@workspace:packages/db":
   version: 0.0.0-use.local
   resolution: "@ganttlines/db@workspace:packages/db"
@@ -597,6 +607,7 @@ __metadata:
     "@fastify/cookie": "npm:^11"
     "@fastify/static": "npm:^8"
     "@fastify/websocket": "npm:^11"
+    "@ganttlines/client": "workspace:^"
     "@ganttlines/db": "workspace:^"
     "@ganttlines/engine": "workspace:^"
     "@ganttlines/protocol": "workspace:^"
