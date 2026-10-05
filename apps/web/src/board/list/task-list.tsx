@@ -298,7 +298,7 @@ export function ListRows({
                   aria-label={`Move “${row.title || "Untitled"}”`}
                   tabIndex={-1}
                   onPointerDown={(event) => startDrag(event, row.id)}
-                  className="absolute top-1/2 left-0 -translate-y-1/2 cursor-grab touch-none text-muted opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                  className="absolute top-1/2 left-0 -translate-y-1/2 cursor-grab touch-none text-muted opacity-0 group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100"
                 >
                   <GripVertical size={14} />
                 </button>
@@ -397,7 +397,7 @@ export function ListRows({
                           event.stopPropagation();
                           addSubtask(board, state, row);
                         }}
-                        className="rounded p-0.5 text-muted opacity-0 group-hover:opacity-100 hover:bg-surface-2 hover:text-text focus-visible:opacity-100"
+                        className="rounded p-0.5 text-muted opacity-0 group-hover:opacity-100 hover:bg-surface-2 hover:text-text focus-visible:opacity-100 pointer-coarse:opacity-100"
                       >
                         <Plus size={14} />
                       </button>
@@ -426,7 +426,7 @@ export function ListRows({
                           <span className="truncate">{assignee.name}</span>
                         </>
                       ) : (
-                        <span className="text-muted opacity-0 group-hover:opacity-100">Assign…</span>
+                        <span className="text-muted opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100">Assign…</span>
                       )}
                     </button>
                   }
@@ -583,7 +583,7 @@ function CellButton({
       onClick={onEdit}
       className="block h-6 w-full truncate rounded px-1 text-right hover:bg-surface-2"
     >
-      {children || <span className="text-muted opacity-0 group-hover:opacity-100">–</span>}
+      {children || <span className="text-muted opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100">–</span>}
     </button>
   );
 }

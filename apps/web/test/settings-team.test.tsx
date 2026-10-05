@@ -1,6 +1,6 @@
 import type { CalendarDto, ResourceDto } from "@ganttlines/protocol";
 import { describe, expect, it } from "vitest";
-import { within } from "@testing-library/react";
+import { waitFor, within } from "@testing-library/react";
 import { ADMIN, renderApp, screen, signedIn, VIEWER } from "./utils";
 
 const CALENDAR: CalendarDto = { instanceVersion: 1, workingWeekdays: [1, 2, 3, 4, 5], holidays: [], timeOff: [], locations: [] };
@@ -18,6 +18,21 @@ describe("settings", () => {
     await user.click(screen.getByRole("button", { name: "Add user" }));
     expect(await screen.findByRole("status")).toHaveTextContent("Temporary password: Tmp-Pass-1234567");
     expect(api.calls.find((c) => c.key === "POST /api/users")?.body).toEqual({ name: "Rudy", email: "rudy@example.com", role: "editor", createResource: true });
+  });
+
+  it("shows only the latest failure: a later action that works clears it", async () => {
+    const api = signedIn(ADMIN);
+    api.on("GET /api/users", () => ({ body: { users: [ADMIN, VIEWER] } }));
+    api.on("GET /api/calendar", () => ({ body: CALENDAR }));
+    api.on("POST /api/users", () => ({ status: 409, body: { error: "conflict", message: "That email is already in use" } }));
+    api.on(`PATCH /api/users/${VIEWER.id}`, (body) => ({ body: { user: { ...VIEWER, ...(body as object) } } }));
+    const { user } = renderApp("/settings");
+    await user.type(await screen.findByLabelText("Name"), "Rudy");
+    await user.type(screen.getByLabelText("Email", { selector: "input" }), "vi@example.com");
+    await user.click(screen.getByRole("button", { name: "Add user" }));
+    expect(await screen.findByText("That email is already in use")).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText(`Role of ${VIEWER.name}`), "editor");
+    await waitFor(() => expect(screen.queryByText("That email is already in use")).not.toBeInTheDocument());
   });
 
   it("invites new users by email when it's set up, and can send a test email", async () => {
@@ -133,6 +148,36 @@ describe("team & calendar", () => {
     await user.type(await screen.findByLabelText("New team member"), "Rudy");
     await user.click(screen.getByRole("button", { name: "Add" }));
     expect(api.calls.find((c) => c.key === "POST /api/resources")?.body).toEqual({ name: "Rudy" });
+  });
+
+  it("renames a team member on Enter; Escape puts the name back, and so does a failed save", async () => {
+    const api = teamApi();
+    let fail = false;
+    api.on(`PATCH /api/resources/${ANA.id}`, (body) =>
+      fail ? { status: 500, body: { error: "internal", message: "Something went wrong" } } : { body: { resource: { ...ANA, ...(body as object) } } },
+    );
+    const { user } = renderApp("/team");
+    const input = await screen.findByLabelText(`Name of ${ANA.name}`);
+    await user.type(input, " Lima{Escape}");
+    expect(input).toHaveValue(ANA.name);
+    expect(api.calls.filter((c) => c.key === `PATCH /api/resources/${ANA.id}`)).toHaveLength(0);
+    fail = true;
+    await user.type(input, " Lima{Enter}");
+    await waitFor(() => expect(api.calls.filter((c) => c.key === `PATCH /api/resources/${ANA.id}`)).toHaveLength(1));
+    await waitFor(() => expect(input).toHaveValue(ANA.name));
+  });
+
+  it("edits an inactive person's time off showing who it's for", async () => {
+    const api = signedIn(ADMIN);
+    const OLD: ResourceDto = { ...ANA, id: "r-old", name: "Olga", inactive: true };
+    api.on("GET /api/resources", () => ({ body: { resources: [ANA, OLD] } }));
+    api.on("GET /api/calendar", () => ({ body: { ...CALENDAR, timeOff: [{ id: "t1", resourceId: OLD.id, startDate: "2026-10-07", endDate: "2026-10-08", note: "" }] } }));
+    const { user } = renderApp("/team");
+    const timeOff = within((await screen.findByRole("heading", { name: "Time off" })).closest("section")!);
+    await user.click(timeOff.getByRole("button", { name: "Edit" }));
+    const who = timeOff.getByLabelText("Who") as HTMLSelectElement;
+    expect(who.value).toBe(OLD.id);
+    expect(who.selectedOptions[0]?.textContent).toBe("Olga (inactive)");
   });
 
   it("adds a holiday for selected people only", async () => {

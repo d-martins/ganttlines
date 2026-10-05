@@ -44,3 +44,13 @@ export function errorMessage(error: unknown): string {
   if (error instanceof ApiError) return error.message;
   return "Something went wrong";
 }
+
+/**
+ * The error of the most recently started of several actions (mutations) — null once a later one
+ * works, so an old failure doesn't linger next to newer results.
+ */
+export function latestError(...actions: { error: Error | null; submittedAt: number }[]): Error | null {
+  let latest: { error: Error | null; submittedAt: number } | undefined;
+  for (const action of actions) if (action.submittedAt > 0 && (!latest || action.submittedAt >= latest.submittedAt)) latest = action;
+  return latest?.error ?? null;
+}

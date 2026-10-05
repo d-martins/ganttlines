@@ -1,4 +1,5 @@
 import { useTheme } from "../src/theme";
+import { waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { ADMIN, project, renderApp, screen, signedIn, VIEWER } from "./utils";
 
@@ -10,6 +11,14 @@ describe("sidebar and top bar", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "Website" })).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/p/p2");
     expect(screen.getByRole("link", { name: "Launch" })).toBeInTheDocument();
+  });
+
+  it("shows the account avatar in the person's own team color", async () => {
+    const api = signedIn(ADMIN);
+    api.on("GET /api/resources", () => ({ body: { resources: [{ id: "r1", name: ADMIN.name, avatarColor: "#e0569b", inactive: false, userId: ADMIN.id, locationId: null }] } }));
+    renderApp("/");
+    const avatar = (await screen.findByRole("button", { name: "Account menu" })).querySelector("span")!;
+    await waitFor(() => expect(avatar.style.background).toBe("rgb(224, 86, 155)"));
   });
 
   it("creates projects inline (editors and admins only)", async () => {

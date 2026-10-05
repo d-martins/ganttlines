@@ -3,7 +3,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { useQuery } from "@tanstack/react-query";
 import { Check, Copy, Link2, TriangleAlert, X } from "lucide-react";
 import { useState } from "react";
-import { errorMessage } from "../api/client";
+import { errorMessage, latestError } from "../api/client";
 import { shareLinkList, useCreateShareLink, useRevokeShareLink, useUpdateShareLink } from "../api/queries";
 import { Button, IconButton } from "../ui/button";
 import { ConfirmButton } from "../ui/confirm";
@@ -149,7 +149,7 @@ function CreateLink({ projectId }: { projectId: string }) {
 function LinkRow({ projectId, link }: { projectId: string; link: ShareLinkDto }) {
   const update = useUpdateShareLink(projectId);
   const revoke = useRevokeShareLink(projectId);
-  const error = update.error ?? revoke.error;
+  const error = latestError(update, revoke);
   return (
     <li className="flex flex-col gap-1 rounded-md border border-border px-3 py-2 text-sm">
       <div className="flex items-center gap-2">

@@ -1,7 +1,7 @@
 import { MCP_SCOPE_LABELS, MCP_SCOPES, ROLES, TWO_FACTOR_REQUIREMENTS, type McpConnectionDto, type McpScope, type Role, type TwoFactorRequirement, type UserDto } from "@ganttlines/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { errorMessage } from "../api/client";
+import { errorMessage, latestError } from "../api/client";
 import {
   about,
   calendar,
@@ -95,7 +95,7 @@ function UsersSection({ me }: { me: UserDto }) {
   const disableTwoFactor = useAdminDisableTwoFactor();
   const [form, setForm] = useState({ name: "", email: "", role: "editor" as Role, createResource: true });
   const [notice, setNotice] = useState<string | null>(null);
-  const failure = create.error ?? update.error ?? reset.error ?? remove.error ?? disableTwoFactor.error;
+  const failure = latestError(create, update, reset, remove, disableTwoFactor);
 
   return (
     <Section title="Users" description="People who can sign in. New users get an email to choose their password (or, without email set up, a temporary password to pass on).">

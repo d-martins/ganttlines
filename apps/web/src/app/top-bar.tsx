@@ -6,7 +6,7 @@ import { createStore } from "zustand/vanilla";
 import { errorMessage } from "../api/client";
 import { useActiveBoard } from "../board/active-board";
 import { BoardTools } from "../board/board-tools";
-import { projectList, useLogout } from "../api/queries";
+import { projectList, resourceList, useLogout } from "../api/queries";
 import { useTheme, type ThemePreference } from "../theme";
 import { Avatar } from "../ui/avatar";
 import { Menu, MenuItem, MenuLabel, MenuRadio, MenuSeparator } from "../ui/menu";
@@ -29,6 +29,9 @@ export function TopBar({ user }: { user: UserDto }) {
   const params = useParams({ strict: false }) as { projectId?: string };
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const projects = useQuery(projectList(true));
+  // The person's team-member color (guests can't read the team).
+  const resources = useQuery({ ...resourceList, enabled: user.role !== "guest" });
+  const color = resources.data?.find((resource) => resource.userId === user.id)?.avatarColor ?? "#5b6474";
   const board = useActiveBoard((state) => state.sync);
   // While switching projects the previous board is still registered: only trust the one shown.
   const shownBoard = board && board.projectId === params.projectId ? board : null;
@@ -50,7 +53,7 @@ export function TopBar({ user }: { user: UserDto }) {
         <Menu
           trigger={
             <button type="button" aria-label="Account menu" className="rounded-full">
-              <Avatar name={user.name} color="#5b6474" size={28} />
+              <Avatar name={user.name} color={color} size={28} />
             </button>
           }
         >
