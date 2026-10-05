@@ -70,19 +70,38 @@ export class MemoryLimiter implements Limiter {
   }
 }
 
-/** Several copies: counts per hashed key in fixed windows, in a table (emails and IPs aren't stored). */
+/**
+ * Several copies: counts per hashed key in fixed windows, in a table (emails and IPs aren't stored).
+ * A key is blocked while its current and previous windows together reach the limit — so attempts
+ * can't straddle a window boundary to get twice as many (a lockout lasts one to two windows). The
+ * table stays bounded: old windows are pruned regularly, and beyond `maxKeys` the keys with the
+ * fewest attempts are dropped first.
+ */
 export class PgLimiter implements Limiter {
+  private sincePrune = 0;
+  private readonly maxKeys: number;
+  private readonly pruneEvery: number;
+
   constructor(
     private readonly db: Db,
     /** keeps different limits' keys apart */
     private readonly name: string,
     private readonly options: LimitOptions = DEFAULT,
     private readonly now: () => number = Date.now,
-  ) {}
+    { maxKeys = MAX_TRACKED_KEYS, pruneEvery = 100 }: { maxKeys?: number; pruneEvery?: number } = {},
+  ) {
+    this.maxKeys = maxKeys;
+    this.pruneEvery = pruneEvery;
+  }
 
   async isBlocked(keys: string[]): Promise<boolean> {
-    const rows = await this.db.rateCounter.findMany({ where: { key: { in: keys.map((key) => this.hash(key)) }, windowStart: this.window() } });
-    return rows.some((row) => row.count >= this.options.max);
+    const current = this.window();
+    const rows = await this.db.rateCounter.findMany({
+      where: { key: { in: keys.map((key) => this.hash(key)) }, windowStart: { in: [current, current - BigInt(this.options.windowMs)] } },
+    });
+    const totals = new Map<string, number>();
+    for (const row of rows) totals.set(row.key, (totals.get(row.key) ?? 0) + row.count);
+    return [...totals.values()].some((total) => total >= this.options.max);
   }
 
   async recordFailure(keys: string[]): Promise<void> {
@@ -95,6 +114,10 @@ export class PgLimiter implements Limiter {
         update: { count: { increment: 1 } },
       });
     }
+    if (++this.sincePrune >= this.pruneEvery) {
+      this.sincePrune = 0;
+      await this.prune();
+    }
   }
 
   async reset(keys: string[]): Promise<void> {
@@ -102,7 +125,19 @@ export class PgLimiter implements Limiter {
   }
 
   async deleteOld(): Promise<void> {
-    await this.db.rateCounter.deleteMany({ where: { key: { startsWith: `${this.name}:` }, windowStart: { lt: this.window() } } });
+    await this.prune();
+  }
+
+  /** Drops windows that can't count any more, then the least-tried keys beyond `maxKeys`. */
+  private async prune(): Promise<void> {
+    const prefix = `${this.name}:`;
+    await this.db.rateCounter.deleteMany({ where: { key: { startsWith: prefix }, windowStart: { lt: this.window() - BigInt(this.options.windowMs) } } });
+    const excess = (await this.db.rateCounter.count({ where: { key: { startsWith: prefix } } })) - this.maxKeys;
+    if (excess <= 0) return;
+    await this.db.$executeRaw`
+      DELETE FROM "RateCounter" WHERE ("key", "windowStart") IN (
+        SELECT "key", "windowStart" FROM "RateCounter" WHERE "key" LIKE ${`${prefix}%`} ORDER BY "count" ASC, "windowStart" ASC LIMIT ${excess}
+      )`;
   }
 
   private window(): bigint {

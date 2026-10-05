@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { afterEach, describe, expect, inject, it } from "vitest";
+import { PgLimiter } from "../src/auth/limiter";
 import { createCluster } from "../src/cluster";
 import { PgUndoStore } from "../src/projects/undo-store";
 import { expectUndoHistory } from "./undo-history";
@@ -288,5 +289,24 @@ describe("several copies: the setup code", () => {
     await a.inject("/api/setup");
     await t.db.settings.deleteMany({}); // e.g. tests resetting the database
     expect((await a.inject({ method: "POST", url: "/api/setup", payload: { ...ADMIN, setupCode: SETUP_CODE } })).statusCode).toBe(201);
+  });
+});
+
+describe("several copies: rate limit safeguards", () => {
+  it("can't be dodged by straddling a window boundary", async () => {
+    let now = 990;
+    const limiter = new PgLimiter(t.db, "boundary", { windowMs: 1000, max: 10 }, () => now);
+    for (let i = 0; i < 10; i++) await limiter.recordFailure(["ip:1"]);
+    expect(await limiter.isBlocked(["ip:1"])).toBe(true);
+    now = 1001; // a new window has just begun
+    expect(await limiter.isBlocked(["ip:1"])).toBe(true);
+    now = 2001; // a whole window later
+    expect(await limiter.isBlocked(["ip:1"])).toBe(false);
+  });
+
+  it("keeps the table bounded when flooded with distinct keys", async () => {
+    const limiter = new PgLimiter(t.db, "flood", { windowMs: 60_000, max: 10 }, Date.now, { maxKeys: 20, pruneEvery: 10 });
+    for (let i = 0; i < 200; i++) await limiter.recordFailure([`email:${i}@example.com`]);
+    expect(await t.db.rateCounter.count({ where: { key: { startsWith: "flood:" } } })).toBeLessThanOrEqual(30);
   });
 });
