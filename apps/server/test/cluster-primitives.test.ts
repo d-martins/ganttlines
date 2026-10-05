@@ -164,3 +164,16 @@ describe("project lock (postgres): a dropped connection", () => {
     await pool.end();
   });
 });
+
+describe("project lock (postgres): try", () => {
+  it("skips work another copy is already doing", async () => {
+    const pools = [new pg.Pool({ connectionString: inject("databaseUrl"), max: 2 }), new pg.Pool({ connectionString: inject("databaseUrl"), max: 2 })];
+    const [one, two] = pools.map((pool) => new PgLock(pool));
+    let ran = 0;
+    const slow = () => new Promise<void>((resolve) => setTimeout(() => (ran++, resolve()), 100));
+    const results = await Promise.all([one!.tryRun("housekeeping", slow), new Promise((r) => setTimeout(r, 20)).then(() => two!.tryRun("housekeeping", slow))]);
+    expect(ran).toBe(1);
+    expect(results[1]).toBeUndefined();
+    await Promise.all(pools.map((pool) => pool.end()));
+  });
+});

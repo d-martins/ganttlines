@@ -163,9 +163,15 @@ export async function buildApp({
 
   // Expired sessions are also deleted when presented; this catches the ones that never come back.
   const cleanup = setInterval(() => {
-    context.sessions.deleteExpired().catch((error: unknown) => app.log.error(error));
-    context.oauthGrants.deleteExpired().catch((error: unknown) => app.log.error(error));
-    context.oauthClients.deleteUnused().catch((error: unknown) => app.log.error(error));
+    // With several copies, one does it (whoever gets there first).
+    void cluster.lock
+      .tryRun("housekeeping", async () => {
+        await context.sessions.deleteExpired();
+        await context.oauthGrants.deleteExpired();
+        await context.oauthClients.deleteUnused();
+        for (const limiter of [context.loginLimiter, context.shareLimiter, context.registerLimiter, context.mcpBudget]) await limiter.deleteOld();
+      })
+      .catch((error: unknown) => app.log.error(error));
   }, SESSION_CLEANUP_INTERVAL_MS);
   cleanup.unref();
   app.addHook("onClose", async () => clearInterval(cleanup));
