@@ -22,11 +22,15 @@ export const MAX_TRACKED_KEYS = 10_000;
 /** One copy: failures per key in a sliding window, in memory. */
 export class MemoryLimiter implements Limiter {
   private readonly failures = new Map<string, number[]>();
+  private readonly maxKeys: number;
 
   constructor(
     private readonly now: () => number = Date.now,
     private readonly options: LimitOptions = DEFAULT,
-  ) {}
+    { maxKeys = MAX_TRACKED_KEYS }: { maxKeys?: number } = {},
+  ) {
+    this.maxKeys = maxKeys;
+  }
 
   async isBlocked(keys: string[]): Promise<boolean> {
     return keys.some((key) => this.recent(key).length >= this.options.max);
@@ -38,7 +42,7 @@ export class MemoryLimiter implements Limiter {
       this.failures.delete(key); // re-insert so Map order stays "least recently failed first"
       this.failures.set(key, failures);
     }
-    if (this.failures.size > MAX_TRACKED_KEYS) this.prune();
+    if (this.failures.size > this.maxKeys) this.prune();
   }
 
   async reset(keys: string[]): Promise<void> {
@@ -53,14 +57,17 @@ export class MemoryLimiter implements Limiter {
     return this.failures.size;
   }
 
-  /** Drops expired entries, then the least recently failed keys beyond the cap. */
+  /**
+   * Drops expired entries, then the least recently failed keys beyond the cap — but never a key
+   * halfway to the limit or more, so flooding other keys can't wipe an account's count.
+   */
   private prune(): void {
     for (const key of [...this.failures.keys()]) {
       if (this.recent(key).length === 0) this.failures.delete(key);
     }
-    for (const key of this.failures.keys()) {
-      if (this.failures.size <= MAX_TRACKED_KEYS) break;
-      this.failures.delete(key);
+    for (const key of [...this.failures.keys()]) {
+      if (this.failures.size <= this.maxKeys) break;
+      if (this.recent(key).length < this.options.max / 2) this.failures.delete(key);
     }
   }
 
@@ -75,7 +82,8 @@ export class MemoryLimiter implements Limiter {
  * A key is blocked while its current and previous windows together reach the limit — so attempts
  * can't straddle a window boundary to get twice as many (a lockout lasts one to two windows). The
  * table stays bounded: old windows are pruned regularly, and beyond `maxKeys` the keys with the
- * fewest attempts are dropped first.
+ * fewest attempts are dropped first (never ones halfway to the limit: flooding costs at least that
+ * many attempts per key, and can't wipe an account's count).
  */
 export class PgLimiter implements Limiter {
   private sincePrune = 0;
@@ -134,9 +142,12 @@ export class PgLimiter implements Limiter {
     await this.db.rateCounter.deleteMany({ where: { key: { startsWith: prefix }, windowStart: { lt: this.window() - BigInt(this.options.windowMs) } } });
     const excess = (await this.db.rateCounter.count({ where: { key: { startsWith: prefix } } })) - this.maxKeys;
     if (excess <= 0) return;
+    // Never a count halfway to the limit or more: flooding other keys can't wipe an account's count.
     await this.db.$executeRaw`
       DELETE FROM "RateCounter" WHERE ("key", "windowStart") IN (
-        SELECT "key", "windowStart" FROM "RateCounter" WHERE "key" LIKE ${`${prefix}%`} ORDER BY "count" ASC, "windowStart" ASC LIMIT ${excess}
+        SELECT "key", "windowStart" FROM "RateCounter"
+        WHERE "key" LIKE ${`${prefix}%`} AND "count" < ${this.options.max / 2}
+        ORDER BY "count" ASC, "windowStart" ASC LIMIT ${excess}
       )`;
   }
 

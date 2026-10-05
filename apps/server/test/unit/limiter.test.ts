@@ -16,4 +16,12 @@ describe("MemoryLimiter", () => {
     for (let i = 0; i < MAX_TRACKED_KEYS + 50; i++) await limiter.recordFailure([`email:${i}@example.com`]);
     expect(limiter.trackedKeys).toBe(MAX_TRACKED_KEYS);
   });
+
+  it("never drops a key's failures to make room, once they're halfway to the limit", async () => {
+    const limiter = new MemoryLimiter(() => 0, { windowMs: 60_000, max: 10 }, { maxKeys: 5 });
+    for (let i = 0; i < 6; i++) await limiter.recordFailure(["email:target"]);
+    for (let k = 0; k < 20; k++) await limiter.recordFailure([`email:flood-${k}`]);
+    for (let i = 0; i < 4; i++) await limiter.recordFailure(["email:target"]);
+    expect(await limiter.isBlocked(["email:target"])).toBe(true);
+  });
 });

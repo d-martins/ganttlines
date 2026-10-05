@@ -304,6 +304,15 @@ describe("several copies: rate limit safeguards", () => {
     expect(await limiter.isBlocked(["ip:1"])).toBe(false);
   });
 
+  it("never drops an account's attempts to make room, once they're halfway to the limit", async () => {
+    const limiter = new PgLimiter(t.db, "evict", { windowMs: 60_000, max: 10 }, Date.now, { maxKeys: 5, pruneEvery: 1000 });
+    for (let i = 0; i < 6; i++) await limiter.recordFailure(["email:target"]);
+    for (let k = 0; k < 8; k++) for (let i = 0; i < 9; i++) await limiter.recordFailure([`email:flood-${k}`]); // keys with more tries
+    await limiter.deleteOld(); // the table is over its cap: something is dropped …
+    for (let i = 0; i < 4; i++) await limiter.recordFailure(["email:target"]);
+    expect(await limiter.isBlocked(["email:target"])).toBe(true);
+  });
+
   it("keeps the table bounded when flooded with distinct keys", async () => {
     const limiter = new PgLimiter(t.db, "flood", { windowMs: 60_000, max: 10 }, Date.now, { maxKeys: 20, pruneEvery: 10 });
     for (let i = 0; i < 200; i++) await limiter.recordFailure([`email:${i}@example.com`]);
