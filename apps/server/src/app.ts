@@ -147,7 +147,7 @@ export async function buildApp({
     presence,
     boardQueue: new KeyedQueue(),
     shareLimiter: limit("share"),
-    firstRun: new FirstRun(db, instance, announce, setupCode),
+    firstRun: new FirstRun(db, instance, announce, setupCode, cluster.mode === "postgres"),
     mailer: mailer !== undefined ? mailer : config.smtp ? smtpMailer(config.smtp) : null,
     passwordTokens: new PasswordTokens(db, now),
     twoFactor: new TwoFactor(config.sessionSecret, now ? () => now().getTime() : undefined),

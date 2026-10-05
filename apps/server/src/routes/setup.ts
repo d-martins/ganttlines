@@ -18,7 +18,7 @@ export function setupRoutes(app: FastifyInstance, { config, sessions, firstRun, 
     if (!(await firstRun.needsSetup())) throw conflict("Setup has already been completed");
     const keys = [`setup:${request.ip}`];
     if (await loginLimiter.isBlocked(keys)) throw new HttpError(429, "too_many_attempts", "Too many failed attempts, try again in a few minutes");
-    if (!firstRun.checkCode(body.setupCode)) {
+    if (!(await firstRun.checkCode(body.setupCode))) {
       await loginLimiter.recordFailure(keys);
       throw new HttpError(403, "wrong_setup_code", "That setup code isn't right — copy it from the server's log");
     }

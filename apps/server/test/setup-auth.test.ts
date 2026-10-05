@@ -44,6 +44,8 @@ describe("first-run setup", () => {
 
   it("makes up a random code and prints it when there's no fixed one", async () => {
     const said: string[] = [];
+    // (with TEST_CLUSTER=postgres, the suite's own app is another copy that stored its code already)
+    await t.db.settings.updateMany({ data: { setupCodeHash: null } });
     const app = await buildApp({ db: t.db, config: testConfig, announce: (message) => said.push(message) });
     expect(said).toEqual([expect.stringMatching(/setup code: [A-HJ-NP-Z2-9]{5}-[A-HJ-NP-Z2-9]{5}$/)]);
     const code = said[0]!.split(": ")[1]!;

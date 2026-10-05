@@ -6,7 +6,8 @@ import { PgUndoStore } from "../src/projects/undo-store";
 import { expectUndoHistory } from "./undo-history";
 import type { Cluster, EventBus } from "../src/cluster/types";
 import { CLOSE_PROJECT_DELETED, CLOSE_SESSION_ENDED } from "../src/realtime/hub";
-import { createUser, setupAdmin, testApp, testConfig, useTestApp } from "./helpers";
+import { buildApp } from "../src/app";
+import { ADMIN, createUser, SETUP_CODE, setupAdmin, testApp, testConfig, useTestApp } from "./helpers";
 import { connect } from "./ws-client";
 
 const t = useTestApp();
@@ -258,5 +259,34 @@ describe("several copies: rate limits", () => {
     expect((await wrong(a)).statusCode).toBe(429);
     expect((await wrong(b)).statusCode).toBe(429);
     expect(await t.db.rateCounter.count({ where: { key: { contains: "ed@example.com" } } })).toBe(0);
+  });
+});
+
+describe("several copies: the setup code", () => {
+  it("is printed by one copy and accepted on any", async () => {
+    const config = { ...testConfig, cluster: "postgres" as const, databaseUrl: inject("databaseUrl") };
+    const said: string[] = [];
+    await t.db.settings.updateMany({ data: { setupCodeHash: null } }); // the suite's own app may have stored its code
+    const a = await buildApp({ db: t.db, config, announce: (message) => said.push(`a: ${message}`) });
+    copies.push(a);
+    const b = await buildApp({ db: t.db, config, announce: (message) => said.push(`b: ${message}`) });
+    copies.push(b);
+    await a.inject("/api/setup");
+    await b.inject("/api/setup");
+    const printed = said.filter((line) => /setup code: /.test(line));
+    expect(printed).toHaveLength(1);
+    expect(said.filter((line) => /in another GanttLines copy's log/.test(line))).toHaveLength(1);
+    const code = printed[0]!.split("setup code: ")[1]!;
+    const other = printed[0]!.startsWith("a:") ? b : a;
+    expect((await other.inject({ method: "POST", url: "/api/setup", payload: { ...ADMIN, setupCode: code } })).statusCode).toBe(201);
+  });
+
+  it("is stored again by the copy that knows it if the database lost it", async () => {
+    const config = { ...testConfig, cluster: "postgres" as const, databaseUrl: inject("databaseUrl") };
+    const a = await testApp({ db: t.db, config });
+    copies.push(a);
+    await a.inject("/api/setup");
+    await t.db.settings.deleteMany({}); // e.g. tests resetting the database
+    expect((await a.inject({ method: "POST", url: "/api/setup", payload: { ...ADMIN, setupCode: SETUP_CODE } })).statusCode).toBe(201);
   });
 });
