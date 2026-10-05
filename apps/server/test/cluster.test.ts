@@ -178,3 +178,21 @@ describe("several copies: revocations hold even if a notification is lost", () =
     expect(await onB.closed).toBe(CLOSE_SESSION_ENDED);
   });
 });
+
+describe("several copies: access checks on open connections", () => {
+  it("closes a board connection once its person may no longer see the board, even after a rejected command", async () => {
+    const config = { ...testConfig, cluster: "postgres" as const, databaseUrl: inject("databaseUrl") };
+    const b = await testApp({ db: t.db, config, liveRevalidateMs: 100 });
+    copies.push(b);
+    const admin = await setupAdmin(b);
+    const ed = await createUser(b, admin, { email: "ed@example.com", name: "Ed", role: "editor" });
+    const projectId = (await b.inject({ method: "POST", url: "/api/projects", headers: { cookie: ed.cookie }, payload: { name: "Launch" } })).json().project.id as string;
+    const onB = await connect(b, ed.cookie);
+    onB.send({ type: "join", projectId, version: 0 });
+    await onB.next("joined");
+    await t.db.user.update({ where: { email: "ed@example.com" }, data: { role: "guest" } }); // demoted, nobody told B
+    onB.send({ type: "command", commandId: randomUUID(), command: createTask("Sneaky") });
+    await onB.next("reject"); // refreshes the connection's view of Ed …
+    expect(await onB.closed).toBe(CLOSE_SESSION_ENDED); // … and the sweep still closes it
+  });
+});

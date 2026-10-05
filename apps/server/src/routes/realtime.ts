@@ -45,10 +45,12 @@ export function realtimeRoutes(app: FastifyInstance, context: RouteContext, { re
       for (const connection of hub.all()) {
         if (connection.closed) continue;
         void (async () => {
-          const role = connection.credentials.user?.role;
           if (!(await refresh(connection))) return;
-          const link = connection.credentials.shareToken ? await access.find(connection.credentials.shareToken) : null;
-          if (connection.credentials.user?.role !== role || link?.revokedAt) hub.close(connection, CLOSE_SESSION_ENDED, "Access changed");
+          // Can this person (or link) still see the board it shows? Checked afresh, not by comparing.
+          const projectId = connection.projectId;
+          if (!projectId) return;
+          const granted = await access.resolve(connection.credentials, projectId).catch((error: unknown) => error);
+          if (!isAccess(granted) && connection.projectId === projectId) hub.close(connection, CLOSE_SESSION_ENDED, "Access changed");
         })().catch((error: unknown) => app.log.error(error));
       }
     }, revalidateMs);
