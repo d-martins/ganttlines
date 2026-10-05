@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { CLOSE_SESSION_ENDED } from "../src/realtime/hub";
-import { createUser, PUBLIC_URL, setupAdmin, useTestApp } from "./helpers";
+import { createUser, PUBLIC_URL, setupAdmin, testApp, testConfig, useTestApp } from "./helpers";
 import { connect } from "./ws-client";
 
 const t = useTestApp();
@@ -167,6 +167,18 @@ describe("closing connections", () => {
     await a.next("joined");
     for (let i = 0; i < 150; i++) a.send({ type: "command", commandId: randomUUID(), command: createTask(randomUUID()) });
     expect(await a.closed).toBe(1008);
+  });
+
+  it("closes idle sockets once their session has expired (they're checked now and then)", async () => {
+    const app = await testApp({ db: t.db, config: testConfig, liveRevalidateMs: 100, now: () => t.clock.now });
+    try {
+      const admin = await setupAdmin(app);
+      const client = await connect(app, admin);
+      t.clock.now = new Date(t.clock.now.getTime() + 31 * 24 * 60 * 60 * 1000);
+      expect(await client.closed).toBe(CLOSE_SESSION_ENDED);
+    } finally {
+      await app.close();
+    }
   });
 
   it("closes a session's sockets on logout", async () => {

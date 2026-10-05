@@ -5,6 +5,9 @@ import { createHash } from "node:crypto";
 import { PgLimiter } from "../src/auth/limiter";
 import { createCluster } from "../src/cluster";
 import { PgUndoStore } from "../src/projects/undo-store";
+import { ProjectService } from "../src/projects/project-service";
+import { InstanceService } from "../src/calendar/instance-service";
+import { NoLock } from "../src/cluster/local";
 import { expectUndoHistory } from "./undo-history";
 import type { Cluster, EventBus } from "../src/cluster/types";
 import { CLOSE_PROJECT_DELETED, CLOSE_SESSION_ENDED } from "../src/realtime/hub";
@@ -251,6 +254,24 @@ describe("several copies: undo", () => {
     const redo = await a.inject({ method: "POST", url: `/api/projects/${projectId}/redo`, headers: { cookie: ed.cookie }, payload: { commandId: randomUUID() } });
     expect(redo.statusCode).toBe(200);
     expect((await state(b, ed.cookie, projectId)).rows.map((row) => row.title)).toEqual(["Design"]);
+  });
+});
+
+describe("several copies: undo bookkeeping", () => {
+  it("is saved with the edit: if it can't be, the edit isn't either (and the other way round)", async () => {
+    const { projectId } = await twoCopies();
+    class Failing extends PgUndoStore {
+      override async pushCommand(): Promise<void> {
+        throw new Error("database hiccup");
+      }
+    }
+    const instance = new InstanceService(t.db, new NoLock(), true);
+    const projects = new ProjectService(t.db, instance, { lock: new NoLock(), shared: true, undo: new Failing(t.db) });
+    const actor = { userId: null, label: "Someone", linkId: null, visitorId: "v1" };
+    const before = (await t.db.project.findUniqueOrThrow({ where: { id: projectId } })).version;
+    await expect(projects.apply(projectId, actor as never, randomUUID(), createTask("Lost?") as never)).rejects.toThrow("database hiccup");
+    expect((await t.db.project.findUniqueOrThrow({ where: { id: projectId } })).version).toBe(before);
+    expect(await t.db.row.count({ where: { projectId, title: "Lost?" } })).toBe(0);
   });
 });
 

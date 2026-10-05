@@ -4,11 +4,12 @@ import type { RawData } from "ws";
 import type { ProjectAccess } from "../auth/access";
 import { pendingStepOf, requireUser } from "../auth/guard";
 import { credentialsOf, requireInstanceRead } from "../auth/request-access";
+import type { ResolvedSession } from "../auth/sessions";
 import { HttpError } from "../errors";
 import { CLOSE_SESSION_ENDED, type Connection } from "../realtime/hub";
 import type { RouteContext } from "./context";
 
-/** Cached projects nobody has open are dropped after this long. */
+/** Cached projects nobody has open (or used through the API) are dropped after this long. */
 const IDLE_EVICTION_MS = 10 * 60 * 1000;
 /** A connection with more unhandled messages than this is flooding the server and gets closed. */
 export const MAX_PENDING_MESSAGES = 100;
@@ -41,39 +42,42 @@ export function realtimeRoutes(app: FastifyInstance, context: RouteContext, { re
 
   // …and every connection is checked now and then (sessions in one query, without extending them),
   // so ones nobody uses don't outlive their session or link.
-  if (shared) {
-    const check = async () => {
+  const checkOne = async (connection: Connection, live: Map<string, ResolvedSession>) => {
+    if (connection.sessionToken) {
+      const session = live.get(connection.sessionToken);
+      if (!session) return hub.close(connection, CLOSE_SESSION_ENDED, "Session ended");
+      connection.credentials = { ...connection.credentials, user: session.user, pendingStep: await pendingStepOf(context, session.user, session.viaSso) };
+    }
+    // Can this person (or link) still see the board it shows? Checked afresh, not by comparing.
+    const projectId = connection.projectId;
+    if (!projectId) return;
+    const granted = await access.resolve(connection.credentials, projectId).catch((error: unknown) => error);
+    if (!isAccess(granted) && connection.projectId === projectId) hub.close(connection, CLOSE_SESSION_ENDED, "Access changed");
+  };
+  let checking = false;
+  const check = async () => {
+    if (checking) return; // the last round is still going (a big server, or a slow database)
+    checking = true;
+    try {
       const open = hub.all().filter((connection) => !connection.closed);
       const tokens = open.flatMap((connection) => (connection.sessionToken ? [connection.sessionToken] : []));
-      const live = tokens.length ? await sessions.check(tokens) : new Map();
+      const live = tokens.length ? await sessions.check(tokens) : new Map<string, ResolvedSession>();
       for (const connection of open) {
-        if (connection.sessionToken) {
-          const session = live.get(connection.sessionToken);
-          if (!session) {
-            hub.close(connection, CLOSE_SESSION_ENDED, "Session ended");
-            continue;
-          }
-          connection.credentials = { ...connection.credentials, user: session.user, pendingStep: await pendingStepOf(context, session.user, session.viaSso) };
-        }
-        // Can this person (or link) still see the board it shows? Checked afresh, not by comparing.
-        const projectId = connection.projectId;
-        if (!projectId) continue;
-        const granted = await access.resolve(connection.credentials, projectId).catch((error: unknown) => error);
-        if (!isAccess(granted) && connection.projectId === projectId) hub.close(connection, CLOSE_SESSION_ENDED, "Access changed");
+        // one connection's trouble doesn't stop the others being checked
+        await checkOne(connection, live).catch((error: unknown) => app.log.error(error));
       }
-    };
-    const sweep = setInterval(() => void check().catch((error: unknown) => app.log.error(error)), revalidateMs);
-    sweep.unref();
-    app.addHook("onClose", async () => clearInterval(sweep));
-  }
-  const announcePresence = (projectId: string) => {
-    presence.changed(projectId);
-    if (hub.roomSize(projectId) === 0) {
-      setTimeout(() => {
-        if (hub.roomSize(projectId) === 0) void projects.evict(projectId);
-      }, IDLE_EVICTION_MS).unref();
+    } finally {
+      checking = false;
     }
   };
+  const sweep = setInterval(() => void check().catch((error: unknown) => app.log.error(error)), revalidateMs);
+  sweep.unref();
+  app.addHook("onClose", async () => clearInterval(sweep));
+
+  const announcePresence = (projectId: string) => presence.changed(projectId);
+  const evictIdle = setInterval(() => void projects.evictIdle(IDLE_EVICTION_MS, (projectId) => hub.roomSize(projectId) > 0).catch((error: unknown) => app.log.error(error)), IDLE_EVICTION_MS / 2);
+  evictIdle.unref();
+  app.addHook("onClose", async () => clearInterval(evictIdle));
 
   const leave = (connection: Connection) => {
     const previous = connection.projectId;
