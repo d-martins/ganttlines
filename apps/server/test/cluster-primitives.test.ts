@@ -177,3 +177,20 @@ describe("project lock (postgres): try", () => {
     await Promise.all(pools.map((pool) => pool.end()));
   });
 });
+
+describe("event bus (postgres): reconnects", () => {
+  it("never leaves extra listener connections behind across reconnects", async () => {
+    const pool = new pg.Pool({ connectionString: inject("databaseUrl"), max: 2 });
+    const bus = new PgEventBus(inject("databaseUrl"), pool, quiet);
+    await bus.start();
+    for (let i = 0; i < 5; i++) {
+      await pool.query("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'ganttlines-listener'");
+      await until(() => !bus.ready);
+      await until(() => bus.ready);
+    }
+    const { rows } = await pool.query("SELECT count(*)::int AS n FROM pg_stat_activity WHERE application_name = 'ganttlines-listener'");
+    expect(rows[0].n).toBe(1);
+    await bus.close();
+    await pool.end();
+  });
+});

@@ -93,7 +93,12 @@ export class PgEventBus implements EventBus {
     client.on("error", (error) => this.log("cluster: listener connection failed", error));
     client.on("end", () => this.dropped(client));
     await client.connect();
-    await client.query(`LISTEN ${CHANNEL}`);
+    try {
+      await client.query(`LISTEN ${CHANNEL}`);
+    } catch (error) {
+      await client.end().catch(() => undefined); // don't leave the connection behind
+      throw error;
+    }
     this.heard = Date.now();
     this.client = client;
   }

@@ -348,3 +348,34 @@ describe("several copies: stopping and readiness", () => {
     expect(await onA.closed).toBe(1001);
   });
 });
+
+describe("several copies: hardening", () => {
+  it("checks idle connections without keeping their sessions alive", async () => {
+    const config = { ...testConfig, cluster: "postgres" as const, databaseUrl: inject("databaseUrl") };
+    const b = await testApp({ db: t.db, config, liveRevalidateMs: 100, now: () => t.clock.now });
+    copies.push(b);
+    const admin = await setupAdmin(b);
+    const before = (await t.db.session.findFirstOrThrow()).expiresAt;
+    const onB = await connect(b, admin);
+    t.clock.now = new Date(t.clock.now.getTime() + 2 * 60 * 60 * 1000); // past the hourly sliding refresh
+    await new Promise((resolve) => setTimeout(resolve, 400)); // a few checks
+    expect((await t.db.session.findFirstOrThrow()).expiresAt).toEqual(before);
+    onB.ws.close();
+  });
+
+  it("relays highlight lists in order on a third copy", async () => {
+    const { a, b, ed, projectId } = await twoCopies();
+    const config = { ...testConfig, cluster: "postgres" as const, databaseUrl: inject("databaseUrl") };
+    const c = await testApp({ db: t.db, config });
+    copies.push(c);
+    const onC = await connect(c, ed.cookie);
+    onC.send({ type: "join", projectId, version: 0 });
+    await onC.next("joined");
+    const add = (app: FastifyInstance, date: string) => app.inject({ method: "POST", url: `/api/projects/${projectId}/highlights`, headers: { cookie: ed.cookie }, payload: { date, color: "#ff0000" } });
+    await Promise.all([add(a, "2026-10-09"), add(b, "2026-10-10")]);
+    await onC.next("highlights", (m) => m.highlights.length === 2);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(onC.inbox.filter((m) => m.type === "highlights").every((m) => (m as { highlights: unknown[] }).highlights.length === 2)).toBe(true);
+    onC.ws.close();
+  });
+});

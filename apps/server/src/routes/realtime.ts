@@ -39,21 +39,30 @@ export function realtimeRoutes(app: FastifyInstance, context: RouteContext, { re
     return true;
   };
 
-  // …and every connection is checked now and then, so ones nobody uses don't outlive their session or link.
+  // …and every connection is checked now and then (sessions in one query, without extending them),
+  // so ones nobody uses don't outlive their session or link.
   if (shared) {
-    const sweep = setInterval(() => {
-      for (const connection of hub.all()) {
-        if (connection.closed) continue;
-        void (async () => {
-          if (!(await refresh(connection))) return;
-          // Can this person (or link) still see the board it shows? Checked afresh, not by comparing.
-          const projectId = connection.projectId;
-          if (!projectId) return;
-          const granted = await access.resolve(connection.credentials, projectId).catch((error: unknown) => error);
-          if (!isAccess(granted) && connection.projectId === projectId) hub.close(connection, CLOSE_SESSION_ENDED, "Access changed");
-        })().catch((error: unknown) => app.log.error(error));
+    const check = async () => {
+      const open = hub.all().filter((connection) => !connection.closed);
+      const tokens = open.flatMap((connection) => (connection.sessionToken ? [connection.sessionToken] : []));
+      const live = tokens.length ? await sessions.check(tokens) : new Map();
+      for (const connection of open) {
+        if (connection.sessionToken) {
+          const session = live.get(connection.sessionToken);
+          if (!session) {
+            hub.close(connection, CLOSE_SESSION_ENDED, "Session ended");
+            continue;
+          }
+          connection.credentials = { ...connection.credentials, user: session.user, pendingStep: await pendingStepOf(context, session.user, session.viaSso) };
+        }
+        // Can this person (or link) still see the board it shows? Checked afresh, not by comparing.
+        const projectId = connection.projectId;
+        if (!projectId) continue;
+        const granted = await access.resolve(connection.credentials, projectId).catch((error: unknown) => error);
+        if (!isAccess(granted) && connection.projectId === projectId) hub.close(connection, CLOSE_SESSION_ENDED, "Access changed");
       }
-    }, revalidateMs);
+    };
+    const sweep = setInterval(() => void check().catch((error: unknown) => app.log.error(error)), revalidateMs);
     sweep.unref();
     app.addHook("onClose", async () => clearInterval(sweep));
   }
