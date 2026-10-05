@@ -90,8 +90,8 @@ export function oauthRoutes(app: FastifyInstance, context: RouteContext): void {
     scope.post("/oauth/register", async (request, reply) => {
       if (!(await enabled())) throw turnedOff();
       const keys = [`register:${request.ip}`];
-      if (registerLimiter.isBlocked(keys)) return oauthError(reply, new OAuthFailure("too_many_requests", "Too many registrations, try again later", 429));
-      registerLimiter.recordFailure(keys); // every registration counts
+      // every registration counts
+      if (!(await registerLimiter.attempt(keys))) return oauthError(reply, new OAuthFailure("too_many_requests", "Too many registrations, try again later", 429));
       try {
         return reply.status(201).header("cache-control", "no-store").send(await oauthClients.register(request.body));
       } catch (error) {

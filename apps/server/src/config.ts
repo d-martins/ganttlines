@@ -29,6 +29,8 @@ export interface Config {
   firstAdminEmail: string | null;
   /** The running version (the image's APP_VERSION; "dev" otherwise) */
   version: string;
+  /** How long a stopping server keeps answering (health says 503) before closing, so load balancers notice */
+  shutdownDelayMs: number;
   /** How copies share state: "single" (one process, in memory) or "postgres" (several copies, through the database) */
   cluster: "single" | "postgres";
   /** The built web app to serve (apps/web/dist); null when it isn't built (development, tests) */
@@ -56,6 +58,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     oidc,
     smtp: smtpSettings(env),
     cluster: parseCluster(env["CLUSTER"]),
+    shutdownDelayMs: parseShutdownDelay(env["SHUTDOWN_DELAY_MS"], parseCluster(env["CLUSTER"])),
   };
 }
 
@@ -83,6 +86,14 @@ function admins(env: NodeJS.ProcessEnv, oidc: OidcSettings | null): { initialAdm
 function webDir(value: string | undefined): string | null {
   const dir = value || fileURLToPath(new URL("../../web/dist", import.meta.url));
   return existsSync(join(dir, "index.html")) ? dir : null;
+}
+
+/** SHUTDOWN_DELAY_MS, or 5 s with several copies (load balancers need a moment) and 0 with one. */
+function parseShutdownDelay(value: string | undefined, cluster: "single" | "postgres"): number {
+  if (value === undefined || value === "") return cluster === "postgres" ? 5000 : 0;
+  const ms = Number(value);
+  if (!Number.isInteger(ms) || ms < 0 || ms > 120_000) throw new Error(`Invalid SHUTDOWN_DELAY_MS: ${value} (0–120000)`);
+  return ms;
 }
 
 function parseCluster(value: string | undefined): "single" | "postgres" {

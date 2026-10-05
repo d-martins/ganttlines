@@ -49,6 +49,13 @@ export class SessionStore {
     return { user: session.user, viaSso: session.viaSso, refreshedUntil: expiresAt };
   }
 
+  /** The live sessions among `tokens` (read only: checking doesn't extend them), in one query. */
+  async check(tokens: string[]): Promise<Map<string, ResolvedSession>> {
+    const byDigest = new Map(tokens.map((token) => [this.digest(token), token]));
+    const sessions = await this.db.session.findMany({ where: { id: { in: [...byDigest.keys()] }, expiresAt: { gt: this.now() } }, include: { user: true } });
+    return new Map(sessions.map((session) => [byDigest.get(session.id)!, { user: session.user, viaSso: session.viaSso, refreshedUntil: null }]));
+  }
+
   /** Removes sessions that expired without being presented again; returns how many. */
   async deleteExpired(): Promise<number> {
     const { count } = await this.db.session.deleteMany({ where: { expiresAt: { lte: this.now() } } });

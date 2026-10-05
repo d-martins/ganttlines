@@ -9,10 +9,11 @@ import { OidcSignIn } from "./auth/oidc";
 import { PasswordTokens } from "./auth/password-tokens";
 import { TwoFactor } from "./auth/two-factor";
 import { smtpMailer, type Mailer } from "./mail/mailer";
-import { LoginLimiter } from "./auth/login-limiter";
+import { MemoryLimiter, PgLimiter, type LimitOptions } from "./auth/limiter";
 import { SESSION_COOKIE, SessionStore } from "./auth/sessions";
 import { TwoFactorPolicy } from "./auth/two-factor-policy";
 import { createCluster } from "./cluster";
+import { MemoryUndoStore, PgUndoStore } from "./projects/undo-store";
 import type { Cluster } from "./cluster/types";
 import { Live } from "./realtime/live";
 import { Presence } from "./realtime/presence";
@@ -48,6 +49,13 @@ import { sharingRoutes } from "./routes/sharing";
 import { userRoutes } from "./routes/users";
 import { UpdateChecker } from "./updates";
 import { webRoutes } from "./web";
+
+declare module "fastify" {
+  interface FastifyInstance {
+    /** Stops this server being picked by load balancers (health answers 503); `close()` follows. */
+    drain(): void;
+  }
+}
 
 export interface AppOptions {
   /** where first-run messages (the setup code) go; the server prints them */
@@ -92,12 +100,25 @@ export async function buildApp({
   const trustProxy = typeof hops === "number" ? (_address: string, hop: number) => hop < hops : hops;
   const app = Fastify({ logger, trustProxy });
   await app.register(cookie);
-  await app.register(websocket, { options: { maxPayload: 1024 * 1024 } });
+  await app.register(websocket, {
+    options: { maxPayload: 1024 * 1024 },
+    // On close, browsers get "going away": they reconnect — to another copy — and catch up.
+    preClose(this: FastifyInstance, done: () => void) {
+      for (const client of this.websocketServer.clients) client.close(1001, "Server restarting");
+      this.websocketServer.close();
+      done();
+    },
+  });
 
   const cluster = givenCluster ?? (await createCluster(config, (message, error) => (error ? app.log.error(error, message) : app.log.warn(message))));
   app.addHook("onClose", () => cluster.close());
   const instance = new InstanceService(db, cluster.lock, cluster.mode === "postgres");
-  const projects = new ProjectService(db, instance, { lock: cluster.lock, shared: cluster.mode === "postgres", bus: cluster.bus });
+  const projects = new ProjectService(db, instance, {
+    lock: cluster.lock,
+    shared: cluster.mode === "postgres",
+    bus: cluster.bus,
+    undo: cluster.mode === "postgres" ? new PgUndoStore(db) : new MemoryUndoStore(),
+  });
   const hub = new Hub();
   const access = new AccessService(db, config.sessionSecret, cluster.mode === "single");
   const presence = new Presence(hub, cluster.bus);
@@ -123,12 +144,17 @@ export async function buildApp({
   projects.onApplied((event) => live.patch(event));
   projects.onMetaChange((project) => live.projectMeta(project));
   instance.onChange((snapshot) => live.instanceChanged(snapshot.version));
+  // Rate limits: in memory with one copy; counted in the database (hashed keys) with several.
+  const nowMs = now ? () => now().getTime() : Date.now;
+  const limit = (name: string, options?: LimitOptions) =>
+    cluster.mode === "postgres" ? new PgLimiter(db, name, options, nowMs) : new MemoryLimiter(nowMs, options);
+  const twoFactor = new TwoFactor(config.sessionSecret, now ? () => now().getTime() : undefined);
   const context: RouteContext = {
     db,
     config,
     cluster,
     sessions: new SessionStore(db, config.sessionSecret, now),
-    loginLimiter: new LoginLimiter(now ? () => now().getTime() : undefined),
+    loginLimiter: limit("login"),
     instance,
     projects,
     hub,
@@ -136,25 +162,32 @@ export async function buildApp({
     live,
     presence,
     boardQueue: new KeyedQueue(),
-    shareLimiter: new LoginLimiter(now ? () => now().getTime() : undefined),
-    firstRun: new FirstRun(db, instance, announce, setupCode),
+    shareLimiter: limit("share"),
+    firstRun: new FirstRun(db, instance, announce, setupCode, cluster.mode === "postgres" ? twoFactor : null),
     mailer: mailer !== undefined ? mailer : config.smtp ? smtpMailer(config.smtp) : null,
     passwordTokens: new PasswordTokens(db, now),
-    twoFactor: new TwoFactor(config.sessionSecret, now ? () => now().getTime() : undefined),
+    twoFactor,
     twoFactorPolicy: new TwoFactorPolicy(db),
     mcpSettings: new McpSettings(db),
     oauthClients: new OAuthClients(db, fetchClientMetadata, clock),
     oauthGrants: new OAuthGrants(db, config.sessionSecret, clock),
-    registerLimiter: new LoginLimiter(now ? () => now().getTime() : undefined),
+    registerLimiter: limit("register"),
+    mcpBudget: limit("mcp", { windowMs: 60_000, max: 300 }),
     teamEdits: new TeamEdits(instance),
   };
   await context.firstRun.start(config.initialAdmin);
 
   // Expired sessions are also deleted when presented; this catches the ones that never come back.
   const cleanup = setInterval(() => {
-    context.sessions.deleteExpired().catch((error: unknown) => app.log.error(error));
-    context.oauthGrants.deleteExpired().catch((error: unknown) => app.log.error(error));
-    context.oauthClients.deleteUnused().catch((error: unknown) => app.log.error(error));
+    // With several copies, one does it (whoever gets there first).
+    void cluster.lock
+      .tryRun("housekeeping", async () => {
+        await context.sessions.deleteExpired();
+        await context.oauthGrants.deleteExpired();
+        await context.oauthClients.deleteUnused();
+        for (const limiter of [context.loginLimiter, context.shareLimiter, context.registerLimiter, context.mcpBudget]) await limiter.deleteOld();
+      })
+      .catch((error: unknown) => app.log.error(error));
   }, SESSION_CLEANUP_INTERVAL_MS);
   cleanup.unref();
   app.addHook("onClose", async () => clearInterval(cleanup));
@@ -217,7 +250,21 @@ export async function buildApp({
     return reply.status(500).send({ error: "internal", message: "Something went wrong" });
   });
 
-  app.get("/api/health", async () => ({ ok: true }));
+  let draining = false;
+  // Stop being picked by load balancers (health says 503); `close()` follows.
+  app.decorate("drain", () => {
+    draining = true;
+  });
+  app.get("/api/health", async (_request, reply) => {
+    if (draining) return reply.status(503).send({ ok: false, reason: "stopping" });
+    if (!cluster.bus.ready) return reply.status(503).send({ ok: false, reason: "not listening for other copies" });
+    try {
+      await db.$queryRaw`SELECT 1`;
+    } catch {
+      return reply.status(503).send({ ok: false, reason: "database unreachable" });
+    }
+    return { ok: true };
+  });
   setupRoutes(app, context);
   authRoutes(app, context);
   userRoutes(app, context);

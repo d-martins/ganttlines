@@ -44,6 +44,8 @@ describe("first-run setup", () => {
 
   it("makes up a random code and prints it when there's no fixed one", async () => {
     const said: string[] = [];
+    // (with TEST_CLUSTER=postgres, the suite's own app is another copy that stored its code already)
+    await t.db.settings.updateMany({ data: { setupCode: null } });
     const app = await buildApp({ db: t.db, config: testConfig, announce: (message) => said.push(message) });
     expect(said).toEqual([expect.stringMatching(/setup code: [A-HJ-NP-Z2-9]{5}-[A-HJ-NP-Z2-9]{5}$/)]);
     const code = said[0]!.split(": ")[1]!;
@@ -98,6 +100,16 @@ describe("login, logout and sessions", () => {
       expect(response.statusCode).toBe(401);
       expect(response.json().error).toBe("invalid_credentials");
     }
+  });
+
+  it("lets no more than 10 wrong passwords through, even sent all at once", async () => {
+    await setupAdmin(t.app);
+    const responses = await Promise.all(
+      Array.from({ length: 30 }, (_, i) =>
+        t.app.inject({ method: "POST", url: "/api/auth/login", remoteAddress: `10.0.0.${i}`, payload: { email: ADMIN.email, password: "wrong" } }),
+      ),
+    );
+    expect(responses.filter((response) => response.statusCode === 401)).toHaveLength(10);
   });
 
   it("blocks an account after 10 failed attempts", async () => {

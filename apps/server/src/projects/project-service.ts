@@ -25,7 +25,8 @@ import { toProjectDto } from "../dto";
 import { conflict, HttpError, notFound } from "../errors";
 import { KeyedQueue } from "../queue";
 import { findTreeProblem, readProject, type StoredProject } from "./state";
-import { revertChanges, UndoStacks } from "./undo";
+import { revertChanges } from "./undo";
+import { MemoryUndoStore, type UndoStore } from "./undo-store";
 
 /** Clients further behind than this (in versions or in total changes) reload instead of replaying. */
 export const MAX_CATCH_UP = 500;
@@ -72,7 +73,7 @@ export class ProjectService {
   private readonly cache = new Map<string, Promise<StoredProject>>();
   private readonly queue = new KeyedQueue();
   private readonly recent = new Map<string, Outcome>();
-  private readonly undoStacks = new UndoStacks();
+  private readonly undoStacks: UndoStore;
   private readonly appliedListeners = new Set<(event: AppliedEvent) => void>();
   private readonly metaListeners = new Set<(project: ProjectDto) => void>();
 
@@ -80,8 +81,10 @@ export class ProjectService {
     private readonly db: Db,
     private readonly instance: InstanceService,
     /** several copies: changes take turns through `lock`, and cached boards are checked against the database */
-    private readonly cluster: { lock: ProjectLock; shared: boolean; bus?: EventBus } = { lock: new NoLock(), shared: false },
-  ) {}
+    private readonly cluster: { lock: ProjectLock; shared: boolean; bus?: EventBus; undo?: UndoStore } = { lock: new NoLock(), shared: false },
+  ) {
+    this.undoStacks = cluster.undo ?? new MemoryUndoStore();
+  }
 
   onApplied(listener: (event: AppliedEvent) => void): () => void {
     this.appliedListeners.add(listener);
@@ -114,7 +117,7 @@ export class ProjectService {
         if (result.changes.length === 0) return { version: stored.meta.version, changes: [] };
         const applied = await this.commit(stored, actor, commandId, command.type, command, result.state, result.changes);
         const key = actorKey(actor);
-        if (key) this.undoStacks.pushCommand(projectId, key, commandId);
+        if (key) await this.undoStacks.pushCommand(projectId, key, commandId);
         return applied;
       });
     });
@@ -220,7 +223,7 @@ export class ProjectService {
       if (!stored.meta.archivedAt) throw conflict("Only archived projects can be deleted — archive it first");
       await this.db.project.delete({ where: { id: projectId } });
       this.cache.delete(projectId);
-      this.undoStacks.forgetProject(projectId);
+      await this.undoStacks.forgetProject(projectId);
     });
   }
 
@@ -243,23 +246,23 @@ export class ProjectService {
       if (previous) return { skipped: 0, ...previous };
       return this.remember(projectId, commandId, digest, async () => {
         if (stored.meta.archivedAt) throw conflict("This project is archived");
-        const target = this.undoStacks.peek(direction, projectId, userId);
+        const target = await this.undoStacks.peek(direction, projectId, userId);
         if (!target) throw new HttpError(422, "invalid", direction === "undo" ? "Nothing to undo" : "Nothing to redo");
         // From here on the entry is consumed when the revert definitively cannot apply (so the next
         // undo moves on), but kept if the commit fails for an unexpected reason (so it can be retried).
-        const discard = (error: HttpError) => {
-          this.undoStacks.pop(direction, projectId, userId);
+        const discard = async (error: HttpError) => {
+          await this.undoStacks.pop(direction, projectId, userId);
           return error;
         };
         let result: UndoResultDto;
         try {
           result = await this.revertLogged(stored, actor, commandId, direction, target, userId);
         } catch (error) {
-          throw error instanceof HttpError && error.status !== 500 ? discard(error) : error;
+          throw error instanceof HttpError && error.status !== 500 ? await discard(error) : error;
         }
-        this.undoStacks.pop(direction, projectId, userId);
-        if (direction === "undo") this.undoStacks.pushUndone(projectId, userId, target);
-        else this.undoStacks.pushRedone(projectId, userId, target);
+        await this.undoStacks.pop(direction, projectId, userId);
+        if (direction === "undo") await this.undoStacks.pushUndone(projectId, userId, target);
+        else await this.undoStacks.pushRedone(projectId, userId, target);
         return result;
       }) as Promise<UndoResultDto>;
     });

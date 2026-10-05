@@ -68,13 +68,18 @@ export class Live {
     void this.bus.publish({ type: "comment", commentId: comment.id });
   }
 
+  /** Lists are re-read and sent one at a time per project (here and when relayed), so the last one sent is the latest. */
   async highlights(projectId: string): Promise<void> {
-    this.hub.broadcast(projectId, { type: "highlights", projectId, highlights: await this.sources.highlights(projectId) });
+    await this.relays.run(`highlights:${projectId}`, async () => {
+      this.hub.broadcast(projectId, { type: "highlights", projectId, highlights: await this.sources.highlights(projectId) });
+    });
     void this.bus.publish({ type: "highlights", projectId });
   }
 
   async baselines(projectId: string): Promise<void> {
-    this.hub.broadcast(projectId, { type: "baselines", projectId, baselines: await this.sources.baselines(projectId) });
+    await this.relays.run(`baselines:${projectId}`, async () => {
+      this.hub.broadcast(projectId, { type: "baselines", projectId, baselines: await this.sources.baselines(projectId) });
+    });
     void this.bus.publish({ type: "baselines", projectId });
   }
 
@@ -146,11 +151,13 @@ export class Live {
         return;
       }
       case "highlights":
-        if (hub.roomSize(event.projectId) > 0) hub.broadcast(event.projectId, { type: "highlights", projectId: event.projectId, highlights: await sources.highlights(event.projectId) });
-        return;
+        return this.relays.run(`highlights:${event.projectId}`, async () => {
+          if (hub.roomSize(event.projectId) > 0) hub.broadcast(event.projectId, { type: "highlights", projectId: event.projectId, highlights: await sources.highlights(event.projectId) });
+        });
       case "baselines":
-        if (hub.roomSize(event.projectId) > 0) hub.broadcast(event.projectId, { type: "baselines", projectId: event.projectId, baselines: await sources.baselines(event.projectId) });
-        return;
+        return this.relays.run(`baselines:${event.projectId}`, async () => {
+          if (hub.roomSize(event.projectId) > 0) hub.broadcast(event.projectId, { type: "baselines", projectId: event.projectId, baselines: await sources.baselines(event.projectId) });
+        });
       case "closeUser":
         return hub.closeUserExceptDigest(event.userId, event.exceptSession);
       case "closeSession":

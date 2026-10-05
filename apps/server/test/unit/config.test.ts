@@ -17,6 +17,7 @@ describe("loadConfig", () => {
       initialAdmin: null,
       firstAdminEmail: null,
       cluster: "single",
+      shutdownDelayMs: 0,
       oidc: null,
       smtp: null,
     });
@@ -50,6 +51,9 @@ describe("loadConfig", () => {
     expect(loadConfig(base).cluster).toBe("single");
     expect(loadConfig({ ...base, CLUSTER: "postgres" }).cluster).toBe("postgres");
     expect(() => loadConfig({ ...base, CLUSTER: "redis" })).toThrow("Invalid CLUSTER: redis (use single or postgres)");
+    expect(loadConfig({ ...base, CLUSTER: "postgres" }).shutdownDelayMs).toBe(5000);
+    expect(loadConfig({ ...base, CLUSTER: "postgres", SHUTDOWN_DELAY_MS: "1500" }).shutdownDelayMs).toBe(1500);
+    expect(() => loadConfig({ ...base, SHUTDOWN_DELAY_MS: "soon" })).toThrow("Invalid SHUTDOWN_DELAY_MS");
   });
 
   it("reads the first admin from ADMIN_*, checked like the setup form", () => {

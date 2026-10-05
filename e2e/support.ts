@@ -4,6 +4,9 @@ import pg from "pg";
 
 export const PORT = 3210;
 export const BASE_URL = `http://localhost:${PORT}`;
+/** a second copy of the server, on the same database */
+export const PORT_2 = 3211;
+export const BASE_URL_2 = `http://localhost:${PORT_2}`;
 /** The test OpenID provider (single sign-on) */
 export const OIDC_PORT = 3299;
 
@@ -18,7 +21,7 @@ export async function resetDatabase(): Promise<void> {
   await client.connect();
   try {
     await client.query(
-      `TRUNCATE "Comment", "Highlight", "Baseline", "ShareLink", "CommandLog", "TimeOff", "Holiday", "Settings", "Row", "Project", "Session", "Resource", "Location", "User" CASCADE`,
+      `TRUNCATE "Comment", "Highlight", "Baseline", "ShareLink", "CommandLog", "TimeOff", "Holiday", "Settings", "Row", "Project", "Session", "Resource", "Location", "User", "UndoEntry", "RateCounter" CASCADE`,
     );
   } finally {
     await client.end();
@@ -45,11 +48,12 @@ export async function signedInUser(
   browser: Browser,
   admin: APIRequestContext,
   user: { email: string; name: string; role: "admin" | "editor" | "viewer" | "guest" },
+  baseURL = BASE_URL,
 ): Promise<{ context: BrowserContext; page: Page }> {
   const created = await ok<{ invited?: true }>(await admin.post("/api/users", { data: { ...user, createResource: user.role !== "guest" } }));
   expect(created.invited, "email is set up in these tests, so new people are invited").toBe(true);
   // Accept the emailed invitation: choose a password through its link (which also signs in).
-  const context = await browser.newContext();
+  const context = await browser.newContext({ baseURL });
   const token = new URL(linkIn(await mailTo(user.email))).searchParams.get("token");
   await ok(await context.request.post("/api/auth/reset", { data: { token, password: `${user.role}-password-1` } }));
   return { context, page: await context.newPage() };

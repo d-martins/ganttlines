@@ -1,10 +1,14 @@
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { afterEach, describe, expect, inject, it } from "vitest";
+import { PgLimiter } from "../src/auth/limiter";
 import { createCluster } from "../src/cluster";
+import { PgUndoStore } from "../src/projects/undo-store";
+import { expectUndoHistory } from "./undo-history";
 import type { Cluster, EventBus } from "../src/cluster/types";
 import { CLOSE_PROJECT_DELETED, CLOSE_SESSION_ENDED } from "../src/realtime/hub";
-import { createUser, setupAdmin, testApp, testConfig, useTestApp } from "./helpers";
+import { buildApp } from "../src/app";
+import { ADMIN, createUser, SETUP_CODE, setupAdmin, testApp, testConfig, useTestApp } from "./helpers";
 import { connect } from "./ws-client";
 
 const t = useTestApp();
@@ -184,7 +188,7 @@ describe("several copies: revocations hold even if a notification is lost", () =
 describe("several copies: access checks on open connections", () => {
   it("closes a board connection once its person may no longer see the board, even after a rejected command", async () => {
     const config = { ...testConfig, cluster: "postgres" as const, databaseUrl: inject("databaseUrl") };
-    const b = await testApp({ db: t.db, config, liveRevalidateMs: 100 });
+    const b = await testApp({ db: t.db, config, liveRevalidateMs: 1000 }); // long enough for the command to be answered first
     copies.push(b);
     const admin = await setupAdmin(b);
     const ed = await createUser(b, admin, { email: "ed@example.com", name: "Ed", role: "editor" });
@@ -227,5 +231,167 @@ describe("several copies: board changes are announced by the edit's own transact
     await command(a, admin, projectId, createTask("Design"));
     expect((await onB.next("patch")).version).toBe(1);
     onB.ws.close();
+  });
+});
+
+describe("several copies: undo", () => {
+  it("keeps the same bounded histories in the database as in memory", async () => {
+    const { projectId } = await twoCopies();
+    await expectUndoHistory(new PgUndoStore(t.db, 2), projectId);
+  });
+
+  it("undoes an edit made through the other copy", async () => {
+    const { a, b, ed, projectId } = await twoCopies();
+    await command(a, ed.cookie, projectId, createTask("Design"));
+    const undo = await b.inject({ method: "POST", url: `/api/projects/${projectId}/undo`, headers: { cookie: ed.cookie }, payload: { commandId: randomUUID() } });
+    expect(undo.statusCode).toBe(200);
+    expect((await state(a, ed.cookie, projectId)).rows).toEqual([]);
+    const redo = await a.inject({ method: "POST", url: `/api/projects/${projectId}/redo`, headers: { cookie: ed.cookie }, payload: { commandId: randomUUID() } });
+    expect(redo.statusCode).toBe(200);
+    expect((await state(b, ed.cookie, projectId)).rows.map((row) => row.title)).toEqual(["Design"]);
+  });
+});
+
+describe("several copies: rate limits", () => {
+  it("counts failed sign-ins on every copy together (keys stored hashed)", async () => {
+    const { a, b } = await twoCopies();
+    const wrong = (app: FastifyInstance) => app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "ed@example.com", password: "wrong" } });
+    for (let i = 0; i < 10; i++) await wrong(i % 2 ? b : a);
+    expect((await wrong(a)).statusCode).toBe(429);
+    expect((await wrong(b)).statusCode).toBe(429);
+    expect(await t.db.rateCounter.count({ where: { key: { contains: "ed@example.com" } } })).toBe(0);
+  });
+});
+
+describe("several copies: the setup code", () => {
+  it("is printed by every copy and accepted on any", async () => {
+    const config = { ...testConfig, cluster: "postgres" as const, databaseUrl: inject("databaseUrl") };
+    const said: string[] = [];
+    await t.db.settings.updateMany({ data: { setupCode: null } }); // the suite's own app may have stored its code
+    const a = await buildApp({ db: t.db, config, announce: (message) => said.push(`a: ${message}`) });
+    copies.push(a);
+    const b = await buildApp({ db: t.db, config, announce: (message) => said.push(`b: ${message}`) });
+    copies.push(b);
+    await a.inject("/api/setup");
+    await b.inject("/api/setup");
+    const codes = said.map((line) => /setup code: (\S+)$/.exec(line)?.[1]);
+    expect(codes).toEqual([expect.any(String), codes[0]]); // the same code, from both
+    expect((await b.inject({ method: "POST", url: "/api/setup", payload: { ...ADMIN, setupCode: codes[0] } })).statusCode).toBe(201);
+  });
+
+  it("is printed again when every copy restarted before anyone set up", async () => {
+    const config = { ...testConfig, cluster: "postgres" as const, databaseUrl: inject("databaseUrl") };
+    await t.db.settings.updateMany({ data: { setupCode: null } });
+    const said: string[] = [];
+    const first = await buildApp({ db: t.db, config, announce: (message) => said.push(message) });
+    await first.close();
+    const again = await buildApp({ db: t.db, config, announce: (message) => said.push(message) });
+    copies.push(again);
+    const codes = said.map((line) => /setup code: (\S+)$/.exec(line)?.[1]);
+    expect(codes).toEqual([expect.any(String), codes[0]]);
+    expect((await again.inject({ method: "POST", url: "/api/setup", payload: { ...ADMIN, setupCode: codes[0] } })).statusCode).toBe(201);
+  });
+
+  it("is stored again by the copy that knows it if the database lost it", async () => {
+    const config = { ...testConfig, cluster: "postgres" as const, databaseUrl: inject("databaseUrl") };
+    const a = await testApp({ db: t.db, config });
+    copies.push(a);
+    await a.inject("/api/setup");
+    await t.db.settings.deleteMany({}); // e.g. tests resetting the database
+    expect((await a.inject({ method: "POST", url: "/api/setup", payload: { ...ADMIN, setupCode: SETUP_CODE } })).statusCode).toBe(201);
+  });
+});
+
+describe("several copies: rate limit safeguards", () => {
+  it("can't be dodged by straddling a window boundary", async () => {
+    let now = 990;
+    const limiter = new PgLimiter(t.db, "boundary", { windowMs: 1000, max: 10 }, () => now);
+    for (let i = 0; i < 10; i++) await limiter.recordFailure(["ip:1"]);
+    expect(await limiter.isBlocked(["ip:1"])).toBe(true);
+    now = 1001; // a new window has just begun
+    expect(await limiter.isBlocked(["ip:1"])).toBe(true);
+    now = 2001; // a whole window later
+    expect(await limiter.isBlocked(["ip:1"])).toBe(false);
+  });
+
+  it("never drops an account's attempts to make room, however full the table is", async () => {
+    const limiter = new PgLimiter(t.db, "evict", { windowMs: 60_000, max: 10 }, Date.now, { maxKeys: 5, pruneEvery: 1000 });
+    for (let k = 0; k < 8; k++) for (let i = 0; i < 9; i++) await limiter.recordFailure([`ip:flood-${k}`]); // busy keys fill the table
+    for (let i = 0; i < 4; i++) await limiter.recordFailure(["user:target"]);
+    await limiter.deleteOld(); // the table is over its cap: something is dropped …
+    for (let i = 0; i < 6; i++) await limiter.recordFailure(["user:target"]);
+    expect(await limiter.isBlocked(["user:target"])).toBe(true);
+  });
+
+  it("keeps the table bounded when other keys are busy too", async () => {
+    const limiter = new PgLimiter(t.db, "busy", { windowMs: 60_000, max: 10 }, Date.now, { maxKeys: 5, pruneEvery: 1000 });
+    for (let k = 0; k < 20; k++) for (let i = 0; i < 9; i++) await limiter.recordFailure([`ip:${k}`]);
+    await limiter.deleteOld();
+    expect(await t.db.rateCounter.count({ where: { key: { startsWith: "busy:" } } })).toBeLessThanOrEqual(5);
+  });
+
+  it("counts attempts as they start, so parallel ones (on any copy) can't get past the limit", async () => {
+    const limiter = new PgLimiter(t.db, "parallel", { windowMs: 60_000, max: 10 });
+    const allowed = await Promise.all(Array.from({ length: 30 }, () => limiter.attempt(["user:target"])));
+    expect(allowed.filter(Boolean)).toHaveLength(10);
+  });
+
+  it("keeps the table bounded when flooded with distinct keys", async () => {
+    const limiter = new PgLimiter(t.db, "flood", { windowMs: 60_000, max: 10 }, Date.now, { maxKeys: 20, pruneEvery: 10 });
+    for (let i = 0; i < 200; i++) await limiter.recordFailure([`email:${i}@example.com`]);
+    expect(await t.db.rateCounter.count({ where: { key: { startsWith: "flood:" } } })).toBeLessThanOrEqual(30);
+  });
+});
+
+describe("several copies: stopping and readiness", () => {
+  it("isn't ready without its listener; when stopping it says so, then tells browsers to reconnect elsewhere", async () => {
+    const { a, ed } = await twoCopies();
+    expect((await a.inject("/api/health")).json()).toEqual({ ok: true });
+    await t.db.$executeRawUnsafe("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'ganttlines-listener'");
+    let seen503 = false;
+    for (let i = 0; i < 60; i++) {
+      const health = await a.inject("/api/health");
+      if (health.statusCode === 503) seen503 = true;
+      else if (seen503) break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    expect(seen503).toBe(true); // not ready while the listener reconnects
+    const onA = await connect(a, ed.cookie);
+    a.drain();
+    expect((await a.inject("/api/health")).json()).toEqual({ ok: false, reason: "stopping" });
+    copies.splice(copies.indexOf(a), 1);
+    await a.close();
+    expect(await onA.closed).toBe(1001);
+  });
+});
+
+describe("several copies: hardening", () => {
+  it("checks idle connections without keeping their sessions alive", async () => {
+    const config = { ...testConfig, cluster: "postgres" as const, databaseUrl: inject("databaseUrl") };
+    const b = await testApp({ db: t.db, config, liveRevalidateMs: 100, now: () => t.clock.now });
+    copies.push(b);
+    const admin = await setupAdmin(b);
+    const before = (await t.db.session.findFirstOrThrow()).expiresAt;
+    const onB = await connect(b, admin);
+    t.clock.now = new Date(t.clock.now.getTime() + 2 * 60 * 60 * 1000); // past the hourly sliding refresh
+    await new Promise((resolve) => setTimeout(resolve, 400)); // a few checks
+    expect((await t.db.session.findFirstOrThrow()).expiresAt).toEqual(before);
+    onB.ws.close();
+  });
+
+  it("relays highlight lists in order on a third copy", async () => {
+    const { a, b, ed, projectId } = await twoCopies();
+    const config = { ...testConfig, cluster: "postgres" as const, databaseUrl: inject("databaseUrl") };
+    const c = await testApp({ db: t.db, config });
+    copies.push(c);
+    const onC = await connect(c, ed.cookie);
+    onC.send({ type: "join", projectId, version: 0 });
+    await onC.next("joined");
+    const add = (app: FastifyInstance, date: string) => app.inject({ method: "POST", url: `/api/projects/${projectId}/highlights`, headers: { cookie: ed.cookie }, payload: { date, color: "#ff0000" } });
+    await Promise.all([add(a, "2026-10-09"), add(b, "2026-10-10")]);
+    await onC.next("highlights", (m) => m.highlights.length === 2);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(onC.inbox.filter((m) => m.type === "highlights").every((m) => (m as { highlights: unknown[] }).highlights.length === 2)).toBe(true);
+    onC.ws.close();
   });
 });

@@ -9,7 +9,7 @@ import type { FirstRun } from "../auth/first-run";
 import type { Db } from "@ganttlines/db";
 import type { FastifyReply } from "fastify";
 import type { AccessService } from "../auth/access";
-import type { LoginLimiter } from "../auth/login-limiter";
+import type { Limiter } from "../auth/limiter";
 import { SESSION_COOKIE, type SessionStore } from "../auth/sessions";
 import type { InstanceService } from "../calendar/instance-service";
 import type { TeamEdits } from "../calendar/team-edits";
@@ -28,7 +28,7 @@ export interface RouteContext {
   /** how copies share state (no-ops in single mode) */
   cluster: Cluster;
   sessions: SessionStore;
-  loginLimiter: LoginLimiter;
+  loginLimiter: Limiter;
   instance: InstanceService;
   projects: ProjectService;
   hub: Hub;
@@ -38,7 +38,7 @@ export interface RouteContext {
   presence: Presence;
   access: AccessService;
   /** throttles guessing of share-link tokens per client IP */
-  shareLimiter: LoginLimiter;
+  shareLimiter: Limiter;
   /** serialises highlight/baseline changes per project, so their live list broadcasts stay in order */
   boardQueue: KeyedQueue;
   /** creating the first admin (from settings, or in the browser with the setup code) */
@@ -58,7 +58,9 @@ export interface RouteContext {
   /** people's approvals for AI apps: codes and tokens */
   oauthGrants: OAuthGrants;
   /** throttles app registrations per client IP */
-  registerLimiter: LoginLimiter;
+  registerLimiter: Limiter;
+  /** requests per AI app connection (per minute) */
+  mcpBudget: Limiter;
   /** changes to the team calendar (people, locations, holidays, time off) */
   teamEdits: TeamEdits;
 }

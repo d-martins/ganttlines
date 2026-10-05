@@ -19,4 +19,8 @@ export class NoLock implements ProjectLock {
   run<T>(_key: string, work: () => Promise<T>): Promise<T> {
     return work();
   }
+
+  tryRun<T>(_key: string, work: () => Promise<T>): Promise<T | undefined> {
+    return work();
+  }
 }

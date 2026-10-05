@@ -164,3 +164,33 @@ describe("project lock (postgres): a dropped connection", () => {
     await pool.end();
   });
 });
+
+describe("project lock (postgres): try", () => {
+  it("skips work another copy is already doing", async () => {
+    const pools = [new pg.Pool({ connectionString: inject("databaseUrl"), max: 2 }), new pg.Pool({ connectionString: inject("databaseUrl"), max: 2 })];
+    const [one, two] = pools.map((pool) => new PgLock(pool));
+    let ran = 0;
+    const slow = () => new Promise<void>((resolve) => setTimeout(() => (ran++, resolve()), 100));
+    const results = await Promise.all([one!.tryRun("housekeeping", slow), new Promise((r) => setTimeout(r, 20)).then(() => two!.tryRun("housekeeping", slow))]);
+    expect(ran).toBe(1);
+    expect(results[1]).toBeUndefined();
+    await Promise.all(pools.map((pool) => pool.end()));
+  });
+});
+
+describe("event bus (postgres): reconnects", () => {
+  it("never leaves extra listener connections behind across reconnects", async () => {
+    const pool = new pg.Pool({ connectionString: inject("databaseUrl"), max: 2 });
+    const bus = new PgEventBus(inject("databaseUrl"), pool, quiet);
+    await bus.start();
+    for (let i = 0; i < 5; i++) {
+      await pool.query("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'ganttlines-listener'");
+      await until(() => !bus.ready);
+      await until(() => bus.ready);
+    }
+    const { rows } = await pool.query("SELECT count(*)::int AS n FROM pg_stat_activity WHERE application_name = 'ganttlines-listener'");
+    expect(rows[0].n).toBe(1);
+    await bus.close();
+    await pool.end();
+  });
+});

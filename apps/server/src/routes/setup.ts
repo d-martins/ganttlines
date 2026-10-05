@@ -17,9 +17,8 @@ export function setupRoutes(app: FastifyInstance, { config, sessions, firstRun, 
     // Cheap early exit so post-setup calls never pay for a password hash (re-checked under the lock).
     if (!(await firstRun.needsSetup())) throw conflict("Setup has already been completed");
     const keys = [`setup:${request.ip}`];
-    if (loginLimiter.isBlocked(keys)) throw new HttpError(429, "too_many_attempts", "Too many failed attempts, try again in a few minutes");
-    if (!firstRun.checkCode(body.setupCode)) {
-      loginLimiter.recordFailure(keys);
+    if (!(await loginLimiter.attempt(keys))) throw new HttpError(429, "too_many_attempts", "Too many failed attempts, try again in a few minutes");
+    if (!(await firstRun.checkCode(body.setupCode))) {
       throw new HttpError(403, "wrong_setup_code", "That setup code isn't right — copy it from the server's log");
     }
     const user = await firstRun.createAdmin(body);

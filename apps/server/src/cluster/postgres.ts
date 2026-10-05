@@ -93,7 +93,12 @@ export class PgEventBus implements EventBus {
     client.on("error", (error) => this.log("cluster: listener connection failed", error));
     client.on("end", () => this.dropped(client));
     await client.connect();
-    await client.query(`LISTEN ${CHANNEL}`);
+    try {
+      await client.query(`LISTEN ${CHANNEL}`);
+    } catch (error) {
+      await client.end().catch(() => undefined); // don't leave the connection behind
+      throw error;
+    }
     this.heard = Date.now();
     this.client = client;
   }
@@ -169,6 +174,28 @@ export class PgLock implements ProjectLock {
         await client.query("SELECT pg_advisory_unlock($1, hashtext($2))", [LOCK_NAMESPACE, key]).catch(() => {
           healthy = false;
         });
+      }
+    } finally {
+      client.off("error", broken);
+      client.release(!healthy);
+    }
+  }
+
+  /** Runs `work` only if no other copy holds the lock right now. */
+  async tryRun<T>(key: string, work: () => Promise<T>): Promise<T | undefined> {
+    const client = await this.pool.connect();
+    let healthy = true;
+    const broken = () => {
+      healthy = false;
+    };
+    client.on("error", broken);
+    try {
+      const { rows } = await client.query<{ ok: boolean }>("SELECT pg_try_advisory_lock($1, hashtext($2)) AS ok", [LOCK_NAMESPACE, key]);
+      if (!rows[0]?.ok) return undefined;
+      try {
+        return await work();
+      } finally {
+        await client.query("SELECT pg_advisory_unlock($1, hashtext($2))", [LOCK_NAMESPACE, key]).catch(broken);
       }
     } finally {
       client.off("error", broken);

@@ -3,12 +3,12 @@ import type { FastifyRequest } from "fastify";
 import { HttpError } from "../errors";
 import type { AccessService, Credentials, ProjectAccess } from "./access";
 import { VISITOR_COOKIE } from "./access";
-import type { LoginLimiter } from "./login-limiter";
+import type { Limiter } from "./limiter";
 
 export interface AccessContext {
   access: AccessService;
   /** throttles guessing of share-link tokens per client IP */
-  shareLimiter: LoginLimiter;
+  shareLimiter: Limiter;
 }
 
 export function credentialsOf(request: FastifyRequest, access: AccessService, shareToken?: string | null): Credentials {
@@ -52,11 +52,11 @@ export async function throttleShareTokens<T>(
 ): Promise<T> {
   if (!credentials.shareToken) return work();
   const keys = [`share:${request.ip}`];
-  if (shareLimiter.isBlocked(keys)) throw new HttpError(429, "too_many_attempts", "Too many invalid links, try again in a few minutes");
+  if (await shareLimiter.isBlocked(keys)) throw new HttpError(429, "too_many_attempts", "Too many invalid links, try again in a few minutes");
   try {
     return await work();
   } catch (error) {
-    if (error instanceof HttpError && error.status === 404) shareLimiter.recordFailure(keys);
+    if (error instanceof HttpError && error.status === 404) await shareLimiter.recordFailure(keys);
     throw error;
   }
 }

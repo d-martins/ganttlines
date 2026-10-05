@@ -22,28 +22,6 @@ const GROUPS: Record<McpScope, ToolGroup> = {
   "team:write": writeTeam,
 };
 
-/** Requests one connection may make per minute (an AI app working through a plan stays well under). */
-const CALLS_PER_MINUTE = 300;
-
-/** Counts each connection's requests in the current minute. */
-class CallBudget {
-  private readonly windows = new Map<string, { start: number; count: number }>();
-
-  constructor(private readonly now: () => number) {}
-
-  take(key: string): boolean {
-    const now = this.now();
-    const window = this.windows.get(key);
-    if (!window || now - window.start >= 60_000) {
-      if (this.windows.size > 10_000) this.windows.clear();
-      this.windows.set(key, { start: now, count: 1 });
-      return true;
-    }
-    window.count++;
-    return window.count <= CALLS_PER_MINUTE;
-  }
-}
-
 const INSTRUCTIONS =
   "GanttLines is a team's Gantt planner. Projects are boards of sections and tasks; tasks have working-day durations, " +
   "can follow a predecessor (with a lag), and are scheduled around weekends, holidays and their assignee's time off. " +
@@ -58,7 +36,6 @@ const INSTRUCTIONS =
 export function mcpRoutes(app: FastifyInstance, context: RouteContext): void {
   const { config, mcpSettings, oauthGrants } = context;
   const urls = oauthUrls(config.publicUrl);
-  const budget = new CallBudget(Date.now);
 
   const handler = createMcpHandler(({ authInfo }) => {
     const caller = authInfo?.extra?.["caller"] as McpCaller;
@@ -82,7 +59,9 @@ export function mcpRoutes(app: FastifyInstance, context: RouteContext): void {
     const access = await oauthGrants.verifyAccess(token);
     // The person must still be able to use the app: an admin's later changes apply at once.
     if (!access || access.user.mustChangePassword || access.user.role === "guest") return challenge(reply, "invalid_token");
-    if (!budget.take(access.connection.id)) {
+    // Requests per connection per minute (an AI app working through a plan stays well under).
+    const budgetKey = [access.connection.id];
+    if (!(await context.mcpBudget.attempt(budgetKey))) {
       return reply.status(429).header("retry-after", "60").send({ error: "too_many_requests", message: "Too many requests from this app — wait a minute" });
     }
     const forRole = scopesForRole(access.user.role);

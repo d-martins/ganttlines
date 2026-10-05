@@ -41,6 +41,8 @@ export interface EventBus {
 /** Makes work on one key take turns across copies. */
 export interface ProjectLock {
   run<T>(key: string, work: () => Promise<T>): Promise<T>;
+  /** Runs `work` only if no other copy holds the lock right now (otherwise resolves undefined). */
+  tryRun<T>(key: string, work: () => Promise<T>): Promise<T | undefined>;
 }
 
 /** The shared-state pieces for one mode. */
