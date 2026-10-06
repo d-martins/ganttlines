@@ -1,10 +1,16 @@
-import { Calendar, findTreeProblem, hasCycle, type ProjectState, type Row } from "@ganttlines/engine";
+import { Calendar, findTreeProblem, hasCycle, toDay, type ProjectState, type Row } from "@ganttlines/engine";
 import type { WorkspaceFile } from "@ganttlines/protocol";
 import { ApiError } from "../api";
 import { checkFormat, toCalendarDto, WORKSPACE_FORMAT, WORKSPACE_VERSION } from "./records";
 import { validation } from "./validation";
 
 export const MAX_FILE_BYTES = 50 * 1024 * 1024;
+/**
+ * The team calendar is worked out per person and day: a file whose holidays and time off add up to
+ * more person-days than this is refused before anything is computed (a whole team's real calendar
+ * stays far below it).
+ */
+export const MAX_PERSON_DAYS = 2_000_000;
 
 const invalid = (message: string) => new ApiError(400, "invalid_file", message);
 
@@ -63,6 +69,15 @@ function referenceProblem(file: WorkspaceFile): string | null {
     if (holiday.locationIds.some((id) => !places.has(id))) return `holiday “${holiday.name}” is for a location that isn't there`;
   }
   if (file.timeOff.some((entry) => !people.has(entry.resourceId))) return "some time off is for a team member who isn't there";
+  const days = (entry: { startDate: string; endDate: string }) => toDay(entry.endDate) - toDay(entry.startDate) + 1;
+  const inLocation = new Map<string, number>();
+  for (const person of file.team) if (person.locationId) inLocation.set(person.locationId, (inLocation.get(person.locationId) ?? 0) + 1);
+  let personDays = file.timeOff.reduce((total, entry) => total + days(entry), 0);
+  for (const holiday of file.holidays) {
+    const covered = holiday.appliesToAll ? 1 : holiday.resourceIds.length + holiday.locationIds.reduce((total, id) => total + (inLocation.get(id) ?? 0), 0);
+    personDays += days(holiday) * covered;
+  }
+  if (personDays > MAX_PERSON_DAYS) return "its team calendar is too large (too many long holidays and time off for too many people)";
   let calendar: Calendar;
   try {
     calendar = new Calendar({ ...toCalendarDto({ ...file, format: WORKSPACE_FORMAT, version: WORKSPACE_VERSION, instanceVersion: 1 }) });

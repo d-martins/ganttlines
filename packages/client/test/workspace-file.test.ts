@@ -114,6 +114,19 @@ describe("the workspace file", () => {
       await expect(readWorkspaceFile(JSON.stringify(people))).rejects.toMatchObject({ code: "invalid_file", message: expect.stringMatching(/twice/) });
     });
 
+    it("whose calendar would take too long to work out (many long holidays for many people)", async () => {
+      const file = await base();
+      const hex = (n: number, width: number) => n.toString(16).padStart(width, "0");
+      file.team = Array.from({ length: 1000 }, (_, i) => ({ id: `00000000-0000-4000-8000-${hex(i, 12)}`, name: `P${i}`, avatarColor: "#4f8cff", inactive: false, locationId: null }));
+      const everyone = file.team.map((person: { id: string }) => person.id);
+      file.timeOff = [];
+      file.projects[0].rows[0].resourceId = null;
+      file.holidays = Array.from({ length: 200 }, (_, i) => ({ id: `00000000-0000-4000-9000-${hex(i, 12)}`, name: `H${i}`, startDate: "2026-01-01", endDate: "2026-12-31", appliesToAll: false, resourceIds: everyone, locationIds: [] }));
+      const started = Date.now();
+      await expect(readWorkspaceFile(JSON.stringify(file))).rejects.toMatchObject({ code: "invalid_file", message: expect.stringMatching(/too large/) });
+      expect(Date.now() - started).toBeLessThan(3000);
+    });
+
     it("with tasks that depend on each other in a loop", async () => {
       const file = await base();
       const first = file.projects[0].rows[0];
