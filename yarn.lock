@@ -537,9 +537,12 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@ganttlines/client@workspace:packages/client"
   dependencies:
+    "@ganttlines/engine": "workspace:^"
+    "@ganttlines/holidays": "workspace:^"
     "@ganttlines/protocol": "workspace:^"
     typescript: "npm:~5.9.3"
     vitest: "npm:^5"
+    zod: "npm:^4"
   languageName: unknown
   linkType: soft
 

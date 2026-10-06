@@ -10,10 +10,14 @@
     "./testing": "./testing/contract.ts"
   },
   "scripts": {
+    "test": "vitest run",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@ganttlines/protocol": "workspace:^"
+    "@ganttlines/engine": "workspace:^",
+    "@ganttlines/holidays": "workspace:^",
+    "@ganttlines/protocol": "workspace:^",
+    "zod": "^4"
   },
   "devDependencies": {
     "typescript": "~5.9.3",
