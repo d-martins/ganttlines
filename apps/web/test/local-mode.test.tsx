@@ -5,7 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { forgetLocalWorkspace, useStorageStatus } from "../src/workspace/local";
 import { serverSource, useWorkspace } from "../src/workspace";
 import { IndexedDbStore } from "../src/workspace/indexed-db-store";
+import { leaveTo } from "../src/app/leave";
 import { ADMIN, fakeApi, renderApp, screen } from "./utils";
+
+vi.mock("../src/app/leave", () => ({ leaveTo: vi.fn() }));
 
 /** Web Locks with one other tab: `held` says whether that tab holds the workspace. */
 class FakeLocks {
@@ -54,6 +57,7 @@ beforeEach(() => {
   forgetLocalWorkspace();
   useStorageStatus.setState({ failed: false });
   useWorkspace.setState({ source: serverSource });
+  vi.mocked(leaveTo).mockClear();
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -321,5 +325,38 @@ describe("local mode", () => {
     await user.click(await screen.findByRole("button", { name: "Collapse sidebar" }));
     expect(screen.getByRole("link", { name: /Saved in this browser only/ })).toHaveAttribute("href", "/settings");
     await user.click(screen.getByRole("button", { name: "Expand sidebar" }));
+  });
+  it("links to a sign-in elsewhere when the local-only build names one", async () => {
+    vi.stubEnv("VITE_WORKSPACE", "local");
+    vi.stubEnv("VITE_SIGN_IN_URL", "https://app.example.com/login");
+    renderApp("/");
+    expect(await screen.findByRole("link", { name: "Sign in" })).toHaveAttribute("href", "https://app.example.com/login");
+  });
+
+  it("sends its own sign-in page there", async () => {
+    vi.stubEnv("VITE_WORKSPACE", "local");
+    vi.stubEnv("VITE_SIGN_IN_URL", "https://app.example.com/login");
+    renderApp("/login");
+    await waitFor(() => expect(leaveTo).toHaveBeenCalledWith("https://app.example.com/login"));
+  });
+
+  it("ignores a sign-in address that isn't a web address", async () => {
+    vi.stubEnv("VITE_WORKSPACE", "local");
+    vi.stubEnv("VITE_SIGN_IN_URL", "javascript:alert(1)");
+    renderApp("/");
+    expect((await screen.findAllByText("No projects yet.")).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("link", { name: "Sign in" })).not.toBeInTheDocument();
+  });
+
+  it("only changes the local-only build: a server keeps its own sign-in page", async () => {
+    vi.stubEnv("VITE_SIGN_IN_URL", "https://app.example.com/login");
+    fakeApi({
+      "GET /api/setup": () => ({ body: { needsSetup: false } }),
+      "GET /api/auth/me": () => signedOut,
+      "GET /api/auth/providers": () => ({ body: { oidc: null, passwordReset: false } }),
+    });
+    renderApp("/login");
+    expect(await screen.findByLabelText("Email")).toBeInTheDocument();
+    expect(leaveTo).not.toHaveBeenCalled();
   });
 });

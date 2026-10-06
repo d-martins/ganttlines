@@ -5,6 +5,7 @@ import { InitialAdminSettings } from "@ganttlines/protocol";
 import type { InitialAdmin } from "./auth/first-run";
 import { oidcSettings, type OidcSettings } from "./auth/oidc";
 import { smtpSettings, type SmtpSettings } from "./mail/mailer";
+import { withDatabaseCa } from "./maintenance/database-ca";
 
 export interface Config {
   databaseUrl: string;
@@ -40,7 +41,7 @@ export interface Config {
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv): Config {
-  const databaseUrl = required(env, "DATABASE_URL");
+  const databaseUrl = withDatabaseCa(required(env, "DATABASE_URL"), env["DATABASE_CA_CERT"]);
   const sessionSecret = required(env, "SESSION_SECRET");
   if (sessionSecret.length < 32) throw new Error("SESSION_SECRET must be at least 32 characters");
   const publicUrl = new URL(env["PUBLIC_URL"] ?? "http://localhost:3000");

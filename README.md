@@ -36,6 +36,7 @@ only with the one-time **setup code** the server prints in its log
 | `COMPOSE_PROFILES=bundled-db` | Run the bundled PostgreSQL. Remove it to use your own database. |
 | `POSTGRES_PASSWORD` | Password of the bundled database (letters and digits). |
 | `DATABASE_URL` | Your own PostgreSQL instead, e.g. `postgresql://user:pass@host:5432/ganttlines?sslmode=require`. |
+| `DATABASE_CA_CERT` | A managed database's certificate authority (PEM), so its certificate can be verified. |
 | `SESSION_SECRET` | Required, 32+ characters. Changing it signs everyone out. |
 | `ADMIN_EMAIL`, `ADMIN_NAME`, `ADMIN_PASSWORD` | The first admin, created on the first start (8+ character password). Ignored once anyone has an account. |
 | `OIDC_*` | Single sign-on — see [Single sign-on](#single-sign-on-google-and-others). |
@@ -50,6 +51,12 @@ only with the one-time **setup code** the server prints in its log
 Delete the `COMPOSE_PROFILES` line, set `DATABASE_URL` and start as usual; only the app container
 runs. Use PostgreSQL 13 or newer and an empty database the user owns. A database on this same
 machine is reachable from the container as `host.docker.internal`.
+
+Managed databases (DigitalOcean, AWS RDS, Azure …) often sign their certificate with the provider's
+own authority, which isn't trusted by default, so the app can't connect with `sslmode=require`.
+Download that authority's certificate from the provider and put it in `DATABASE_CA_CERT` (the PEM
+text): connections, backups and upgrades then verify the database against it. On DigitalOcean App
+Platform, bind it with `DATABASE_CA_CERT=${db.CA_CERT}`.
 
 ## Locations and public holidays
 
@@ -233,6 +240,8 @@ GanttLines also works with no account, keeping everything in the browser:
   workspace in their browser (nothing is stored on the server); signing in shows the server's.
 - **As a static site:** `yarn workspace @ganttlines/web build:local` builds the app with no server at
   all, into `apps/web/dist-local` — host it anywhere that serves static files.
+  Set `VITE_SIGN_IN_URL` when building (e.g. `VITE_SIGN_IN_URL=https://app.example.com/login`) to
+  show a "Sign in" link to a GanttLines server elsewhere.
 
 A local workspace lives only in that browser (Settings → Export saves a copy; Import opens one).
 Clearing the browser's site data deletes it, and Safari clears it after about 7 days without a visit.

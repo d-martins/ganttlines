@@ -20,6 +20,8 @@ export function libpqEnv(databaseUrl: string): Record<string, string> {
   if (url.password) env["PGPASSWORD"] = decodeURIComponent(url.password);
   const sslmode = url.searchParams.get("sslmode");
   if (sslmode) env["PGSSLMODE"] = sslmode;
+  const rootCert = url.searchParams.get("sslrootcert");
+  if (rootCert) env["PGSSLROOTCERT"] = rootCert;
   return env;
 }
 

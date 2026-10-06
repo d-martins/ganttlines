@@ -25,6 +25,18 @@ export const useCapabilities = (): WorkspaceCapabilities => useWorkspace((state)
 /** The local-only build: no server at all. */
 export const localOnly = (): boolean => import.meta.env.VITE_WORKSPACE === "local";
 
+/** The local-only build's sign-in elsewhere (VITE_SIGN_IN_URL), when it names an http(s) address. */
+export function signInElsewhere(): string | null {
+  const value: unknown = import.meta.env.VITE_SIGN_IN_URL;
+  if (!localOnly() || typeof value !== "string") return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * After switching workspaces (or replacing this one) nothing cached from before may show: the data
  * is dropped and what's on screen is fetched again (setup and "who am I" are refreshed separately).
