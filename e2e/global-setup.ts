@@ -2,10 +2,12 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { extname, join } from "node:path";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
 import { GenericContainer, Wait } from "testcontainers";
 import { BASE_URL, BASE_URL_2, OIDC_PORT, PORT, PORT_2 } from "./support";
+import { createServer } from "node:http";
+import { readFile } from "node:fs/promises";
 
 const ROOT = join(__dirname, "..");
 const WEB_DIR = join(ROOT, "apps/web/dist");
@@ -16,6 +18,7 @@ const WEB_DIR = join(ROOT, "apps/web/dist");
  */
 export default async function globalSetup(): Promise<() => Promise<void>> {
   if (!existsSync(join(WEB_DIR, "index.html"))) throw new Error("Build the web app first: yarn workspace @ganttlines/web build");
+  if (!existsSync(join(LOCAL_DIR, "index.html"))) throw new Error("Build the local-only app first: yarn workspace @ganttlines/web build:local");
   const database = await new PostgreSqlContainer("postgres:17").start();
   const databaseUrl = database.getConnectionUri();
   process.env["E2E_DATABASE_URL"] = databaseUrl; // for the tests' database resets
@@ -54,11 +57,11 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     CLUSTER: "postgres",
   };
   // Each copy's PUBLIC_URL is the address browsers use for it (the Origin check depends on it).
-  const start = (port: number, publicUrl: string) =>
+  const start = (port: number, publicUrl: string, extra: NodeJS.ProcessEnv = {}) =>
     spawn(process.execPath, ["--import", "tsx", "apps/server/src/cli.ts", "start"], {
       cwd: ROOT,
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...environment, PORT: String(port), PUBLIC_URL: publicUrl },
+      env: { ...environment, ...extra, PORT: String(port), PUBLIC_URL: publicUrl },
     });
   const server: ChildProcess = start(PORT, BASE_URL);
   let server2: ChildProcess | undefined;
@@ -73,7 +76,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     const code = /setup code: ([A-Z0-9]{5}-[A-Z0-9]{5})/.exec(output)?.[1];
     if (!code) throw new Error("The server didn't print a setup code");
     process.env["E2E_SETUP_CODE"] = code;
-    server2 = start(PORT_2, BASE_URL_2);
+    // Copy 2 also lets people who aren't signed in work in their browser (local mode tests).
+    server2 = start(PORT_2, BASE_URL_2, { VISITOR_WORKSPACE: "local" });
     server2.stdout?.on("data", keep);
     server2.stderr?.on("data", keep);
     await waitUntilUp(server2, BASE_URL_2);
@@ -86,7 +90,10 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     throw new Error(`${(error as Error).message}\n--- server output ---\n${output}`);
   }
 
+  const staticServer = serveLocalBuild();
+
   return async () => {
+    staticServer.close();
     await Promise.all([stop(server), stop(server2!)]);
     provider.kill();
     await mailpit.stop();
@@ -111,4 +118,21 @@ async function waitUntilUp(server: ChildProcess, baseUrl: string): Promise<void>
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   throw new Error("The server didn't start within 90 s");
+}
+
+const LOCAL_DIR = join(ROOT, "apps/web/dist-local");
+const TYPES: Record<string, string> = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".json": "application/json" };
+
+/** The local-only build on a plain static server (any path that isn't a file gets index.html). */
+function serveLocalBuild() {
+  return createServer(async (request, response) => {
+    const path = decodeURIComponent((request.url ?? "/").split("?")[0]!);
+    const file = path.startsWith("/assets/") ? join(LOCAL_DIR, path) : join(LOCAL_DIR, "index.html");
+    try {
+      const body = await readFile(file);
+      response.writeHead(200, { "content-type": TYPES[extname(file)] ?? "application/octet-stream" }).end(body);
+    } catch {
+      response.writeHead(404).end();
+    }
+  }).listen(3220, "127.0.0.1");
 }

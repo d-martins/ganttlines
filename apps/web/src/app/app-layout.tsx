@@ -12,6 +12,7 @@ import { LocalWorkspaceProblem, OpenElsewhere, StorageBanner } from "../workspac
 import { useTabLock } from "../workspace/tab-lock";
 import { Sidebar } from "./sidebar";
 import { TopBar } from "./top-bar";
+import { useActiveBoard } from "../board/active-board";
 
 /** This browser's workspace, once wanted (opened again after another tab used it). */
 function useLocalSource(wanted: boolean) {
@@ -59,6 +60,16 @@ export function AppLayout() {
   const active = useWorkspace((state) => state.source);
   const lock = useTabLock(wantLocal && local.source !== undefined);
   const storageFailed = useStorageStatus((state) => state.failed);
+
+  // In this browser's workspace an edit is saved by this tab: closing it first would lose the edit.
+  useEffect(() => {
+    if (!wantLocal) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      if (useActiveBoard.getState().sync?.state.pending.some((entry) => entry.ackVersion === null)) event.preventDefault();
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [wantLocal]);
 
   // Switch workspaces before anything below asks for data, and forget the other workspace's data.
   useLayoutEffect(() => {
