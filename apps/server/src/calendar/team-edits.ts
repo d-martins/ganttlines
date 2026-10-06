@@ -14,7 +14,7 @@ import type { z } from "zod";
 import type { Actor } from "../actor";
 import { badRequest, conflict, notFound } from "../errors";
 import { toLocationDto, toResourceDto, type InstanceService } from "./instance-service";
-import { countries, regions } from "./public-holidays";
+import { countries, regions } from "@ganttlines/holidays";
 
 type Tx = Prisma.TransactionClient;
 type ParsedHoliday = z.output<typeof HolidayBody>;

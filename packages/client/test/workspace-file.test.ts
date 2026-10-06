@@ -1,0 +1,139 @@
+import { describe, expect, it } from "vitest";
+import { LocalSource } from "../src/local/local-source";
+import { MemoryStore } from "../src/local/store";
+import { MAX_FILE_BYTES, readWorkspaceFile } from "../src/local/workspace-file";
+
+const A = "11111111-1111-4111-8111-111111111111";
+const B = "22222222-2222-4222-8222-222222222222";
+const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+async function filledSource() {
+  const source = await LocalSource.open(new MemoryStore());
+  const project = await source.createProject({ name: "Launch" });
+  const ana = await source.createResource({ name: "Ana" });
+  await source.saveTimeOff({ resourceId: ana.id, startDate: "2026-10-12", endDate: "2026-10-12", note: "" });
+  const link = source.openBoard(project.id).openLink();
+  await settle();
+  link.send(JSON.stringify({ type: "join", projectId: project.id, version: 0 }));
+  link.send(JSON.stringify({ type: "command", commandId: B, command: { type: "createRow", id: A, kind: "task", parentId: null, afterId: null, title: "Design", start: "2026-10-05" } }));
+  await settle();
+  await source.saveHighlight(project.id, { date: "2026-10-09", label: "Demo", color: "#e5892f" });
+  await source.createBaseline(project.id, "Kick-off");
+  return { source, project };
+}
+
+describe("the workspace file", () => {
+  it("exports a workspace that imports into another browser as the same workspace", async () => {
+    const { source, project } = await filledSource();
+    const file = await readWorkspaceFile(JSON.stringify(source.exportFile()));
+    const elsewhere = await LocalSource.open(new MemoryStore());
+    await elsewhere.replaceWith(file);
+    expect(await elsewhere.listProjects()).toEqual(await source.listProjects());
+    expect((await elsewhere.calendar()).timeOff).toEqual((await source.calendar()).timeOff);
+    expect(await elsewhere.resources()).toEqual(await source.resources());
+    expect(await elsewhere.openBoard(project.id).load()).toEqual(await source.openBoard(project.id).load());
+    expect(await elsewhere.highlights(project.id)).toEqual(await source.highlights(project.id));
+    expect(await elsewhere.baselines(project.id)).toEqual(await source.baselines(project.id));
+  });
+
+  it("imports again whatever the app let you make (long names, deep order keys, late baseline dates)", async () => {
+    const { source, project } = await filledSource();
+    await source.updateProject(project.id, { name: "x".repeat(200) });
+    const file = JSON.parse(JSON.stringify(source.exportFile())) as Record<string, any>;
+    file.projects[0].rows[0].position = "a".repeat(5_000);
+    file.projects[0].baselines[0].tasks[0].end = "2205-01-01";
+    await expect(readWorkspaceFile(JSON.stringify(file))).resolves.toMatchObject({ projects: [expect.objectContaining({ name: "x".repeat(200) })] });
+  });
+
+  it("clears the workspace", async () => {
+    const { source } = await filledSource();
+    await source.clear();
+    expect(await source.listProjects()).toEqual([]);
+    expect(await source.resources()).toEqual([]);
+  });
+
+  describe("refuses files it can't trust, with a reason", () => {
+    const base = async () => JSON.parse(JSON.stringify((await filledSource()).source.exportFile())) as Record<string, any>;
+
+    it("not JSON, or not a workspace", async () => {
+      await expect(readWorkspaceFile("not json")).rejects.toMatchObject({ code: "invalid_file" });
+      await expect(readWorkspaceFile(JSON.stringify({ format: "excalidraw" }))).rejects.toMatchObject({ code: "invalid_file" });
+    });
+
+    it("from a newer GanttLines", async () => {
+      const file = await base();
+      await expect(readWorkspaceFile(JSON.stringify({ ...file, version: 2 }))).rejects.toMatchObject({ code: "newer_version" });
+    });
+
+    it("too big", async () => {
+      await expect(readWorkspaceFile(" ".repeat(MAX_FILE_BYTES + 1))).rejects.toMatchObject({ code: "invalid_file", message: expect.stringMatching(/50 MB/) });
+    });
+
+    it("with fields that don't fit", async () => {
+      const file = await base();
+      file.projects[0].rows[0].duration = -3;
+      await expect(readWorkspaceFile(JSON.stringify(file))).rejects.toMatchObject({ code: "invalid_file" });
+    });
+
+    it("pointing at people or rows that aren't there", async () => {
+      const ghost = await base();
+      ghost.projects[0].rows[0].resourceId = "99999999-9999-4999-8999-999999999999";
+      await expect(readWorkspaceFile(JSON.stringify(ghost))).rejects.toMatchObject({ code: "invalid_file", message: expect.stringMatching(/team member/) });
+      const orphan = await base();
+      orphan.projects[0].rows[0].predecessorId = "99999999-9999-4999-8999-999999999999";
+      await expect(readWorkspaceFile(JSON.stringify(orphan))).rejects.toMatchObject({ code: "invalid_file", message: expect.stringMatching(/predecessor/) });
+    });
+
+    it("with calendar entries the app would never accept", async () => {
+      const reversed = await base();
+      reversed.timeOff[0].endDate = "2026-10-01";
+      await expect(readWorkspaceFile(JSON.stringify(reversed))).rejects.toMatchObject({ code: "invalid_file" });
+      const endless = await base();
+      Object.assign(endless.timeOff[0], { startDate: "1970-01-01", endDate: "2199-12-31" });
+      await expect(readWorkspaceFile(JSON.stringify(endless))).rejects.toMatchObject({ code: "invalid_file", message: expect.stringMatching(/366/) });
+      const nobody = await base();
+      nobody.holidays.push({ id: "88888888-8888-4888-8888-888888888888", name: "Nobody", startDate: "2026-12-24", endDate: "2026-12-24", appliesToAll: false, resourceIds: [], locationIds: [] });
+      await expect(readWorkspaceFile(JSON.stringify(nobody))).rejects.toMatchObject({ code: "invalid_file" });
+      const both = await base();
+      both.holidays.push({ id: "88888888-8888-4888-8888-888888888888", name: "Both", startDate: "2026-12-24", endDate: "2026-12-24", appliesToAll: true, resourceIds: [both.team[0].id], locationIds: [] });
+      await expect(readWorkspaceFile(JSON.stringify(both))).rejects.toMatchObject({ code: "invalid_file" });
+      const twice = await base();
+      twice.workingWeekdays = [1, 1, 2];
+      await expect(readWorkspaceFile(JSON.stringify(twice))).rejects.toMatchObject({ code: "invalid_file" });
+    });
+
+    it("with the same id twice", async () => {
+      const projects = await base();
+      projects.projects.push({ ...projects.projects[0], name: "Copy" });
+      await expect(readWorkspaceFile(JSON.stringify(projects))).rejects.toMatchObject({ code: "invalid_file", message: expect.stringMatching(/twice/) });
+      const rows = await base();
+      rows.projects[0].rows.push({ ...rows.projects[0].rows[0], title: "Again" });
+      await expect(readWorkspaceFile(JSON.stringify(rows))).rejects.toMatchObject({ code: "invalid_file", message: expect.stringMatching(/twice/) });
+      const people = await base();
+      people.team.push({ ...people.team[0], name: "Clone" });
+      await expect(readWorkspaceFile(JSON.stringify(people))).rejects.toMatchObject({ code: "invalid_file", message: expect.stringMatching(/twice/) });
+    });
+
+    it("whose calendar would take too long to work out (many long holidays for many people)", async () => {
+      const file = await base();
+      const hex = (n: number, width: number) => n.toString(16).padStart(width, "0");
+      file.team = Array.from({ length: 1000 }, (_, i) => ({ id: `00000000-0000-4000-8000-${hex(i, 12)}`, name: `P${i}`, avatarColor: "#4f8cff", inactive: false, locationId: null }));
+      const everyone = file.team.map((person: { id: string }) => person.id);
+      file.timeOff = [];
+      file.projects[0].rows[0].resourceId = null;
+      file.holidays = Array.from({ length: 200 }, (_, i) => ({ id: `00000000-0000-4000-9000-${hex(i, 12)}`, name: `H${i}`, startDate: "2026-01-01", endDate: "2026-12-31", appliesToAll: false, resourceIds: everyone, locationIds: [] }));
+      const started = Date.now();
+      await expect(readWorkspaceFile(JSON.stringify(file))).rejects.toMatchObject({ code: "invalid_file", message: expect.stringMatching(/too large/) });
+      expect(Date.now() - started).toBeLessThan(3000);
+    });
+
+    it("with tasks that depend on each other in a loop", async () => {
+      const file = await base();
+      const first = file.projects[0].rows[0];
+      const second = { ...first, id: B, position: "a1", predecessorId: first.id };
+      first.predecessorId = B;
+      file.projects[0].rows.push(second);
+      await expect(readWorkspaceFile(JSON.stringify(file))).rejects.toMatchObject({ code: "invalid_file", message: expect.stringMatching(/loop/) });
+    });
+  });
+});

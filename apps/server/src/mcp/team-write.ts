@@ -1,7 +1,7 @@
 import { CreateResourceBody, HolidayBody, ImportHolidaysBody, LocationBody, TimeOffBody, UpdateResourceBody } from "@ganttlines/protocol";
 import { z } from "zod";
 import { aiActorOf } from "../actor";
-import { publicHolidays } from "../calendar/public-holidays";
+import { publicHolidays } from "@ganttlines/holidays";
 import { pickOne, pickPerson, ToolProblem } from "./lookup";
 import { answer, guarded, type ToolGroup } from "./tools";
 

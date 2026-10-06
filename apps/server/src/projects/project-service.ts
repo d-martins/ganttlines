@@ -2,13 +2,13 @@ import { Prisma, toDbColumns, type Db, type Project } from "@ganttlines/db";
 import {
   applyChanges,
   applyCommand,
+  baselineTasks,
   buildTree,
   childrenOf,
   type Command,
   computeSchedule,
   diffRows,
   findTreeProblem,
-  fromDay,
   hasCycle,
   isParentTask,
   type ProjectState,
@@ -173,27 +173,7 @@ export class ProjectService {
 
   /** The current computed dates of every scheduled task (for baselines). */
   scheduleSnapshot(projectId: string): Promise<BaselineTaskDto[]> {
-    return this.queue.run(projectId, async () => {
-      const { state } = await this.load(projectId);
-      const schedule = computeSchedule(state, (await this.instance.current()).calendar);
-      const tree = buildTree(state);
-      const tasks: BaselineTaskDto[] = [];
-      for (const row of Object.values(state.rows)) {
-        const span = schedule.get(row.id)?.span;
-        if (row.kind !== "task" || !span) continue;
-        const kind = isParentTask(tree, row) ? "parent" : row.duration === 0 ? "milestone" : "task";
-        tasks.push({
-          rowId: row.id,
-          kind,
-          title: row.title,
-          start: fromDay(span.start),
-          end: fromDay(span.end),
-          startsAfternoon: span.startsAfternoon,
-          endsMidday: span.endsMidday,
-        });
-      }
-      return tasks;
-    });
+    return this.queue.run(projectId, async () => baselineTasks((await this.load(projectId)).state, (await this.instance.current()).calendar));
   }
 
   /** Every row in board order (depth first), with the computed dates of scheduled tasks. */

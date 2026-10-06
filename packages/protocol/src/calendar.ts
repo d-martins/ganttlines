@@ -13,7 +13,7 @@ const name = z.string().trim().min(1).max(LIMITS.nameMax);
 const color = z.string().regex(/^#[0-9a-f]{6}$/i, "Colors are #rrggbb");
 
 /** Date ranges must not be reversed and must span at most MAX_RANGE_DAYS days (inclusive). */
-function checkRange(value: { startDate: string; endDate: string }, ctx: z.RefinementCtx): void {
+export function checkRange(value: { startDate: string; endDate: string }, ctx: z.RefinementCtx): void {
   if (value.endDate < value.startDate) {
     ctx.addIssue({ code: "custom", message: "The end date is before the start date", path: ["endDate"] });
   } else if (toDay(value.endDate) - toDay(value.startDate) >= MAX_RANGE_DAYS) {

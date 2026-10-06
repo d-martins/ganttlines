@@ -80,3 +80,4 @@ export {
   type McpSettingsDto,
   type OAuthRequestDto,
 } from "./mcp";
+export { WorkspaceFile } from "./workspace-file";

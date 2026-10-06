@@ -1,23 +1,17 @@
 {
-  "name": "@ganttlines/client",
+  "name": "@ganttlines/holidays",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",
-  "exports": {
-    ".": "./src/index.ts",
-    "./testing": "./testing/contract.ts"
-  },
   "scripts": {
     "test": "vitest run",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
     "@ganttlines/engine": "workspace:^",
-    "@ganttlines/holidays": "workspace:^",
-    "@ganttlines/protocol": "workspace:^",
-    "zod": "^4"
+    "date-holidays": "^3"
   },
   "devDependencies": {
     "typescript": "~5.9.3",
