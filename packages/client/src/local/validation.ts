@@ -12,7 +12,8 @@ let loading: Promise<Validation> | null = null;
 
 /** The protocol's request schemas (and zod), loaded on first use so they stay out of the first download. */
 export function validation(): Promise<Validation> {
-  loading ??= Promise.all([import("@ganttlines/protocol"), import("zod")]).then(([protocol, zod]) => ({
+  if (loading) return loading;
+  loading = Promise.all([import("@ganttlines/protocol"), import("zod")]).then(([protocol, zod]) => ({
     protocol,
     explain: (error) => zod.z.prettifyError(error),
     check: (schema, input) => {
@@ -21,5 +22,9 @@ export function validation(): Promise<Validation> {
       return result.data;
     },
   }));
+  // A failed load (offline, or the site was updated meanwhile) is tried again next time.
+  loading.catch(() => {
+    loading = null;
+  });
   return loading;
 }

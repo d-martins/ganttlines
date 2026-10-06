@@ -1,6 +1,6 @@
 import { MAX_DATE, MAX_DURATION, MAX_OFFSET, MIN_DATE, TASK_COLORS } from "@ganttlines/engine";
 import { z } from "zod";
-import { CALENDAR_LIMITS } from "./calendar";
+import { CALENDAR_LIMITS, checkRange } from "./calendar";
 import { LIMITS } from "./api";
 import { BOARD_LIMITS, COMMAND_LIMITS } from "./constants";
 
@@ -9,7 +9,9 @@ const date = z.iso.date().refine((value) => value >= MIN_DATE && value <= MAX_DA
 const name = z.string().trim().min(1).max(LIMITS.nameMax);
 const color = z.string().regex(/^#[0-9a-f]{6}$/i);
 const halfSteps = (schema: z.ZodNumber) => schema.refine((value) => Number.isInteger(value * 2), "Use whole or half days");
-const position = z.string().min(1).max(200);
+// Order keys grow when rows keep being inserted at the same place; the app sets no limit.
+const position = z.string().min(1).max(10_000);
+const projectName = z.string().trim().min(1).max(LIMITS.projectNameMax);
 
 const SectionRow = z.strictObject({ id, kind: z.literal("section"), title: z.string().max(COMMAND_LIMITS.titleMax), parentId: id.nullable(), position });
 const TaskRow = z.strictObject({
@@ -35,18 +37,30 @@ export const WorkspaceFile = z.strictObject({
   format: z.literal("ganttlines-workspace"),
   version: z.literal(1),
   exportedAt: z.string().max(40),
-  workingWeekdays: z.array(z.int().min(0).max(6)).min(1).max(7),
+  workingWeekdays: z
+    .array(z.int().min(0).max(6))
+    .min(1)
+    .max(7)
+    .refine((days) => new Set(days).size === days.length, "Duplicate weekday"),
   team: z.array(z.strictObject({ id, name, avatarColor: color, inactive: z.boolean(), locationId: id.nullable() })).max(1_000),
   locations: z.array(z.strictObject({ id, name, country: z.string().regex(/^[A-Z]{2}$/).nullable(), region: z.string().max(20).nullable() })).max(1_000),
   holidays: z
-    .array(z.strictObject({ id, name, startDate: date, endDate: date, appliesToAll: z.boolean(), resourceIds: z.array(id).max(1_000), locationIds: z.array(id).max(100) }))
+    .array(
+      z
+        .strictObject({ id, name, startDate: date, endDate: date, appliesToAll: z.boolean(), resourceIds: z.array(id).max(1_000), locationIds: z.array(id).max(100) })
+        .superRefine(checkRange)
+        .refine(
+          (holiday) => (holiday.appliesToAll ? holiday.resourceIds.length + holiday.locationIds.length === 0 : holiday.resourceIds.length + holiday.locationIds.length > 0),
+          "A holiday is for everyone, or for chosen people or locations",
+        ),
+    )
     .max(CALENDAR_LIMITS.holidays),
-  timeOff: z.array(z.strictObject({ id, resourceId: id, startDate: date, endDate: date, note: z.string().max(500) })).max(CALENDAR_LIMITS.timeOff),
+  timeOff: z.array(z.strictObject({ id, resourceId: id, startDate: date, endDate: date, note: z.string().max(500) }).superRefine(checkRange)).max(CALENDAR_LIMITS.timeOff),
   projects: z
     .array(
       z.strictObject({
         id,
-        name,
+        name: projectName,
         archived: z.boolean(),
         createdAt: z.string().max(40),
         version: z.int().min(0),
@@ -65,8 +79,9 @@ export const WorkspaceFile = z.strictObject({
                     rowId: id,
                     kind: z.enum(["task", "parent", "milestone"]),
                     title: z.string().max(COMMAND_LIMITS.titleMax),
-                    start: date,
-                    end: date,
+                    // computed dates: a schedule can run past the last date anyone can type
+                    start: z.iso.date(),
+                    end: z.iso.date(),
                     startsAfternoon: z.boolean().optional(),
                     endsMidday: z.boolean().optional(),
                   }),

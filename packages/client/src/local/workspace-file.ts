@@ -30,7 +30,31 @@ export async function readWorkspaceFile(text: string): Promise<WorkspaceFile> {
   return parsed.data;
 }
 
+/** The first id used twice within a collection (or across projects' rows), if any. */
+function duplicateProblem(file: WorkspaceFile): string | null {
+  const twice = (what: string, ids: string[]) => {
+    const seen = new Set<string>();
+    for (const id of ids) {
+      if (seen.has(id)) return `${what} ${id} appears twice`;
+      seen.add(id);
+    }
+    return null;
+  };
+  return (
+    twice("project", file.projects.map((project) => project.id)) ??
+    twice("team member", file.team.map((person) => person.id)) ??
+    twice("location", file.locations.map((location) => location.id)) ??
+    twice("holiday", file.holidays.map((holiday) => holiday.id)) ??
+    twice("time off", file.timeOff.map((entry) => entry.id)) ??
+    twice("row", file.projects.flatMap((project) => project.rows.map((row) => row.id))) ??
+    twice("highlight", file.projects.flatMap((project) => project.highlights.map((highlight) => highlight.id))) ??
+    twice("baseline", file.projects.flatMap((project) => project.baselines.map((baseline) => baseline.id)))
+  );
+}
+
 function referenceProblem(file: WorkspaceFile): string | null {
+  const duplicate = duplicateProblem(file);
+  if (duplicate) return duplicate;
   const people = new Set(file.team.map((person) => person.id));
   const places = new Set(file.locations.map((location) => location.id));
   for (const person of file.team) if (person.locationId && !places.has(person.locationId)) return `team member “${person.name}” is in a location that isn't there`;

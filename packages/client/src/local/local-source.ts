@@ -38,7 +38,7 @@ import type { BoardConnection, CountryDto, WorkspaceCapabilities, WorkspaceSourc
 import { LocalLink } from "./local-link";
 import { checkFormat, emptyWorkspace, toCalendarDto, WORKSPACE_FORMAT, WORKSPACE_VERSION, type ProjectRecord, type StoredHoliday, type StoredResource, type WorkspaceRecord } from "./records";
 import type { LocalStore } from "./store";
-import { validation } from "./validation";
+import { validation, type Validation } from "./validation";
 
 export const AVATAR_COLORS = ["#4f8cff", "#a66cff", "#ff6fae", "#ff8a4c", "#2fbf71", "#1fb5c9", "#f5b82e", "#8a94a6"];
 export const MAX_HIGHLIGHTS = 1_000;
@@ -460,11 +460,21 @@ export class LocalSource implements WorkspaceSource {
 
   /** A message from a board's link: join/leave, or an edit/undo/redo answered with ack or reject. */
   private async receive(link: LocalLink, data: string): Promise<void> {
-    const { protocol } = await validation();
     let parsed: unknown;
     try {
       parsed = JSON.parse(data);
     } catch {
+      return;
+    }
+    let protocol: Validation["protocol"];
+    try {
+      ({ protocol } = await validation());
+    } catch {
+      // Answer anyway, so the board doesn't wait for an edit that will never be saved.
+      const message = "Part of GanttLines couldn't be loaded — check your connection and reload the page";
+      const commandId = (parsed as { commandId?: unknown } | null)?.commandId;
+      if (typeof commandId === "string") link.deliver({ type: "reject", commandId, error: "unavailable", message });
+      else link.deliver({ type: "error", message });
       return;
     }
     const result = protocol.ClientMessage.safeParse(parsed);

@@ -1,4 +1,4 @@
-import type { ClientMessage, ServerMessage } from "@ganttlines/protocol";
+import type { ClientMessage, ProjectDto, ServerMessage } from "@ganttlines/protocol";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { SocketLike, WorkspaceSource } from "../src/source";
 
@@ -34,6 +34,25 @@ const CREATE = "22222222-2222-4222-8222-222222222222";
 const UNDO = "33333333-3333-4333-8333-333333333333";
 const REDO = "55555555-5555-4555-8555-555555555555";
 const AGAIN = "66666666-6666-4666-8666-666666666666";
+
+/** A workspace with something of everything: a board with rows, a baseline, a location, time off, other working days. */
+export async function fillWorkspace(source: WorkspaceSource): Promise<ProjectDto> {
+  const project = await source.createProject({ name: "Launch" });
+  const lisbon = await source.saveLocation({ name: "Lisbon", country: "PT" });
+  const ana = await source.createResource({ name: "Ana" });
+  await source.updateResource(ana.id, { locationId: lisbon.id });
+  await source.saveTimeOff({ resourceId: ana.id, startDate: "2026-10-12", endDate: "2026-10-13", note: "away" });
+  await source.setWorkingWeekdays([1, 2, 3, 4]);
+  const link = source.openBoard(project.id).openLink();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  link.send(JSON.stringify({ type: "join", projectId: project.id, version: 0 }));
+  link.send(JSON.stringify({ type: "command", commandId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", command: { type: "createRow", id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", kind: "task", parentId: null, afterId: null, title: "Design", start: "2026-10-05" } }));
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  await source.createBaseline(project.id, "Kick-off");
+  await source.saveHighlight(project.id, { date: "2026-10-09", label: "Demo", color: "#e5892f" });
+  link.close();
+  return project;
+}
 
 /**
  * What every workspace source must do, whatever stores the data. `setup` gives a fresh, empty

@@ -2,6 +2,7 @@ import { LocalSource } from "@ganttlines/client";
 import { IDBFactory } from "fake-indexeddb";
 import { describe, expect, it } from "vitest";
 import { IndexedDbStore } from "../src/workspace/indexed-db-store";
+import { fillWorkspace } from "@ganttlines/client/testing";
 
 describe("the workspace in IndexedDB", () => {
   it("is there again on the next visit (a new store on the same database)", async () => {
@@ -14,6 +15,15 @@ describe("the workspace in IndexedDB", () => {
     expect(await again.listProjects()).toEqual(await first.listProjects());
     expect(await again.resources()).toEqual(await first.resources());
     expect(await again.highlights(project.id)).toEqual(await first.highlights(project.id));
+  });
+
+  it("gives back everything — rows, baselines, calendar — when reopened", async () => {
+    const factory = new IDBFactory();
+    const first = await LocalSource.open(new IndexedDbStore("full", factory));
+    await fillWorkspace(first);
+    const contents = (source: LocalSource) => ({ ...source.exportFile(), exportedAt: "" });
+    expect(contents(first).projects[0]?.baselines).toHaveLength(1);
+    expect(contents(await LocalSource.open(new IndexedDbStore("full", factory)))).toEqual(contents(first));
   });
 
   it("deletes projects and replaces everything at once", async () => {

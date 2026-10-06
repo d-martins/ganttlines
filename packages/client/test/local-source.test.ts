@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { checkFormat, emptyWorkspace, toCalendarDto } from "../src/local/records";
 import { MemoryStore } from "../src/local/store";
 import { validation } from "../src/local/validation";
-import { workspaceContract } from "../testing/contract";
+import { fillWorkspace, workspaceContract } from "../testing/contract";
 import { LocalSource } from "../src/local/local-source";
 import type { ServerMessage } from "@ganttlines/protocol";
 
@@ -47,7 +47,17 @@ describe("the browser as a workspace source", () => {
   workspaceContract(async () => LocalSource.open(new MemoryStore()));
 });
 
+const contents = (source: LocalSource) => ({ ...source.exportFile(), exportedAt: "" });
+
 describe("local workspace storage", () => {
+  it("gives back everything — rows, baselines, calendar — when reopened", async () => {
+    const store = new MemoryStore();
+    const first = await LocalSource.open(store);
+    await fillWorkspace(first);
+    expect(contents(first).projects[0]?.rows).toHaveLength(1);
+    expect(contents(await LocalSource.open(store))).toEqual(contents(first));
+  });
+
   it("keeps everything for the next visit", async () => {
     const store = new MemoryStore();
     const first = await LocalSource.open(store);
@@ -73,6 +83,7 @@ describe("local workspace storage", () => {
     const project = await source.createProject({ name: "Launch" });
     expect(await source.listProjects()).toEqual([expect.objectContaining({ id: project.id })]);
     expect(errors).toHaveLength(1);
+    expect(source.exportFile().projects).toEqual([expect.objectContaining({ id: project.id })]);
   });
 
   it("gives team members the next color in turn, and checks requests like the server", async () => {
