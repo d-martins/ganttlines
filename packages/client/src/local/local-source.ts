@@ -31,11 +31,12 @@ import type {
   TimeOffDto,
   UpdateProjectBody,
   UpdateResourceBody,
+  WorkspaceFile,
 } from "@ganttlines/protocol";
 import { ApiError } from "../api";
 import type { BoardConnection, CountryDto, WorkspaceCapabilities, WorkspaceSource } from "../source";
 import { LocalLink } from "./local-link";
-import { checkFormat, emptyWorkspace, toCalendarDto, type ProjectRecord, type StoredHoliday, type StoredResource, type WorkspaceRecord } from "./records";
+import { checkFormat, emptyWorkspace, toCalendarDto, WORKSPACE_FORMAT, WORKSPACE_VERSION, type ProjectRecord, type StoredHoliday, type StoredResource, type WorkspaceRecord } from "./records";
 import type { LocalStore } from "./store";
 import { validation } from "./validation";
 
@@ -229,6 +230,41 @@ export class LocalSource implements WorkspaceSource {
     return [...project.baselines]
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
       .map((baseline) => ({ id: baseline.id, name: baseline.name, createdAt: baseline.createdAt, createdBy: baseline.createdBy }));
+  }
+
+  /** The whole workspace as a file (what Export saves). */
+  exportFile(): WorkspaceFile {
+    const { workingWeekdays, team, locations, holidays, timeOff } = copy(this.workspace);
+    const projects = [...this.projects.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map((project) => copy(project));
+    return { format: WORKSPACE_FORMAT, version: WORKSPACE_VERSION, exportedAt: this.now().toISOString(), workingWeekdays, team, locations, holidays, timeOff, projects } as WorkspaceFile;
+  }
+
+  /** Replaces the whole workspace with a (checked) file's: open boards end, undo history starts afresh. */
+  replaceWith(file: WorkspaceFile): Promise<void> {
+    return this.serial(async () => {
+      this.workspace = {
+        format: WORKSPACE_FORMAT,
+        version: WORKSPACE_VERSION,
+        instanceVersion: this.workspace.instanceVersion + 1,
+        workingWeekdays: [...file.workingWeekdays],
+        team: copy(file.team),
+        locations: copy(file.locations),
+        holidays: copy(file.holidays),
+        timeOff: copy(file.timeOff),
+      };
+      this.calendarCache = null;
+      this.projects.clear();
+      for (const project of copy(file.projects) as ProjectRecord[]) this.projects.set(project.id, project);
+      this.history.clear();
+      await this.persist(() => this.store.replaceAll(this.workspace, [...this.projects.values()]));
+      for (const link of [...this.links]) link.close(CLOSE_PROJECT_DELETED);
+    });
+  }
+
+  /** Empties the workspace (Clear workspace). */
+  clear(): Promise<void> {
+    const empty = emptyWorkspace();
+    return this.replaceWith({ format: WORKSPACE_FORMAT, version: WORKSPACE_VERSION, exportedAt: this.now().toISOString(), workingWeekdays: empty.workingWeekdays, team: [], locations: [], holidays: [], timeOff: [], projects: [] } as WorkspaceFile);
   }
 
   // —— the team calendar ——

@@ -4,3 +4,4 @@ export type { BoardConnection, CountryDto, SocketLike, WorkspaceCapabilities, Wo
 export { LocalSource, type LocalSourceOptions } from "./local/local-source";
 export { MemoryStore, type LocalStore, type StoredWorkspace } from "./local/store";
 export { WORKSPACE_FORMAT, WORKSPACE_VERSION, type ProjectRecord, type WorkspaceRecord } from "./local/records";
+export { MAX_FILE_BYTES, readWorkspaceFile } from "./local/workspace-file";
