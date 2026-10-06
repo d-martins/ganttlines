@@ -240,6 +240,8 @@ GanttLines also works with no account, keeping everything in the browser:
   workspace in their browser (nothing is stored on the server); signing in shows the server's.
 - **As a static site:** `yarn workspace @ganttlines/web build:local` builds the app with no server at
   all, into `apps/web/dist-local` — host it anywhere that serves static files.
+  Set `VITE_SIGN_IN_URL` when building (e.g. `VITE_SIGN_IN_URL=https://app.example.com/login`) to
+  show a "Sign in" link to a GanttLines server elsewhere.
 
 A local workspace lives only in that browser (Settings → Export saves a copy; Import opens one).
 Clearing the browser's site data deletes it, and Safari clears it after about 7 days without a visit.

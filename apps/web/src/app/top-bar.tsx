@@ -11,6 +11,7 @@ import { useTheme, type ThemePreference } from "../theme";
 import { Avatar } from "../ui/avatar";
 import { Menu, MenuItem, MenuLabel, MenuRadio, MenuSeparator } from "../ui/menu";
 import { ThemeToggle } from "./theme-toggle";
+import { signInElsewhere } from "../workspace";
 import { LOCAL_PERSON } from "../workspace/local";
 
 /** Stand-in store while no board is open (hooks can't be skipped). */
@@ -34,6 +35,7 @@ export function TopBar({ user, signIn, signOutTo }: { user: UserDto; signIn: boo
   const resources = useQuery({ ...resourceList, enabled: user.role !== "guest" });
   const color = resources.data?.find((resource) => resource.userId === user.id)?.avatarColor ?? "#5b6474";
   const board = useActiveBoard((state) => state.sync);
+  const elsewhere = signInElsewhere();
   // While switching projects the previous board is still registered: only trust the one shown.
   const shownBoard = board && board.projectId === params.projectId ? board : null;
   const boardName = useStore(shownBoard?.store ?? EMPTY, (state) => state?.project?.name);
@@ -56,6 +58,10 @@ export function TopBar({ user, signIn, signOutTo }: { user: UserDto; signIn: boo
             <Link to="/login" className="rounded-md px-2 py-1 text-sm font-medium hover:bg-surface-2">
               Sign in
             </Link>
+          ) : elsewhere ? (
+            <a href={elsewhere} className="rounded-md px-2 py-1 text-sm font-medium hover:bg-surface-2">
+              Sign in
+            </a>
           ) : null
         ) : (
           <Menu

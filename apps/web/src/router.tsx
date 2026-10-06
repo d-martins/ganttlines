@@ -9,7 +9,8 @@ import { HomeRedirect } from "./projects/project-pages";
 import { SettingsPage } from "./settings/settings-page";
 import { SharePage } from "./share/share-page";
 import { TeamPage } from "./team/team-page";
-import { localOnly } from "./workspace";
+import { leaveTo } from "./app/leave";
+import { localOnly, signInElsewhere } from "./workspace";
 
 const rootRoute = createRootRoute({ component: Outlet });
 /** Pages about accounts and servers: the local-only build has neither, so they lead home. */
@@ -19,7 +20,14 @@ const needsServer = {
   },
 };
 const setupRoute = createRoute({ ...needsServer, getParentRoute: () => rootRoute, path: "/setup", component: SetupPage });
-const loginRoute = createRoute({ ...needsServer,
+const loginRoute = createRoute({
+  // The local-only build may name a sign-in elsewhere; otherwise it has none.
+  beforeLoad: () => {
+    if (!localOnly()) return;
+    const elsewhere = signInElsewhere();
+    if (elsewhere) leaveTo(elsewhere);
+    throw redirect({ to: "/" });
+  },
   getParentRoute: () => rootRoute,
   path: "/login",
   component: LoginPage,
