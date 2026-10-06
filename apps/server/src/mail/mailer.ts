@@ -28,6 +28,8 @@ export function smtpMailer(settings: SmtpSettings): Mailer {
     host: settings.host,
     port: settings.port,
     secure: settings.secure,
+    // A password never goes out unencrypted: without TLS from the start, STARTTLS is required.
+    requireTLS: !settings.secure && settings.user !== null,
     ...(settings.user ? { auth: { user: settings.user, pass: settings.password ?? "" } } : {}),
     connectionTimeout: 10_000,
     greetingTimeout: 10_000,
