@@ -1,13 +1,13 @@
 import type { LocalSource } from "@ganttlines/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Navigate, Outlet, useRouterState } from "@tanstack/react-router";
-import { useEffect, useLayoutEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { errorMessage } from "../api/client";
 import { currentUser, keys, setupStatus } from "../api/queries";
 import { Button } from "../ui/button";
-import { Toaster } from "../ui/toast";
+import { toast, Toaster } from "../ui/toast";
 import { forgetWorkspaceCache, localOnly, serverSource, useWorkspace } from "../workspace";
-import { LOCAL_PERSON, reopenLocalWorkspace, useStorageStatus } from "../workspace/local";
+import { LOCAL_PERSON, reopenLocalWorkspace, settleLocalWorkspace, stopLocalWorkspace, useStorageStatus } from "../workspace/local";
 import { LocalWorkspaceProblem, OpenElsewhere, StorageBanner } from "../workspace/local-screens";
 import { useTabLock } from "../workspace/tab-lock";
 import { Sidebar } from "./sidebar";
@@ -36,6 +36,9 @@ function useLocalSource(held: boolean, grant: number) {
   return { ...state, retry: () => setAttempt((n) => n + 1) };
 }
 
+/** Another tab gets the workspace only after this tab's changes are stored; a tab that lost it stops writing. */
+const LOCK_HANDOVER = { beforeRelease: settleLocalWorkspace, onStolen: stopLocalWorkspace };
+
 /**
  * The app shell. Signed in: the server's workspace (setup, login, password change and two-factor
  * setup come first). Not signed in: this browser's workspace in the local-only build, or on a server
@@ -52,21 +55,38 @@ export function AppLayout() {
   const returnTo = here === "/" || onAuthPage ? undefined : here;
   const visitorsWorkLocally = setup.data?.localForVisitors === true;
   const wantLocal = onlyLocal || me.data?.id === LOCAL_PERSON.id || (me.data === null && visitorsWorkLocally);
-  const lock = useTabLock(wantLocal);
+  const lock = useTabLock(wantLocal, LOCK_HANDOVER);
   const local = useLocalSource(wantLocal && lock.state === "held", lock.grant);
   const wanted = wantLocal ? local.source : serverSource;
   const active = useWorkspace((state) => state.source);
   const storageFailed = useStorageStatus((state) => state.failed);
 
-  // In this browser's workspace an edit is saved by this tab: closing it first would lose the edit.
+  // In this browser's workspace an edit is saved by this tab: closing it first would lose the edit
+  // (and everything, when nothing can be saved).
   useEffect(() => {
     if (!wantLocal) return;
     const warn = (event: BeforeUnloadEvent) => {
-      if (useActiveBoard.getState().sync?.state.pending.some((entry) => entry.ackVersion === null)) event.preventDefault();
+      const unsaved = useActiveBoard.getState().sync?.state.pending.some((entry) => entry.ackVersion === null);
+      if (!unsaved && !useStorageStatus.getState().failed) return;
+      event.preventDefault();
+      event.returnValue = ""; // older browsers ask only when this is set
     };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [wantLocal]);
+
+  // A session that ran out (not signing out, which forgets who was signed in first) lands in the
+  // browser's workspace: say why the screen changed.
+  const signedInAs = useRef<string | null>(null);
+  useEffect(() => {
+    const user = me.data;
+    if (user === undefined) signedInAs.current = null;
+    else if (user && user.id !== LOCAL_PERSON.id) signedInAs.current = user.id;
+    else if (signedInAs.current && visitorsWorkLocally) {
+      signedInAs.current = null;
+      toast("You were signed out. This is the workspace kept in this browser — sign in to get back to the server's.");
+    }
+  }, [me.data, visitorsWorkLocally]);
 
   // Switch workspaces before anything below asks for data, and forget the other workspace's data.
   useLayoutEffect(() => {
@@ -103,7 +123,7 @@ export function AppLayout() {
     <div className="flex h-full">
       <Sidebar user={me.data} />
       <div className="flex min-w-0 flex-1 flex-col">
-        {wantLocal && storageFailed ? <StorageBanner /> : null}
+        {wantLocal && storageFailed ? <StorageBanner problem={storageFailed} /> : null}
         <TopBar user={me.data} signIn={wantLocal && visitorsWorkLocally} signOutTo={visitorsWorkLocally ? "/" : "/login"} />
         <main className="min-h-0 flex-1 overflow-auto">
           <Outlet />

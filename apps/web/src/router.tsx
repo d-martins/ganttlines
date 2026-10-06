@@ -1,4 +1,4 @@
-import { createRootRoute, createRoute, createRouter, Outlet, type RouterHistory } from "@tanstack/react-router";
+import { createRootRoute, createRoute, createRouter, Outlet, redirect, type RouterHistory } from "@tanstack/react-router";
 import { AppLayout } from "./app/app-layout";
 import { ErrorScreen } from "./app/error-screen";
 import { ChangePasswordPage, ChoosePasswordPage, ForgotPasswordPage, LoginPage, SetupPage, SetUpTwoFactorPage } from "./auth/auth-pages";
@@ -9,10 +9,17 @@ import { HomeRedirect } from "./projects/project-pages";
 import { SettingsPage } from "./settings/settings-page";
 import { SharePage } from "./share/share-page";
 import { TeamPage } from "./team/team-page";
+import { localOnly } from "./workspace";
 
 const rootRoute = createRootRoute({ component: Outlet });
-const setupRoute = createRoute({ getParentRoute: () => rootRoute, path: "/setup", component: SetupPage });
-const loginRoute = createRoute({
+/** Pages about accounts and servers: the local-only build has neither, so they lead home. */
+const needsServer = {
+  beforeLoad: () => {
+    if (localOnly()) throw redirect({ to: "/" });
+  },
+};
+const setupRoute = createRoute({ ...needsServer, getParentRoute: () => rootRoute, path: "/setup", component: SetupPage });
+const loginRoute = createRoute({ ...needsServer,
   getParentRoute: () => rootRoute,
   path: "/login",
   component: LoginPage,
@@ -23,17 +30,17 @@ const loginRoute = createRoute({
     ...(typeof search["error"] === "string" ? { error: search["error"] } : {}),
   }),
 });
-const forgotPasswordRoute = createRoute({ getParentRoute: () => rootRoute, path: "/forgot-password", component: ForgotPasswordPage });
+const forgotPasswordRoute = createRoute({ ...needsServer, getParentRoute: () => rootRoute, path: "/forgot-password", component: ForgotPasswordPage });
 /** `?token=…` from an emailed invitation or reset link. */
-const choosePasswordRoute = createRoute({
+const choosePasswordRoute = createRoute({ ...needsServer,
   getParentRoute: () => rootRoute,
   path: "/reset-password",
   component: ChoosePasswordPage,
   validateSearch: (search: Record<string, unknown>): { token?: string } => (typeof search["token"] === "string" ? { token: search["token"] } : {}),
 });
-const changePasswordRoute = createRoute({ getParentRoute: () => rootRoute, path: "/change-password", component: ChangePasswordPage });
+const changePasswordRoute = createRoute({ ...needsServer, getParentRoute: () => rootRoute, path: "/change-password", component: ChangePasswordPage });
 /** An AI app's "Allow access?" step (`?request=…` signed by the server, or `?error=…`). */
-const connectRoute = createRoute({
+const connectRoute = createRoute({ ...needsServer,
   getParentRoute: () => rootRoute,
   path: "/connect",
   component: ConnectPage,
@@ -42,7 +49,7 @@ const connectRoute = createRoute({
     ...(typeof search["error"] === "string" ? { error: search["error"] } : {}),
   }),
 });
-const setUpTwoFactorRoute = createRoute({ getParentRoute: () => rootRoute, path: "/set-up-two-factor", component: SetUpTwoFactorPage });
+const setUpTwoFactorRoute = createRoute({ ...needsServer, getParentRoute: () => rootRoute, path: "/set-up-two-factor", component: SetUpTwoFactorPage });
 const appRoute = createRoute({ getParentRoute: () => rootRoute, id: "app", component: AppLayout });
 const homeRoute = createRoute({ getParentRoute: () => appRoute, path: "/", component: HomeRedirect });
 /** `?baseline=<id>&compare=switch`: only well-formed values are kept. */
@@ -64,7 +71,7 @@ const boardRoute = createRoute({
   validateSearch: validateBoardSearch,
 });
 /** A board opened through a share link: outside the signed-in layout (no sidebar; may be anonymous). */
-const shareRoute = createRoute({ getParentRoute: () => rootRoute, path: "/s/$token", component: SharePage, validateSearch: validateBoardSearch });
+const shareRoute = createRoute({ ...needsServer, getParentRoute: () => rootRoute, path: "/s/$token", component: SharePage, validateSearch: validateBoardSearch });
 const teamRoute = createRoute({ getParentRoute: () => appRoute, path: "/team", component: TeamPage });
 const settingsRoute = createRoute({ getParentRoute: () => appRoute, path: "/settings", component: SettingsPage });
 

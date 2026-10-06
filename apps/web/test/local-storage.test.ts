@@ -53,7 +53,29 @@ describe("storing the workspace in the browser", () => {
     const source = await openLocalWorkspace();
     await source.createProject({ name: "Still works" });
     expect(await source.listProjects()).toEqual([expect.objectContaining({ name: "Still works" })]);
-    expect(useStorageStatus.getState().failed).toBe(true);
+    expect(useStorageStatus.getState().failed).toBe("unavailable");
     vi.unstubAllGlobals();
+  });
+
+  it("tells a workspace that couldn't be opened apart from a browser that can't store anything", async () => {
+    vi.stubGlobal("indexedDB", {
+      open: () => {
+        throw new Error("Connection to Indexed Database server lost");
+      },
+    });
+    const source = await openLocalWorkspace();
+    expect(await source.listProjects()).toEqual([]);
+    expect(useStorageStatus.getState().failed).toBe("open");
+    vi.unstubAllGlobals();
+  });
+
+  it("stops writing once another tab has taken over (its copy is the one kept)", async () => {
+    const memory = new MemoryStore();
+    const store = new PersistingStore(memory, async () => true);
+    const source = await LocalSource.open(store);
+    await source.createProject({ name: "Before" });
+    store.stop();
+    await source.createProject({ name: "After" });
+    expect((await memory.load()).projects.map((project) => project.name)).toEqual(["Before"]);
   });
 });

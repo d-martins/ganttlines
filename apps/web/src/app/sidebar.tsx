@@ -2,7 +2,7 @@ import type { UserDto } from "@ganttlines/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { about } from "../api/queries";
-import { ChevronsLeft, ChevronsRight, FolderKanban, Settings, Users } from "lucide-react";
+import { ChevronsLeft, ChevronsRight, FolderKanban, HardDrive, Settings, Users } from "lucide-react";
 import { SidebarProjects } from "../projects/sidebar-projects";
 import { IconButton } from "../ui/button";
 import { useSidebar } from "./sidebar-store";
@@ -29,7 +29,10 @@ export function Sidebar({ user }: { user: UserDto }) {
         </IconButton>
         {user.role !== "guest" ? <RailLink to="/team" label="Team & calendar" icon={<Users size={18} />} /> : null}
         <RailLink to="/settings" label={update ? `Settings (GanttLines ${update} is available)` : "Settings"} icon={<Settings size={18} />} dot={Boolean(update)} />
-        <div className="mt-auto">{toggleButton}</div>
+        <div className="mt-auto flex flex-col items-center gap-1">
+          {capabilities.accounts ? null : <RailLink to="/settings" label="Saved in this browser only · Export" icon={<HardDrive size={18} />} />}
+          {toggleButton}
+        </div>
       </nav>
     );
   }
@@ -61,12 +64,12 @@ export function Sidebar({ user }: { user: UserDto }) {
         </section>
       </div>
       {capabilities.accounts ? null : (
-          <p className="px-3 py-2 text-xs text-muted">
-            Saved in this browser only ·{" "}
-            <Link to="/settings" className="underline">
-              Export
-            </Link>
-          </p>
+        <p className="px-3 py-2 text-xs text-muted">
+          Saved in this browser only ·{" "}
+          <Link to="/settings" className="underline">
+            Export
+          </Link>
+        </p>
       )}
       <div className="flex justify-end p-2">{toggleButton}</div>
     </nav>

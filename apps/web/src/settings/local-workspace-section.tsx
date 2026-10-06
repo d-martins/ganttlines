@@ -18,7 +18,8 @@ function download(file: WorkspaceFile): void {
   link.href = url;
   link.download = `ganttlines-${file.exportedAt.slice(0, 10)}.ganttlines.json`;
   link.click();
-  URL.revokeObjectURL(url);
+  // Some browsers start the download only after the click returns.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 /** Export, import (replacing) and clear the workspace kept in this browser. */

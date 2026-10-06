@@ -72,6 +72,15 @@ describe("local workspace storage", () => {
     expect(await again.highlights(project.id)).toEqual(await first.highlights(project.id));
   });
 
+  it("says when every change asked for so far is stored", async () => {
+    const store = new MemoryStore();
+    const source = await LocalSource.open(store);
+    void source.createProject({ name: "Launch" }); // the first change waits for the request checks to load
+    void source.createProject({ name: "Garden" });
+    await source.idle();
+    expect((await store.load()).projects.map((project) => project.name).sort()).toEqual(["Garden", "Launch"]);
+  });
+
   it("keeps working in memory when a change can't be saved, and says so", async () => {
     class FullStore extends MemoryStore {
       override async saveProject(): Promise<void> {

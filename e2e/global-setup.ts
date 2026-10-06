@@ -2,11 +2,11 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { extname, join } from "node:path";
+import { extname, join, sep } from "node:path";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
 import { GenericContainer, Wait } from "testcontainers";
-import { BASE_URL, BASE_URL_2, OIDC_PORT, PORT, PORT_2 } from "./support";
-import { createServer } from "node:http";
+import { BASE_URL, BASE_URL_2, LOCAL_URL, OIDC_PORT, PORT, PORT_2 } from "./support";
+import { createServer, type Server } from "node:http";
 import { readFile } from "node:fs/promises";
 
 const ROOT = join(__dirname, "..");
@@ -90,7 +90,16 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     throw new Error(`${(error as Error).message}\n--- server output ---\n${output}`);
   }
 
-  const staticServer = serveLocalBuild();
+  let staticServer: Server;
+  try {
+    staticServer = await serveLocalBuild();
+  } catch (error) {
+    await Promise.all([stop(server), stop(server2!)]);
+    provider.kill();
+    await mailpit.stop();
+    await database.stop();
+    throw error;
+  }
 
   return async () => {
     staticServer.close();
@@ -124,15 +133,22 @@ const LOCAL_DIR = join(ROOT, "apps/web/dist-local");
 const TYPES: Record<string, string> = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".json": "application/json" };
 
 /** The local-only build on a plain static server (any path that isn't a file gets index.html). */
-function serveLocalBuild() {
-  return createServer(async (request, response) => {
+async function serveLocalBuild(): Promise<Server> {
+  const server = createServer(async (request, response) => {
     const path = decodeURIComponent((request.url ?? "/").split("?")[0]!);
     const file = path.startsWith("/assets/") ? join(LOCAL_DIR, path) : join(LOCAL_DIR, "index.html");
+    if (!file.startsWith(LOCAL_DIR + sep)) return void response.writeHead(404).end();
     try {
       const body = await readFile(file);
       response.writeHead(200, { "content-type": TYPES[extname(file)] ?? "application/octet-stream" }).end(body);
     } catch {
       response.writeHead(404).end();
     }
-  }).listen(3220, "127.0.0.1");
+  });
+  const { port, hostname } = new URL(LOCAL_URL);
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject); // e.g. the port is taken
+    server.listen(Number(port), hostname === "localhost" ? "127.0.0.1" : hostname, resolve);
+  });
+  return server;
 }

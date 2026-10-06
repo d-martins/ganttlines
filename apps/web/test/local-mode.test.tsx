@@ -1,6 +1,6 @@
 import { LocalSource } from "@ganttlines/client";
 import { IDBFactory } from "fake-indexeddb";
-import { waitFor } from "@testing-library/react";
+import { act, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { forgetLocalWorkspace, useStorageStatus } from "../src/workspace/local";
 import { serverSource, useWorkspace } from "../src/workspace";
@@ -211,11 +211,14 @@ describe("local mode", () => {
   it("exports the workspace to a file", async () => {
     const saved: Blob[] = [];
     // jsdom has no object URLs: add them (only them — the app still needs URL itself).
-    Object.assign(URL, { createObjectURL: (blob: Blob) => (saved.push(blob), "blob:x"), revokeObjectURL: () => undefined });
+    const revoked: string[] = [];
+    Object.assign(URL, { createObjectURL: (blob: Blob) => (saved.push(blob), "blob:x"), revokeObjectURL: (url: string) => revoked.push(url) });
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
     const { user } = await settingsWithProject("Garden");
     await user.click(screen.getByRole("button", { name: "Export" }));
     expect(click).toHaveBeenCalled();
+    expect(revoked).toEqual([]); // some browsers start the download after the click returns
+    await waitFor(() => expect(revoked).toEqual(["blob:x"]), { timeout: 2000 });
     expect(JSON.parse(await saved[0]!.text())).toMatchObject({ format: "ganttlines-workspace", projects: [expect.objectContaining({ name: "Garden" })] });
   });
 
@@ -252,5 +255,71 @@ describe("local mode", () => {
     visitorServer();
     renderApp("/");
     expect(await screen.findByText(/Saved in this browser only/)).toBeInTheDocument();
+  });
+
+  it("on the board, says when changes aren't being saved, and asks before the tab closes", async () => {
+    visitorServer();
+    const { user } = renderApp("/");
+    await user.click(await screen.findByRole("button", { name: "New project" }));
+    await user.type(screen.getByLabelText("New project name"), "Garden{Enter}");
+    await user.click(await screen.findByRole("link", { name: "Garden" }));
+    expect(await screen.findByRole("status", { name: "Saved in this browser" })).toBeInTheDocument();
+    const leaving = () => {
+      const event = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    expect(leaving()).toBe(false);
+    act(() => useStorageStatus.setState({ failed: "save" }));
+    expect(await screen.findByRole("status", { name: "Not saved — export to keep" })).toBeInTheDocument();
+    expect(leaving()).toBe(true);
+  });
+
+  it("says saved work may come back when the browser's storage couldn't be opened", async () => {
+    vi.stubGlobal("indexedDB", {
+      open: () => {
+        throw new Error("Connection to Indexed Database server lost");
+      },
+    });
+    visitorServer();
+    renderApp("/");
+    expect(await screen.findByRole("alert")).toHaveTextContent(/reload the page/);
+  });
+
+  it("says so when a session runs out and the browser's workspace takes over", async () => {
+    let signedIn = true;
+    fakeApi({
+      "GET /api/setup": () => ({ body: { needsSetup: false, localForVisitors: true } }),
+      "GET /api/auth/me": () => (signedIn ? { body: { user: ADMIN } } : signedOut),
+      "GET /api/projects": () => ({ body: { projects: [] } }),
+      "POST /api/projects": () => signedOut,
+    });
+    const { user } = renderApp("/");
+    await user.click(await screen.findByRole("button", { name: "New project" }));
+    signedIn = false;
+    await user.type(screen.getByLabelText("New project name"), "Late{Enter}");
+    expect(await screen.findByText(/You were signed out/)).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "Sign in" })).toBeInTheDocument();
+  });
+
+  it("has no sign-in pages in the local-only build", async () => {
+    vi.stubEnv("VITE_WORKSPACE", "local");
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", async (input: string) => {
+      calls.push(String(input));
+      throw new Error("no server here");
+    });
+    const { router } = renderApp("/login");
+    await waitFor(() => expect(router.state.location.pathname).toBe("/"));
+    expect((await screen.findAllByText("No projects yet.")).length).toBeGreaterThan(0);
+    expect(calls).toEqual([]);
+  });
+
+  it("keeps the reminder in the collapsed sidebar", async () => {
+    visitorServer();
+    const { user } = renderApp("/");
+    await user.click(await screen.findByRole("button", { name: "Collapse sidebar" }));
+    expect(screen.getByRole("link", { name: /Saved in this browser only/ })).toHaveAttribute("href", "/settings");
+    await user.click(screen.getByRole("button", { name: "Expand sidebar" }));
   });
 });

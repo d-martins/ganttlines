@@ -22,6 +22,7 @@ import { formatDay, today } from "./format";
 import { ShareDialog } from "./share-dialog";
 import { useBoardView } from "./view-store";
 import { useCapabilities, useWorkspace } from "../workspace";
+import { useStorageStatus } from "../workspace/local";
 
 const ZOOMS: { value: Zoom; label: string }[] = [
   { value: "day", label: "Day" },
@@ -204,8 +205,9 @@ function Connection({ sync }: { sync: BoardSync }) {
   const status = useStore(sync.store, (state) => state.status);
   // Edits are saved in this tab: say when one isn't saved yet (closing the tab now would lose it).
   const saving = useStore(sync.store, (state) => state.pending.some((entry) => entry.ackVersion === null));
+  const notStored = useStorageStatus((state) => state.failed !== false);
   if (local) {
-    const text = saving ? "Saving…" : "Saved in this browser";
+    const text = notStored ? "Not saved — export to keep" : saving ? "Saving…" : "Saved in this browser";
     return (
       <span role="status" aria-label={text} className="ml-1 text-xs text-muted">
         {text}

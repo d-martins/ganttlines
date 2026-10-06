@@ -258,16 +258,20 @@ export function DetailsPanel({ numbers }: { numbers: ReadonlyMap<RowId, number> 
           </button>
         ) : null}
       </Section>
-      {!capabilities.activity ? null : row.kind === "task" ? (
+      {row.kind === "task" && capabilities.comments && capabilities.activity ? (
         <ConversationTabs
           comments={<Comments projectId={sync.projectId} taskId={row.id} canComment={board.canComment} isAdmin={me.data?.role === "admin"} maxHeight={halfHeight} />}
           history={<Activity projectId={sync.projectId} rowId={row.id} names={{ state, resources: board.resourceMap }} />}
         />
-      ) : (
+      ) : row.kind === "task" && capabilities.comments ? (
+        <Section title="Comments">
+          <Comments projectId={sync.projectId} taskId={row.id} canComment={board.canComment} isAdmin={me.data?.role === "admin"} maxHeight={halfHeight} />
+        </Section>
+      ) : capabilities.activity ? (
         <Section title="History">
           <Activity projectId={sync.projectId} rowId={row.id} names={{ state, resources: board.resourceMap }} />
         </Section>
-      )}
+      ) : null}
     </aside>
   );
 }
