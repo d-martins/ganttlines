@@ -1,13 +1,15 @@
-import { createHash } from "node:crypto";
-import { existsSync, renameSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+/** The certificate files this process wrote, by folder and content. */
+const written = new Map<string, string>();
 
 /**
  * Managed PostgreSQL services (DigitalOcean, AWS, Azure …) sign their certificate with their own
  * authority. With its certificate in DATABASE_CA_CERT the connection is verified against it: the PEM
- * is written to a private file named after its content, and the URL points at it (`sslrootcert`),
- * which `pg`, libpq tools and (translated) Prisma all understand.
+ * is written to a private file (once per process), and the URL points at it (`sslrootcert`), which
+ * `pg`, libpq tools and (translated) Prisma all understand.
  */
 export function withDatabaseCa(databaseUrl: string, pem: string | undefined, dir = tmpdir()): string {
   const text = pem?.replace(/\r\n/g, "\n").trim();
@@ -18,12 +20,14 @@ export function withDatabaseCa(databaseUrl: string, pem: string | undefined, dir
   const url = new URL(databaseUrl);
   if (url.searchParams.has("sslrootcert") || url.searchParams.get("sslmode") === "disable") return databaseUrl;
   const content = `${text}\n`;
-  const file = join(dir, `ganttlines-db-ca-${createHash("sha256").update(content).digest("hex").slice(0, 16)}.pem`);
-  if (!existsSync(file)) {
-    // Written aside and renamed: another process never reads half a file.
-    const partial = `${file}.${process.pid}.tmp`;
-    writeFileSync(partial, content, { mode: 0o600 });
-    renameSync(partial, file);
+  const key = `${dir}\0${content}`;
+  let file = written.get(key);
+  if (!file) {
+    // A folder only this process can use: a file someone else left in the shared temporary
+    // folder is never trusted.
+    file = join(mkdtempSync(join(dir, "ganttlines-db-ca-")), "ca.pem");
+    writeFileSync(file, content, { mode: 0o600, flag: "wx" });
+    written.set(key, file);
   }
   url.searchParams.set("sslrootcert", file);
   return url.toString();

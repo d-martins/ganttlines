@@ -1,6 +1,7 @@
-import { mkdtempSync, readFileSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "../../src/config";
 import { prismaDatabaseUrl, withDatabaseCa } from "../../src/maintenance/database-ca";
@@ -29,9 +30,20 @@ describe("a managed database's certificate authority (DATABASE_CA_CERT)", () => 
     expect(readFileSync(file, "utf8")).toBe(PEM);
   });
 
-  it("uses the same file for the same certificate (restarts, several processes)", () => {
+  it("uses the same file for the same certificate within a process", () => {
     const where = dir();
     expect(withDatabaseCa(URL_, PEM, where)).toBe(withDatabaseCa(URL_, PEM, where));
+  });
+
+  it("never trusts a file someone else put in the shared temporary folder", () => {
+    const where = dir();
+    const planted = "-----BEGIN CERTIFICATE-----\nMIIBattacker\n-----END CERTIFICATE-----\n";
+    // The name can be worked out from the (public) certificate itself.
+    writeFileSync(join(where, `ganttlines-db-ca-${createHash("sha256").update(PEM).digest("hex").slice(0, 16)}.pem`), planted);
+    const file = new URL(withDatabaseCa(URL_, PEM, where)).searchParams.get("sslrootcert")!;
+    expect(readFileSync(file, "utf8")).toBe(PEM);
+    expect(dirname(file)).not.toBe(where); // a folder only this process created
+    expect(statSync(dirname(file)).mode & 0o777).toBe(0o700);
   });
 
   it("leaves an explicit sslrootcert, and a connection without TLS, alone", () => {
