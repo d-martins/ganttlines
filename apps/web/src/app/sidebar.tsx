@@ -6,12 +6,14 @@ import { ChevronsLeft, ChevronsRight, FolderKanban, Settings, Users } from "luci
 import { SidebarProjects } from "../projects/sidebar-projects";
 import { IconButton } from "../ui/button";
 import { useSidebar } from "./sidebar-store";
+import { useCapabilities } from "../workspace";
 
 /** Left sidebar: projects, Team and Settings. Collapses to an icon rail via the bottom-right button. */
 export function Sidebar({ user }: { user: UserDto }) {
   const { collapsed, toggle } = useSidebar();
   // Admins get a dot on Settings when a newer version is out.
-  const info = useQuery({ ...about, enabled: user.role === "admin" });
+  const capabilities = useCapabilities();
+  const info = useQuery({ ...about, enabled: user.role === "admin" && capabilities.serverSettings });
   const update = info.data?.updates?.available ? info.data.updates.latest?.version : undefined;
   const toggleButton = (
     <IconButton label={collapsed ? "Expand sidebar" : "Collapse sidebar"} onClick={toggle}>
