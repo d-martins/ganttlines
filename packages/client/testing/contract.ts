@@ -32,6 +32,8 @@ function listen(link: SocketLike) {
 const TASK = "11111111-1111-4111-8111-111111111111";
 const CREATE = "22222222-2222-4222-8222-222222222222";
 const UNDO = "33333333-3333-4333-8333-333333333333";
+const REDO = "55555555-5555-4555-8555-555555555555";
+const AGAIN = "66666666-6666-4666-8666-666666666666";
 
 /**
  * What every workspace source must do, whatever stores the data. `setup` gives a fresh, empty
@@ -98,6 +100,50 @@ export function workspaceContract(setup: () => Promise<WorkspaceSource>): void {
       live.send({ type: "undo", commandId: UNDO });
       expect(await live.next("ack", (message) => message.commandId === UNDO)).toMatchObject({ version: 2 });
       expect((await board.load()).rows).toEqual([]);
+      live.close();
+    });
+
+    it("redoes an undone edit", async () => {
+      const { board, live } = await projectWithTask();
+      live.send({ type: "undo", commandId: UNDO });
+      await live.next("ack", (message) => message.commandId === UNDO);
+      live.send({ type: "redo", commandId: REDO });
+      expect(await live.next("ack", (message) => message.commandId === REDO)).toMatchObject({ version: 3 });
+      expect((await board.load()).rows).toEqual([expect.objectContaining({ id: TASK, title: "Design" })]);
+      live.close();
+    });
+
+    it("rejects an edit that can't apply, and changes nothing", async () => {
+      const { board, live } = await projectWithTask();
+      live.send({
+        type: "command",
+        commandId: AGAIN,
+        command: { type: "createRow", id: TASK, kind: "task", parentId: null, afterId: null, title: "Twice", start: "2026-10-05" },
+      });
+      expect(await live.next("reject", (message) => message.commandId === AGAIN)).toMatchObject({ message: expect.any(String) });
+      expect(await board.load()).toMatchObject({ project: { version: 1 }, rows: [expect.objectContaining({ id: TASK, title: "Design" })] });
+      live.close();
+    });
+
+    it("catches up a link that joins behind (missed edits, or a reload)", async () => {
+      const { project, board, live } = await projectWithTask();
+      const late = listen(board.openLink());
+      await late.open;
+      late.send({ type: "join", projectId: project.id, version: 0 });
+      await late.next("joined");
+      const caughtUp = await Promise.race([
+        late.next("patch", (message) => message.version === 1).then((message) => message.type),
+        late.next("reload").then((message) => message.type),
+      ]);
+      expect(["patch", "reload"]).toContain(caughtUp);
+      late.close();
+      live.close();
+    });
+
+    it("tells an open board when its highlights change", async () => {
+      const { project, live } = await projectWithTask();
+      const demo = await source.saveHighlight(project.id, { date: "2026-10-09", label: "Demo", color: "#e5892f" });
+      expect(await live.next("highlights")).toMatchObject({ projectId: project.id, highlights: [expect.objectContaining({ id: demo.id })] });
       live.close();
     });
 
