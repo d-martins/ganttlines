@@ -7,36 +7,33 @@ import { currentUser, keys, setupStatus } from "../api/queries";
 import { Button } from "../ui/button";
 import { Toaster } from "../ui/toast";
 import { forgetWorkspaceCache, localOnly, serverSource, useWorkspace } from "../workspace";
-import { LOCAL_PERSON, openLocalWorkspace, reopenLocalWorkspace, useStorageStatus } from "../workspace/local";
+import { LOCAL_PERSON, reopenLocalWorkspace, useStorageStatus } from "../workspace/local";
 import { LocalWorkspaceProblem, OpenElsewhere, StorageBanner } from "../workspace/local-screens";
 import { useTabLock } from "../workspace/tab-lock";
 import { Sidebar } from "./sidebar";
 import { TopBar } from "./top-bar";
 import { useActiveBoard } from "../board/active-board";
 
-/** This browser's workspace, once wanted (opened again after another tab used it). */
-function useLocalSource(wanted: boolean) {
+/**
+ * This browser's workspace, read from storage each time this tab gets the lock (another tab may have
+ * changed it in between).
+ */
+function useLocalSource(held: boolean, grant: number) {
   const [state, setState] = useState<{ source?: LocalSource; error?: unknown }>({});
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
-    if (!wanted) return;
+    if (!held) return;
     let current = true;
-    openLocalWorkspace().then(
+    setState({});
+    reopenLocalWorkspace().then(
       (source) => current && setState({ source }),
       (error: unknown) => current && setState({ error }),
     );
     return () => {
       current = false;
     };
-  }, [wanted, attempt]);
-  return {
-    ...state,
-    retry: () => {
-      setState({});
-      setAttempt((n) => n + 1);
-    },
-    reopen: async () => setState({ source: await reopenLocalWorkspace() }),
-  };
+  }, [held, grant, attempt]);
+  return { ...state, retry: () => setAttempt((n) => n + 1) };
 }
 
 /**
@@ -55,10 +52,10 @@ export function AppLayout() {
   const returnTo = here === "/" || onAuthPage ? undefined : here;
   const visitorsWorkLocally = setup.data?.localForVisitors === true;
   const wantLocal = onlyLocal || me.data?.id === LOCAL_PERSON.id || (me.data === null && visitorsWorkLocally);
-  const local = useLocalSource(wantLocal);
+  const lock = useTabLock(wantLocal);
+  const local = useLocalSource(wantLocal && lock.state === "held", lock.grant);
   const wanted = wantLocal ? local.source : serverSource;
   const active = useWorkspace((state) => state.source);
-  const lock = useTabLock(wantLocal && local.source !== undefined);
   const storageFailed = useStorageStatus((state) => state.failed);
 
   // In this browser's workspace an edit is saved by this tab: closing it first would lose the edit.
@@ -97,10 +94,9 @@ export function AppLayout() {
   if (!onlyLocal && setup.data?.needsSetup) return <Navigate to="/setup" />;
   // Already heading to an auth page: navigating again would drop the return address.
   if (!wantLocal && !me.data) return onAuthPage ? null : <Navigate to="/login" search={returnTo ? { redirect: returnTo } : {}} />;
+  if (wantLocal && lock.state === "elsewhere") return <OpenElsewhere onUseHere={() => void lock.take()} />;
   if (wantLocal && local.error) return <LocalWorkspaceProblem error={local.error} onRetry={local.retry} />;
   if (!wanted || active !== wanted || !me.data) return loading;
-  if (wantLocal && lock.state === "elsewhere") return <OpenElsewhere onUseHere={() => void lock.take().then(local.reopen)} />;
-  if (wantLocal && lock.state === "checking") return loading;
   if (me.data.mustChangePassword) return <Navigate to="/change-password" />;
   if (me.data.mustSetUpTwoFactor) return <Navigate to="/set-up-two-factor" />;
   return (

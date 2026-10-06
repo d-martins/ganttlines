@@ -1,25 +1,43 @@
+import { LocalSource } from "@ganttlines/client";
 import { IDBFactory } from "fake-indexeddb";
 import { waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { forgetLocalWorkspace, useStorageStatus } from "../src/workspace/local";
 import { serverSource, useWorkspace } from "../src/workspace";
+import { IndexedDbStore } from "../src/workspace/indexed-db-store";
 import { ADMIN, fakeApi, renderApp, screen } from "./utils";
 
 /** Web Locks with one other tab: `held` says whether that tab holds the workspace. */
 class FakeLocks {
   holder: { reject: (error: unknown) => void } | null = null;
-  async request(_name: string, options: { ifAvailable?: boolean; steal?: boolean }, callback: (lock: unknown) => Promise<void>) {
+  async request(name: string, options: { ifAvailable?: boolean; steal?: boolean }, callback: (lock: unknown) => Promise<void>) {
+    await Promise.resolve(); // browsers grant locks later, never during the request
     if (this.holder && options.ifAvailable) return callback(null);
     if (this.holder && options.steal) {
       const previous = this.holder;
       this.holder = null;
       previous.reject(new DOMException("Lock stolen", "AbortError"));
     }
+    const mine = { reject: (_error: unknown) => undefined as void };
     return new Promise<void>((resolve, reject) => {
-      this.holder = { reject };
-      Promise.resolve(callback({ name: _name })).then(resolve, reject);
+      mine.reject = reject;
+      this.holder = mine;
+      Promise.resolve(callback({ name }))
+        .then(resolve, reject)
+        .finally(() => {
+          if (this.holder === mine) this.holder = null;
+        });
     });
   }
+}
+
+/** Another tab changing the workspace while it holds the lock. */
+async function inAnotherTab(locks: FakeLocks, name: string) {
+  await locks.request("ganttlines-workspace", { ifAvailable: true }, async (lock) => {
+    expect(lock).not.toBeNull();
+    const other = await LocalSource.open(new IndexedDbStore());
+    await other.createProject({ name });
+  });
 }
 
 const signedOut = { status: 401, body: { error: "unauthorized", message: "Please sign in" } };
@@ -101,17 +119,47 @@ describe("local mode", () => {
     expect(calls).toEqual([]);
   });
 
-  it("lets one tab edit at a time: another tab can take over", async () => {
+  it("lets one tab edit at a time: the tab that takes over sees the other tab's latest work", async () => {
     const locks = new FakeLocks();
-    locks.holder = { reject: () => undefined }; // another tab has it
+    let otherTab: () => void = () => undefined;
+    void locks.request("ganttlines-workspace", {}, () => new Promise<void>((done) => (otherTab = done)));
     Object.defineProperty(navigator, "locks", { value: locks, configurable: true });
     visitorServer();
     const { user } = renderApp("/");
     expect(await screen.findByText("GanttLines is open in another tab")).toBeInTheDocument();
+    otherTab(); // the other tab is closed
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await inAnotherTab(locks, "Planned elsewhere");
     await user.click(screen.getByRole("button", { name: "Use here" }));
-    expect((await screen.findAllByText("No projects yet.")).length).toBeGreaterThan(0);
-    locks.holder?.reject(new DOMException("Lock stolen", "AbortError")); // the other tab takes it back
+    expect(await screen.findByRole("link", { name: "Planned elsewhere" })).toBeInTheDocument();
+
+    locks.holder?.reject(new DOMException("Lock stolen", "AbortError")); // another tab takes it over…
+    locks.holder = null;
     expect(await screen.findByText("GanttLines is open in another tab")).toBeInTheDocument();
+    await inAnotherTab(locks, "Planned there too"); // …changes something, and is closed
+    await user.click(screen.getByRole("button", { name: "Use here" }));
+    expect(await screen.findByRole("link", { name: "Planned there too" })).toBeInTheDocument();
+  });
+
+  it("lets go of the workspace while signing in, and comes back to what other tabs saved meanwhile", async () => {
+    const locks = new FakeLocks();
+    Object.defineProperty(navigator, "locks", { value: locks, configurable: true });
+    fakeApi({
+      "GET /api/setup": () => ({ body: { needsSetup: false, localForVisitors: true } }),
+      "GET /api/auth/me": () => signedOut,
+      "GET /api/auth/providers": () => ({ body: { oidc: null, passwordReset: false } }),
+    });
+    const { user, router } = renderApp("/");
+    await user.click(await screen.findByRole("button", { name: "New project" }));
+    await user.type(screen.getByLabelText("New project name"), "Garden{Enter}");
+    expect(await screen.findByRole("link", { name: "Garden" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("link", { name: "Sign in" }));
+    expect(await screen.findByLabelText("Email")).toBeInTheDocument();
+    await inAnotherTab(locks, "Planned in another tab");
+    await router.navigate({ to: "/" });
+    expect(await screen.findByRole("link", { name: "Planned in another tab" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Garden" })).toBeInTheDocument();
   });
 
   it("says when changes can't be saved, and keeps working", async () => {
