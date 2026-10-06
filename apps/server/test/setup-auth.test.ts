@@ -1,15 +1,15 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { buildApp } from "../src/app";
-import { ADMIN, SETUP_CODE, sessionCookie, setupAdmin, testConfig, useTestApp } from "./helpers";
+import { ADMIN, SETUP_CODE, sessionCookie, setupAdmin, testApp, testConfig, useTestApp } from "./helpers";
 
 const t = useTestApp();
 
 describe("first-run setup", () => {
   it("reports that setup is needed until an admin exists", async () => {
-    expect((await t.app.inject("/api/setup")).json()).toEqual({ needsSetup: true });
+    expect((await t.app.inject("/api/setup")).json()).toEqual({ needsSetup: true, localForVisitors: false });
     await setupAdmin(t.app);
-    expect((await t.app.inject("/api/setup")).json()).toEqual({ needsSetup: false });
+    expect((await t.app.inject("/api/setup")).json()).toEqual({ needsSetup: false, localForVisitors: false });
   });
 
   it("creates the admin with a linked team member and signs them in", async () => {
@@ -26,6 +26,13 @@ describe("first-run setup", () => {
     expect(await t.db.commandLog.findMany({ where: { projectId: null }, select: { name: true, actorLabel: true } })).toEqual([
       { name: "setup", actorLabel: ADMIN.name },
     ]);
+  });
+
+  it("tells the web app whether visitors work in their browser", async () => {
+    expect((await t.app.inject("/api/setup")).json()).toEqual({ needsSetup: true, localForVisitors: false });
+    const app = await testApp({ db: t.db, config: { ...testConfig, visitorWorkspace: "local" } });
+    expect((await app.inject("/api/setup")).json()).toEqual({ needsSetup: true, localForVisitors: true });
+    await app.close();
   });
 
   it("can only run once", async () => {
@@ -50,7 +57,7 @@ describe("first-run setup", () => {
     const app = await buildApp({ db: t.db, config: testConfig, announce: (message) => said.push(message) });
     expect(said).toEqual([expect.stringMatching(/setup code: [A-HJ-NP-Z2-9]{5}-[A-HJ-NP-Z2-9]{5}$/)]);
     const code = said[0]!.split(": ")[1]!;
-    expect((await app.inject("/api/setup")).json()).toEqual({ needsSetup: true }); // asking again doesn't print a new one
+    expect((await app.inject("/api/setup")).json()).toEqual({ needsSetup: true, localForVisitors: false }); // asking again doesn't print a new one
     expect(said).toHaveLength(1);
     const response = await app.inject({ method: "POST", url: "/api/setup", payload: { ...ADMIN, setupCode: code } });
     expect(response.statusCode).toBe(201);
@@ -62,7 +69,7 @@ describe("first-run setup", () => {
     const initialAdmin = { email: "boss@example.com", name: "Boss", password: "from the settings" };
     const app = await buildApp({ db: t.db, config: { ...testConfig, initialAdmin }, announce: (message) => said.push(message) });
     expect(said).toEqual([expect.stringContaining("Created the admin account boss@example.com")]);
-    expect((await app.inject("/api/setup")).json()).toEqual({ needsSetup: false });
+    expect((await app.inject("/api/setup")).json()).toEqual({ needsSetup: false, localForVisitors: false });
     const login = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "boss@example.com", password: "from the settings" } });
     expect(login.json().user).toMatchObject({ role: "admin", name: "Boss", mustChangePassword: false });
     await app.close();

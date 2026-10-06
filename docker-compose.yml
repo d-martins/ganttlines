@@ -30,6 +30,7 @@ services:
       BACKUP_BEFORE_MIGRATE: ${BACKUP_BEFORE_MIGRATE:-true}
       CLUSTER: ${CLUSTER:-}
       SHUTDOWN_DELAY_MS: ${SHUTDOWN_DELAY_MS:-}
+      VISITOR_WORKSPACE: ${VISITOR_WORKSPACE:-}
     ports:
       - "${HOST_BIND:-127.0.0.1}:${HOST_PORT:-3000}:3000"
     volumes:

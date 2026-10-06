@@ -4,6 +4,13 @@ import { loadConfig } from "../../src/config";
 const SECRET = "x".repeat(32);
 
 describe("loadConfig", () => {
+  it("reads VISITOR_WORKSPACE (local or unset) and refuses anything else", () => {
+    const base = { DATABASE_URL: "postgresql://db/gp", SESSION_SECRET: SECRET };
+    expect(loadConfig(base).visitorWorkspace).toBeNull();
+    expect(loadConfig({ ...base, VISITOR_WORKSPACE: "local" }).visitorWorkspace).toBe("local");
+    expect(() => loadConfig({ ...base, VISITOR_WORKSPACE: "browser" })).toThrow(/VISITOR_WORKSPACE/);
+  });
+
   it("reads required values and applies defaults", () => {
     const { webDir: _webDir, ...config } = loadConfig({ DATABASE_URL: "postgresql://db/gp", SESSION_SECRET: SECRET }); // apps/web/dist when built
     expect(config).toEqual({
@@ -18,6 +25,7 @@ describe("loadConfig", () => {
       firstAdminEmail: null,
       cluster: "single",
       shutdownDelayMs: 0,
+      visitorWorkspace: null,
       oidc: null,
       smtp: null,
     });

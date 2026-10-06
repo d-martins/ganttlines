@@ -225,6 +225,18 @@ network, put it behind a reverse proxy that terminates HTTPS (Caddy, nginx, Trae
 `PUBLIC_URL` to the `https://` address and `TRUST_PROXY=1`. The proxy must pass WebSocket
 upgrades on `/ws`.
 
+## Without an account (local mode)
+
+GanttLines also works with no account, keeping everything in the browser:
+
+- **On your server:** set `VISITOR_WORKSPACE=local`. People who aren't signed in get their own
+  workspace in their browser (nothing is stored on the server); signing in shows the server's.
+- **As a static site:** `yarn workspace @ganttlines/web build:local` builds the app with no server at
+  all, into `apps/web/dist-local` — host it anywhere that serves static files.
+
+A local workspace lives only in that browser (Settings → Export saves a copy; Import opens one).
+Clearing the browser's site data deletes it, and Safari clears it after about 7 days without a visit.
+
 ## Running several copies
 
 For more capacity, for platforms that run several instances (Kubernetes, DigitalOcean App
