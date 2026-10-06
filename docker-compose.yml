@@ -8,6 +8,7 @@ services:
     environment:
       # The bundled database, unless DATABASE_URL points at your own
       DATABASE_URL: ${DATABASE_URL:-postgresql://gantt:${POSTGRES_PASSWORD}@postgres:5432/ganttlines}
+      DATABASE_CA_CERT: ${DATABASE_CA_CERT:-}
       SESSION_SECRET: ${SESSION_SECRET}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       ADMIN_NAME: ${ADMIN_NAME:-}

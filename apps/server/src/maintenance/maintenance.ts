@@ -1,6 +1,7 @@
 import { mkdir, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { prismaDatabaseUrl } from "./database-ca";
 import { libpqEnv, pgTool, run, serverMajor, withClient } from "./postgres";
 
 const ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
@@ -53,5 +54,5 @@ export async function restore(databaseUrl: string, file: string): Promise<void> 
 
 /** Applies pending migrations (prisma migrate deploy). */
 export async function migrate(databaseUrl: string): Promise<void> {
-  await run(join(ROOT, "node_modules/.bin/prisma"), ["migrate", "deploy"], { DATABASE_URL: databaseUrl }, DB_PACKAGE);
+  await run(join(ROOT, "node_modules/.bin/prisma"), ["migrate", "deploy"], { DATABASE_URL: prismaDatabaseUrl(databaseUrl) }, DB_PACKAGE);
 }

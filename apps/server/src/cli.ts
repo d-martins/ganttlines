@@ -1,4 +1,5 @@
 import { loadConfig } from "./config";
+import { withDatabaseCa } from "./maintenance/database-ca";
 import { backup, migrate, migrationStatus, restore } from "./maintenance/maintenance";
 import { waitForDatabase } from "./maintenance/postgres";
 import { withStartupLock } from "./maintenance/startup-lock";
@@ -19,7 +20,7 @@ const log = (message: string) => console.log(`[ganttlines] ${message}`);
 function databaseUrl(): string {
   const url = process.env["DATABASE_URL"];
   if (!url) throw new Error("DATABASE_URL is required");
-  return url;
+  return withDatabaseCa(url, process.env["DATABASE_CA_CERT"]);
 }
 
 async function start(): Promise<void> {
