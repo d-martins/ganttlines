@@ -2,7 +2,7 @@ import { ImportHolidaysBody, LocationBody, type PublicHolidayDto } from "@ganttl
 import type { FastifyInstance } from "fastify";
 import { actorOf } from "../actor";
 import { requireUser } from "../auth/guard";
-import { countries, publicHolidays, regions } from "../calendar/public-holidays";
+import { countries, publicHolidays, regions } from "@ganttlines/holidays";
 import { badRequest, notFound } from "../errors";
 import { parseBody, parseId } from "../validation";
 import type { RouteContext } from "./context";

@@ -588,6 +588,17 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@ganttlines/holidays@workspace:^, @ganttlines/holidays@workspace:packages/holidays":
+  version: 0.0.0-use.local
+  resolution: "@ganttlines/holidays@workspace:packages/holidays"
+  dependencies:
+    "@ganttlines/engine": "workspace:^"
+    date-holidays: "npm:^3"
+    typescript: "npm:~5.9.3"
+    vitest: "npm:^5"
+  languageName: unknown
+  linkType: soft
+
 "@ganttlines/protocol@workspace:^, @ganttlines/protocol@workspace:packages/protocol":
   version: 0.0.0-use.local
   resolution: "@ganttlines/protocol@workspace:packages/protocol"
@@ -610,6 +621,7 @@ __metadata:
     "@ganttlines/client": "workspace:^"
     "@ganttlines/db": "workspace:^"
     "@ganttlines/engine": "workspace:^"
+    "@ganttlines/holidays": "workspace:^"
     "@ganttlines/protocol": "workspace:^"
     "@modelcontextprotocol/client": "npm:^2.3.0"
     "@modelcontextprotocol/server": "npm:^2.3.0"
@@ -620,7 +632,6 @@ __metadata:
     "@types/pg": "npm:^8"
     "@types/qrcode": "npm:^1"
     "@types/ws": "npm:^8"
-    date-holidays: "npm:^3"
     fastify: "npm:^5"
     jose: "npm:^6"
     nodemailer: "npm:^7"

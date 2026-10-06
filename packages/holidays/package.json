@@ -1,0 +1,20 @@
+{
+  "name": "@ganttlines/holidays",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "test": "vitest run",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ganttlines/engine": "workspace:^",
+    "date-holidays": "^3"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3",
+    "vitest": "^5"
+  }
+}
