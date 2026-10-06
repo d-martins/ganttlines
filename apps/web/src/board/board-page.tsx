@@ -73,9 +73,10 @@ function useBoardSync(projectId: string, shareToken: string | null): BoardSync |
     const next = new BoardSync({
       projectId,
       connection: {
-        ...board,
         // Through the query cache, so a lost session is noticed like any other request.
         load: () => client.fetchQuery({ queryKey: [...keys.project(projectId), "state"], queryFn: () => board.load(), staleTime: 0, gcTime: 0 }),
+        openLink: () => board.openLink(),
+        isFatal: (error) => board.isFatal(error),
       },
       onEvent: (event) => applyEvent(client, projectId, event),
     });

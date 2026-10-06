@@ -41,6 +41,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^6",
+    "fake-indexeddb": "^6.2.5",
     "jsdom": "^30",
     "tailwindcss": "^4",
     "typescript": "~5.9.3",
