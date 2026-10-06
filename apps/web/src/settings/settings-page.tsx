@@ -34,6 +34,7 @@ import { ErrorText, Field } from "../ui/field";
 import { CopyText } from "../ui/copy-text";
 import { Section, WEEKDAYS } from "../ui/section";
 import { useCapabilities } from "../workspace";
+import { LocalWorkspaceSection } from "./local-workspace-section";
 
 export function SettingsPage() {
   const me = useQuery(currentUser);
@@ -47,6 +48,7 @@ export function SettingsPage() {
           <ThemeChoice />
         </Section>
         <WorkingWeekdaysSection />
+        <LocalWorkspaceSection />
       </div>
     );
   }

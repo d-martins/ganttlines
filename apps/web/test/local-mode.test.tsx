@@ -144,4 +144,65 @@ describe("local mode", () => {
       expect(screen.queryByRole("heading", { name: gone })).not.toBeInTheDocument();
     }
   });
+  async function settingsWithProject(name: string) {
+    visitorServer();
+    const app = renderApp("/");
+    await app.user.click(await screen.findByRole("button", { name: "New project" }));
+    await app.user.type(screen.getByLabelText("New project name"), `${name}{Enter}`);
+    await screen.findByRole("link", { name });
+    await app.user.click(screen.getByRole("link", { name: "Settings" }));
+    await screen.findByRole("heading", { name: "This browser's workspace" });
+    return app;
+  }
+  const fileOf = (text: string, size?: number) => {
+    const file = new File([text], "plan.ganttlines.json", { type: "application/json" });
+    if (size !== undefined) Object.defineProperty(file, "size", { value: size });
+    return file;
+  };
+
+  it("exports the workspace to a file", async () => {
+    const saved: Blob[] = [];
+    // jsdom has no object URLs: add them (only them — the app still needs URL itself).
+    Object.assign(URL, { createObjectURL: (blob: Blob) => (saved.push(blob), "blob:x"), revokeObjectURL: () => undefined });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    const { user } = await settingsWithProject("Garden");
+    await user.click(screen.getByRole("button", { name: "Export" }));
+    expect(click).toHaveBeenCalled();
+    expect(JSON.parse(await saved[0]!.text())).toMatchObject({ format: "ganttlines-workspace", projects: [expect.objectContaining({ name: "Garden" })] });
+  });
+
+  it("imports a file after saying which projects it replaces", async () => {
+    const { user } = await settingsWithProject("Old");
+    const { LocalSource, MemoryStore } = await import("@ganttlines/client");
+    const other = await LocalSource.open(new MemoryStore());
+    await other.createProject({ name: "From elsewhere" });
+    await user.upload(screen.getByLabelText("Import a workspace file"), fileOf(JSON.stringify(other.exportFile())));
+    const dialog = await screen.findByRole("dialog", { name: "Replace this browser's workspace?" });
+    expect(dialog).toHaveTextContent("Old");
+    await user.click(screen.getByRole("button", { name: "Replace" }));
+    expect(await screen.findByRole("link", { name: "From elsewhere" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Old" })).not.toBeInTheDocument();
+  });
+
+  it("refuses files it can't use, before changing anything", async () => {
+    const { user } = await settingsWithProject("Keep");
+    await user.upload(screen.getByLabelText("Import a workspace file"), fileOf("{}", 50 * 1024 * 1024 + 1));
+    expect(await screen.findByText(/too big/)).toBeInTheDocument();
+    await user.upload(screen.getByLabelText("Import a workspace file"), fileOf("not json"));
+    expect(await screen.findByText(/isn't a GanttLines workspace/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Keep" })).toBeInTheDocument();
+  });
+
+  it("clears the workspace after confirming", async () => {
+    const { user } = await settingsWithProject("Gone soon");
+    await user.click(screen.getByRole("button", { name: "Clear workspace" }));
+    await user.click(screen.getByRole("button", { name: "Clear" }));
+    await waitFor(() => expect(screen.queryByRole("link", { name: "Gone soon" })).not.toBeInTheDocument());
+  });
+
+  it("reminds people where their work is kept", async () => {
+    visitorServer();
+    renderApp("/");
+    expect(await screen.findByText(/Saved in this browser only/)).toBeInTheDocument();
+  });
 });

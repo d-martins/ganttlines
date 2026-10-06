@@ -60,6 +60,14 @@ export function Sidebar({ user }: { user: UserDto }) {
           </SideLink>
         </section>
       </div>
+      {capabilities.accounts ? null : (
+          <p className="px-3 py-2 text-xs text-muted">
+            Saved in this browser only ·{" "}
+            <Link to="/settings" className="underline">
+              Export
+            </Link>
+          </p>
+      )}
       <div className="flex justify-end p-2">{toggleButton}</div>
     </nav>
   );

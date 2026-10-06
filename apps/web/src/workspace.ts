@@ -25,7 +25,10 @@ export const useCapabilities = (): WorkspaceCapabilities => useWorkspace((state)
 /** The local-only build: no server at all. */
 export const localOnly = (): boolean => import.meta.env.VITE_WORKSPACE === "local";
 
-/** After switching workspaces nothing cached from the other may show (setup and "who am I" are refetched separately). */
+/**
+ * After switching workspaces (or replacing this one) nothing cached from before may show: the data
+ * is dropped and what's on screen is fetched again (setup and "who am I" are refreshed separately).
+ */
 export function forgetWorkspaceCache(client: QueryClient): void {
-  client.removeQueries({ predicate: (query) => query.queryKey[0] !== "setup" && query.queryKey[0] !== "me" });
+  void client.resetQueries({ predicate: (query) => query.queryKey[0] !== "setup" && query.queryKey[0] !== "me" });
 }
