@@ -123,4 +123,25 @@ describe("local mode", () => {
     await user.type(screen.getByLabelText("New project name"), "Kept for now{Enter}");
     expect(await screen.findByRole("link", { name: "Kept for now" })).toBeInTheDocument();
   });
+  it("leaves out what needs a server: sharing, people viewing, comments, history, account settings", async () => {
+    visitorServer();
+    const { user } = renderApp("/");
+    await user.click(await screen.findByRole("button", { name: "New project" }));
+    await user.type(screen.getByLabelText("New project name"), "Garden{Enter}");
+    await user.click(await screen.findByRole("link", { name: "Garden" }));
+    expect(await screen.findByRole("status", { name: "Saved in this browser" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Share" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "People viewing this board" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    await user.type(screen.getByRole("textbox", { name: "Title" }), "Dig{Enter}");
+    const row = (await screen.findAllByRole("row")).find((candidate) => candidate.textContent?.includes("Dig"))!;
+    await user.dblClick(row.querySelector('[aria-label^="Row "]')!); // the row number, as the panel tests do
+    expect(await screen.findByRole("complementary", { name: /^Details of/ })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Comments" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("link", { name: "Settings" }));
+    expect(await screen.findByRole("heading", { name: "Working days" })).toBeInTheDocument();
+    for (const gone of ["Your account", "Users", "AI access (MCP)", "Email", "About"]) {
+      expect(screen.queryByRole("heading", { name: gone })).not.toBeInTheDocument();
+    }
+  });
 });

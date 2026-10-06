@@ -18,6 +18,7 @@ import { actualDaysOf } from "../model";
 import { useSelection } from "../selection";
 import { Activity } from "./activity";
 import { Comments } from "./comments";
+import { useCapabilities } from "../../workspace";
 
 const INPUT = "w-full rounded-md border border-border-strong bg-bg px-2 py-1 text-sm text-text disabled:border-border disabled:text-muted";
 
@@ -155,6 +156,7 @@ function ConversationTabs({ comments, history }: { comments: ReactNode; history:
  * comments and history. Selecting another row retargets it; Escape or × closes it.
  */
 export function DetailsPanel({ numbers }: { numbers: ReadonlyMap<RowId, number> }) {
+  const capabilities = useCapabilities();
   const board = useBoard();
   const { state, calendar, sync } = board;
   const { selectedId, panelOpen, closePanel } = useSelection();
@@ -256,7 +258,7 @@ export function DetailsPanel({ numbers }: { numbers: ReadonlyMap<RowId, number> 
           </button>
         ) : null}
       </Section>
-      {row.kind === "task" ? (
+      {!capabilities.activity ? null : row.kind === "task" ? (
         <ConversationTabs
           comments={<Comments projectId={sync.projectId} taskId={row.id} canComment={board.canComment} isAdmin={me.data?.role === "admin"} maxHeight={halfHeight} />}
           history={<Activity projectId={sync.projectId} rowId={row.id} names={{ state, resources: board.resourceMap }} />}

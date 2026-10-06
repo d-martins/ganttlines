@@ -21,6 +21,7 @@ import type { CompareMode } from "./model";
 import { formatDay, today } from "./format";
 import { ShareDialog } from "./share-dialog";
 import { useBoardView } from "./view-store";
+import { useCapabilities, useWorkspace } from "../workspace";
 
 const ZOOMS: { value: Zoom; label: string }[] = [
   { value: "day", label: "Day" },
@@ -33,6 +34,7 @@ const MAX_AVATARS = 5;
 export function BoardTools({ sync }: { sync: BoardSync }) {
   const { zoom, barStyle, showWeekends, setZoom, setBarStyle, setShowWeekends, goToToday } = useBoardView();
   const canEdit = useActiveBoard((state) => state.canEdit);
+  const capabilities = useCapabilities();
   const mod = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
   return (
     <>
@@ -79,9 +81,9 @@ export function BoardTools({ sync }: { sync: BoardSync }) {
         </Button>
       </div>
       <div className="flex shrink-0 items-center">
-        <ShareButton sync={sync} />
+        {capabilities.sharing ? <ShareButton sync={sync} /> : null}
         <Connection sync={sync} />
-        <Viewers sync={sync} />
+        {capabilities.presence ? <Viewers sync={sync} /> : null}
       </div>
     </>
   );
@@ -198,7 +200,15 @@ function BaselinePicker({ projectId }: { projectId: string }) {
 }
 
 function Connection({ sync }: { sync: BoardSync }) {
+  const local = useWorkspace((state) => state.source.kind === "local");
   const status = useStore(sync.store, (state) => state.status);
+  if (local) {
+    return (
+      <span role="status" aria-label="Saved in this browser" className="ml-1 text-xs text-muted">
+        Saved in this browser
+      </span>
+    );
+  }
   const [color, text] =
     status === "live" ? ["bg-[#2fa86b]", "Live"] : status === "reconnecting" ? ["bg-[#e5892f]", "Reconnecting…"] : status === "ended" ? ["bg-danger", "Offline"] : ["bg-border-strong", "Connecting…"];
   return (
