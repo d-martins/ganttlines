@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Mailer, MailMessage } from "../src/mail/mailer";
-import { smtpSettings } from "../src/mail/mailer";
+import { createServer, type Server } from "node:net";
+import { smtpMailer, smtpSettings } from "../src/mail/mailer";
 import { ADMIN, sessionCookie, setupAdmin, testApp, testConfig, useTestApp } from "./helpers";
 
 const t = useTestApp();
@@ -115,3 +116,48 @@ describe("email", () => {
     expect(() => smtpSettings({ SMTP_HOST: "h" })).toThrow("MAIL_FROM is required");
   });
 });
+
+describe("sending mail with a password", () => {
+  /** A mail server that never offers encryption (as if an attacker on the network had removed the offer). */
+  async function plainServer(): Promise<{ server: Server; port: number; received: string[] }> {
+    const received: string[] = [];
+    const server = createServer((socket) => {
+      socket.write("220 plain.example ESMTP\r\n");
+      socket.on("data", (chunk) => {
+        for (const line of chunk.toString().split("\r\n").filter(Boolean)) {
+          received.push(line);
+          if (/^EHLO/i.test(line)) socket.write("250-plain.example\r\n250 AUTH PLAIN LOGIN\r\n");
+          else if (/^STARTTLS/i.test(line)) socket.write("502 not supported\r\n");
+          else if (/^AUTH/i.test(line)) socket.write("235 ok\r\n");
+          else if (/^QUIT/i.test(line)) socket.end("221 bye\r\n");
+          else socket.write("250 ok\r\n");
+        }
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    return { server, port: (server.address() as { port: number }).port, received };
+  }
+
+  it("never sends the login unencrypted: no encryption offered means no email", async () => {
+    const { server, port, received } = await plainServer();
+    try {
+      const settings = smtpSettings({ SMTP_HOST: "127.0.0.1", SMTP_PORT: String(port), SMTP_USER: "app@mg.example.com", SMTP_PASSWORD: "secret", MAIL_FROM: "x@example.com" })!;
+      await expect(smtpMailer(settings).send({ to: "a@example.com", subject: "s", text: "t" })).rejects.toThrow();
+      expect(received.some((line) => /^AUTH/i.test(line))).toBe(false);
+    } finally {
+      server.close();
+    }
+  });
+
+  it("still sends through a local relay without a password (no encryption needed)", async () => {
+    const { server, port, received } = await plainServer();
+    try {
+      const settings = smtpSettings({ SMTP_HOST: "127.0.0.1", SMTP_PORT: String(port), MAIL_FROM: "x@example.com" })!;
+      await expect(smtpMailer(settings).send({ to: "a@example.com", subject: "s", text: "t" })).resolves.toBeUndefined();
+      expect(received.some((line) => /^MAIL FROM/i.test(line))).toBe(true);
+    } finally {
+      server.close();
+    }
+  });
+});
+
