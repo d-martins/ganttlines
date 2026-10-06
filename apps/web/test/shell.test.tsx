@@ -67,6 +67,15 @@ describe("sidebar and top bar", () => {
     expect(screen.queryByRole("button", { name: "New project" })).not.toBeInTheDocument();
   });
 
+  it("shows the server's message when a workspace change fails", async () => {
+    const api = signedIn(ADMIN, [project("p1", "Launch")]);
+    api.on("POST /api/projects", () => ({ status: 409, body: { error: "conflict", message: "Too many projects for now" } }));
+    const { user } = renderApp("/p/p1");
+    await user.click(await screen.findByRole("button", { name: "New project" }));
+    await user.type(screen.getByLabelText("New project name"), "Roadmap{Enter}");
+    expect(await screen.findByText("Too many projects for now")).toBeInTheDocument();
+  });
+
   it("creates projects inline (editors and admins only)", async () => {
     const projects = [project("p1", "Launch")];
     const api = signedIn(ADMIN, projects);

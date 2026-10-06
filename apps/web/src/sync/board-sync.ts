@@ -1,16 +1,9 @@
 import { applyChanges, type Command, type ProjectState, type Row } from "@ganttlines/engine";
 import type { ProjectDto, ProjectStateDto, ServerMessage, Viewer } from "@ganttlines/protocol";
 import { createStore, type StoreApi } from "zustand/vanilla";
+import type { BoardConnection, SocketLike } from "@ganttlines/client";
 
-/** The parts of a WebSocket the sync client uses (a fake one stands in for tests). */
-export interface SocketLike {
-  readonly readyState: number;
-  send(data: string): void;
-  close(code?: number): void;
-  onopen: (() => void) | null;
-  onmessage: ((event: { data: unknown }) => void) | null;
-  onclose: ((event: { code: number }) => void) | null;
-}
+export type { SocketLike } from "@ganttlines/client";
 
 /**
  * - `loading`: fetching the project; `live`: joined and receiving patches;
@@ -57,15 +50,9 @@ export type BoardEvent =
 
 export interface BoardSyncOptions {
   projectId: string;
-  loadState: () => Promise<ProjectStateDto>;
-  openSocket: () => SocketLike;
+  /** the board's state and live link (from the workspace source) */
+  connection: BoardConnection;
   onEvent?: (event: BoardEvent) => void;
-  /**
-   * Whether a failed `loadState` means the board can't be shown at all (no access, deleted…).
-   * Checked when a connection fails before opening: the server refuses WebSocket upgrades with a
-   * plain HTTP status the browser can't see, so access is re-checked over REST instead.
-   */
-  isFatal?: (error: unknown) => boolean;
   /** reconnect delays; the n-th retry waits `min(base * 2^n, max)` */
   backoff?: { baseMs: number; maxMs: number };
   /** command ids (tests pass a counter) */
@@ -124,7 +111,7 @@ export class BoardSync {
 
   async start(): Promise<void> {
     try {
-      this.adopt(await this.options.loadState());
+      this.adopt(await this.options.connection.load());
     } catch (error) {
       if (!this.stopped) this.store.setState({ loadError: error, status: "ended" });
       return;
@@ -188,7 +175,7 @@ export class BoardSync {
   }
 
   private connect(): void {
-    const socket = this.options.openSocket();
+    const socket = this.options.connection.openLink();
     this.socket = socket;
     socket.onopen = () => {
       this.opened = true;
@@ -242,11 +229,16 @@ export class BoardSync {
     if (neverOpened) void this.checkAccess();
   }
 
+  /**
+   * Whether the board can still be shown at all (no access, deleted…). Checked when a connection
+   * fails before opening: the server refuses WebSocket upgrades with a plain HTTP status the
+   * browser can't see, so access is re-checked over REST instead.
+   */
   private async checkAccess(): Promise<void> {
     try {
-      await this.options.loadState();
+      await this.options.connection.load();
     } catch (error) {
-      if (this.stopped || !this.options.isFatal?.(error)) return;
+      if (this.stopped || !this.options.connection.isFatal(error)) return;
       this.stop();
       this.store.setState({ status: "ended", loadError: error, viewers: [] });
     }
@@ -353,7 +345,7 @@ export class BoardSync {
   private async reload(): Promise<void> {
     this.reloading = true;
     try {
-      const dto = await this.options.loadState();
+      const dto = await this.options.connection.load();
       if (this.stopped) return;
       this.reloading = false;
       // Patches older than the fresh state are already part of it (`adopt` drops them).

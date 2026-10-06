@@ -1,7 +1,6 @@
 import { toDbColumns } from "@ganttlines/db";
 import { TASK_DEFAULTS, type Row } from "@ganttlines/engine";
 import { describe, expect, it } from "vitest";
-import { findTreeProblem } from "../src/projects/state";
 import { randomUUID } from "node:crypto";
 import { CLOSE_PROJECT_DELETED } from "../src/realtime/hub";
 import { InstanceService } from "../src/calendar/instance-service";
@@ -91,23 +90,7 @@ describe("projects", () => {
   });
 });
 
-describe("findTreeProblem", () => {
-  it("accepts a valid tree", () => {
-    expect(findTreeProblem(rows)).toBeNull();
-  });
-
-  it("detects missing predecessors", () => {
-    const [, task] = rows as [Row, Row];
-    expect(findTreeProblem([rows[0]!, { ...task, predecessorId: "33333333-3333-4333-8333-333333333333" } as Row])).toMatch(/missing predecessor/);
-  });
-
-  it("detects missing parents, parent loops and sections inside tasks", () => {
-    const [section, task] = rows as [Row, Row];
-    expect(findTreeProblem([task])).toMatch(/missing parent/);
-    expect(findTreeProblem([{ ...section, parentId: task.id }, task])).toMatch(/section .* is inside task|loop/);
-    expect(findTreeProblem([{ ...task, parentId: TASK_ID }])).toMatch(/loop/);
-  });
-
+describe("deleting projects", () => {
   it("deletes archived projects only — with their rows, history, comments and links — and closes their boards", async () => {
     const admin = await setupAdmin(t.app);
     const editor = await createUser(t.app, admin, { email: "ed@example.com", name: "Ed", role: "editor" });

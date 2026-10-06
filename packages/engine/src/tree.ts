@@ -53,3 +53,26 @@ export function isAncestor(state: ProjectState, ancestorId: RowId, id: RowId): b
   }
   return false;
 }
+
+/**
+ * Parent links must point to rows of the same project and never loop; sections never sit inside
+ * tasks; predecessors must be tasks of the same project.
+ */
+export function findTreeProblem(rows: readonly Row[]): string | null {
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  for (const row of rows) {
+    if (row.kind === "task" && row.predecessorId !== null && byId.get(row.predecessorId)?.kind !== "task") {
+      return `task ${row.id} has a missing predecessor ${row.predecessorId}`;
+    }
+    if (row.parentId === null) continue;
+    const parent = byId.get(row.parentId);
+    if (!parent) return `row ${row.id} has a missing parent ${row.parentId}`;
+    if (row.kind === "section" && parent.kind === "task") return `section ${row.id} is inside task ${parent.id}`;
+    const seen = new Set([row.id]);
+    for (let current: Row | undefined = parent; current; current = current.parentId ? byId.get(current.parentId) : undefined) {
+      if (seen.has(current.id)) return `row ${row.id} is part of a parent loop`;
+      seen.add(current.id);
+    }
+  }
+  return null;
+}

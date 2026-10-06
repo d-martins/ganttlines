@@ -54,16 +54,18 @@ async function started(version = 3, load = vi.fn(async () => stateDto(version)),
   let ids = 0;
   const sync = new BoardSync({
     projectId: PROJECT,
-    loadState: load,
-    openSocket: () => {
-      const socket = new FakeSocket();
-      sockets.push(socket);
-      return socket;
+    connection: {
+      load,
+      openLink: () => {
+        const socket = new FakeSocket();
+        sockets.push(socket);
+        return socket;
+      },
+      isFatal: isFatal ?? (() => false),
     },
     onEvent: (event) => events.push(event),
     backoff: { baseMs: 100, maxMs: 1000 },
     newId: () => `id${++ids}`,
-    ...(isFatal ? { isFatal } : {}),
   });
   await sync.start();
   sockets[0]!.open();
@@ -183,11 +185,14 @@ describe("BoardSync", () => {
     const sockets: SocketLike[] = [];
     const sync = new BoardSync({
       projectId: PROJECT,
-      loadState: () => Promise.reject(new Error("gone")),
-      openSocket: () => {
-        const socket = new FakeSocket();
-        sockets.push(socket);
-        return socket;
+      connection: {
+        load: () => Promise.reject(new Error("gone")),
+        openLink: () => {
+          const socket = new FakeSocket();
+          sockets.push(socket);
+          return socket;
+        },
+        isFatal: () => false,
       },
     });
     await sync.start();

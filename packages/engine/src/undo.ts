@@ -1,10 +1,24 @@
-import type { ProjectState, Row, RowChange, RowId } from "@ganttlines/engine";
-import { isDeepStrictEqual } from "node:util";
+import type { RowChange } from "./changes";
+import type { ProjectState, Row, RowId } from "./model";
 
 export interface Reverted {
   state: ProjectState;
   /** changes that could not be reverted because the value was changed by someone since */
   skipped: number;
+}
+
+/** Deep equality for JSON values: plain objects are compared key by key, in any order. */
+function sameValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    return a.every((item, index) => sameValue(item, b[index]));
+  }
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  const keys = Object.keys(left);
+  return keys.length === Object.keys(right).length && keys.every((key) => Object.hasOwn(right, key) && sameValue(left[key], right[key]));
 }
 
 /**
@@ -26,7 +40,7 @@ export function revertChanges(state: ProjectState, changes: readonly RowChange[]
       if (target === null) {
         // Removed together at the end, so a parent and its children (or a predecessor and the
         // successor detached by the same command) are handled as one set, whatever their order.
-        if (current && isDeepStrictEqual(current, expected)) removals.add(change.rowId);
+        if (current && sameValue(current, expected)) removals.add(change.rowId);
         else skipped++;
       } else if (!current) {
         rows[change.rowId] = target as Row;
@@ -36,7 +50,7 @@ export function revertChanges(state: ProjectState, changes: readonly RowChange[]
       continue;
     }
     const value = current ? (current as unknown as Record<string, unknown>)[change.field] : undefined;
-    if (current && isDeepStrictEqual(value, expected)) rows[change.rowId] = { ...current, [change.field]: target } as Row;
+    if (current && sameValue(value, expected)) rows[change.rowId] = { ...current, [change.field]: target } as Row;
     else skipped++;
   }
   skipped += removeUnreferenced(rows, removals);

@@ -4,13 +4,15 @@ import {
   applyCommand,
   buildTree,
   childrenOf,
+  type Command,
   computeSchedule,
   diffRows,
+  findTreeProblem,
   fromDay,
   hasCycle,
   isParentTask,
-  type Command,
   type ProjectState,
+  revertChanges,
   type Row,
   type RowChange,
   type Span,
@@ -24,8 +26,7 @@ import type { EventBus, ProjectLock } from "../cluster/types";
 import { toProjectDto } from "../dto";
 import { conflict, HttpError, notFound } from "../errors";
 import { KeyedQueue } from "../queue";
-import { findTreeProblem, readProject, type StoredProject } from "./state";
-import { revertChanges } from "./undo";
+import { readProject, type StoredProject } from "./state";
 import { MemoryUndoStore, type UndoStore } from "./undo-store";
 
 /** Clients further behind than this (in versions or in total changes) reload instead of replaying. */

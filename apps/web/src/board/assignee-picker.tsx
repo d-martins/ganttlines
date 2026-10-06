@@ -49,7 +49,7 @@ export function AssigneePicker({
                 create.mutate(
                   { name: query },
                   {
-                    onSuccess: ({ resource }) => onChange(resource.id),
+                    onSuccess: (resource) => onChange(resource.id),
                     onError: (error) => toast(`Couldn't add the team member: ${errorMessage(error)}`, { tone: "error" }),
                   },
                 ),

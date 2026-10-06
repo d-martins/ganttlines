@@ -63,6 +63,15 @@ describe("editing the task list", () => {
     expect(sentCommands()[2]).toEqual({ type: "updateTitle", id: created, title: "Press kit" });
   });
 
+  it("adds a new team member from the picker and assigns them", async () => {
+    const { api, user } = await editableBoard();
+    api.on("POST /api/resources", () => ({ status: 201, body: { resource: { ...ANA, id: "r-zed", name: "Zed" } } }));
+    await user.click(screen.getByRole("button", { name: "Assignee of “ui”: nobody" }));
+    await user.type(await screen.findByRole("combobox", { name: "Find a person" }), "Zed");
+    await user.click(await screen.findByRole("option", { name: /New team member “Zed”/ }));
+    await waitFor(() => expect(sentCommands()).toEqual([{ type: "setAssignee", id: "ui", resourceId: "r-zed" }]));
+  });
+
   it("assigns people from the picker", async () => {
     const { user } = await editableBoard();
     await user.click(screen.getByRole("button", { name: "Assignee of “ui”: nobody" }));
