@@ -38,7 +38,10 @@ export interface BoardConnection {
   isFatal(error: unknown): boolean;
 }
 
-/** What a source supports beyond the workspace itself; the UI leaves out what's missing. */
+/**
+ * What a source can do beyond the workspace itself — not today's settings (an admin switching AI
+ * access off is a server setting the UI reads separately). The UI leaves out what's missing.
+ */
 export interface WorkspaceCapabilities {
   accounts: boolean;
   sharing: boolean;
