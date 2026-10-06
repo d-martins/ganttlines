@@ -429,10 +429,14 @@ describe("several copies: hardening", () => {
     onC.send({ type: "join", projectId, version: 0 });
     await onC.next("joined");
     const add = (app: FastifyInstance, date: string) => app.inject({ method: "POST", url: `/api/projects/${projectId}/highlights`, headers: { cookie: ed.cookie }, payload: { date, color: "#ff0000" } });
+    // Lists in between are fine (a change may be relayed before the next one is made); an older list after a newer one isn't.
+    const sizes = () => onC.inbox.flatMap((m) => (m.type === "highlights" ? [m.highlights.length] : []));
+    await add(a, "2026-10-08");
     await Promise.all([add(a, "2026-10-09"), add(b, "2026-10-10")]);
-    await onC.next("highlights", (m) => m.highlights.length === 2);
+    for (let waited = 0; !sizes().includes(3) && waited < 5000; waited += 20) await new Promise((resolve) => setTimeout(resolve, 20));
     await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(onC.inbox.filter((m) => m.type === "highlights").every((m) => (m as { highlights: unknown[] }).highlights.length === 2)).toBe(true);
+    expect(sizes().at(-1)).toBe(3);
+    expect(sizes()).toEqual([...sizes()].sort((x, y) => x - y));
     onC.ws.close();
   });
 });

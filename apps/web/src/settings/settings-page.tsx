@@ -33,10 +33,25 @@ import { ConfirmButton } from "../ui/confirm";
 import { ErrorText, Field } from "../ui/field";
 import { CopyText } from "../ui/copy-text";
 import { Section, WEEKDAYS } from "../ui/section";
+import { useCapabilities } from "../workspace";
+import { LocalWorkspaceSection } from "./local-workspace-section";
 
 export function SettingsPage() {
   const me = useQuery(currentUser);
+  const capabilities = useCapabilities();
   if (!me.data) return null;
+  if (!capabilities.accounts) {
+    // A workspace in this browser: no account, no server settings.
+    return (
+      <div className="mx-auto flex max-w-3xl flex-col gap-5 p-6">
+        <Section title="Appearance">
+          <ThemeChoice />
+        </Section>
+        <WorkingWeekdaysSection />
+        <LocalWorkspaceSection />
+      </div>
+    );
+  }
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-5 p-6">
       <Section title="Your account" description={`${me.data.name} · ${me.data.email}`}>

@@ -21,6 +21,8 @@ import type { CompareMode } from "./model";
 import { formatDay, today } from "./format";
 import { ShareDialog } from "./share-dialog";
 import { useBoardView } from "./view-store";
+import { useCapabilities, useWorkspace } from "../workspace";
+import { useStorageStatus } from "../workspace/local";
 
 const ZOOMS: { value: Zoom; label: string }[] = [
   { value: "day", label: "Day" },
@@ -33,6 +35,7 @@ const MAX_AVATARS = 5;
 export function BoardTools({ sync }: { sync: BoardSync }) {
   const { zoom, barStyle, showWeekends, setZoom, setBarStyle, setShowWeekends, goToToday } = useBoardView();
   const canEdit = useActiveBoard((state) => state.canEdit);
+  const capabilities = useCapabilities();
   const mod = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
   return (
     <>
@@ -79,9 +82,9 @@ export function BoardTools({ sync }: { sync: BoardSync }) {
         </Button>
       </div>
       <div className="flex shrink-0 items-center">
-        <ShareButton sync={sync} />
+        {capabilities.sharing ? <ShareButton sync={sync} /> : null}
         <Connection sync={sync} />
-        <Viewers sync={sync} />
+        {capabilities.presence ? <Viewers sync={sync} /> : null}
       </div>
     </>
   );
@@ -198,7 +201,19 @@ function BaselinePicker({ projectId }: { projectId: string }) {
 }
 
 function Connection({ sync }: { sync: BoardSync }) {
+  const local = useWorkspace((state) => state.source.kind === "local");
   const status = useStore(sync.store, (state) => state.status);
+  // Edits are saved in this tab: say when one isn't saved yet (closing the tab now would lose it).
+  const saving = useStore(sync.store, (state) => state.pending.some((entry) => entry.ackVersion === null));
+  const notStored = useStorageStatus((state) => state.failed !== false);
+  if (local) {
+    const text = notStored ? "Not saved — export to keep" : saving ? "Saving…" : "Saved in this browser";
+    return (
+      <span role="status" aria-label={text} className="ml-1 text-xs text-muted">
+        {text}
+      </span>
+    );
+  }
   const [color, text] =
     status === "live" ? ["bg-[#2fa86b]", "Live"] : status === "reconnecting" ? ["bg-[#e5892f]", "Reconnecting…"] : status === "ended" ? ["bg-danger", "Offline"] : ["bg-border-strong", "Connecting…"];
   return (

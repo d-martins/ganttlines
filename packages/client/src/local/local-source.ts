@@ -591,6 +591,11 @@ export class LocalSource implements WorkspaceSource {
     return (this.options.newId ?? randomId)();
   }
 
+  /** Settles once every change asked for so far is done (stored, or reported as not stored). */
+  idle(): Promise<void> {
+    return this.serialized.then(() => undefined);
+  }
+
   /** One change at a time: request checks load asynchronously, and changes must not interleave. */
   protected serial<T>(work: () => Promise<T>): Promise<T> {
     const next = this.serialized.then(work, work);

@@ -15,6 +15,7 @@ import type { BoardRow } from "../model";
 import { useSelection } from "../selection";
 import { addAtEnd, addRowBelow, addSubtask, deleteRow, dropMove, parseDays, setActualDays, setWorkingDays, type DropZone } from "./list-actions";
 import { AUTO_SCROLL_STEP, AUTO_SCROLL_TICK_MS, edgePush, HEADER_HEIGHT } from "../auto-scroll";
+import { useCapabilities } from "../../workspace";
 
 /**
  * Column template shared by the header and the rows: # · title · assignee · WD · AWD · predecessor · row actions (show the bar, open details).
@@ -223,7 +224,8 @@ export function ListRows({
   searching: boolean;
 }) {
   const board = useBoard();
-  const comments = useQuery(commentCounts(board.sync.projectId)).data;
+  const capabilities = useCapabilities();
+  const comments = useQuery({ ...commentCounts(board.sync.projectId), enabled: capabilities.comments }).data;
   const { state, calendar, resources, resourceMap, canEdit, canCreateResources } = board;
   const run = useRun();
   const { selectedId, editingId, draftId, select, edit, center } = useSelection();

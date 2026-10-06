@@ -7,6 +7,8 @@ export const BASE_URL = `http://localhost:${PORT}`;
 /** a second copy of the server, on the same database */
 export const PORT_2 = 3211;
 export const BASE_URL_2 = `http://localhost:${PORT_2}`;
+/** the local-only build, served as a static site */
+export const LOCAL_URL = "http://localhost:3220";
 /** The test OpenID provider (single sign-on) */
 export const OIDC_PORT = 3299;
 

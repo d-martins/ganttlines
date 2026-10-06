@@ -11,7 +11,7 @@
   "scripts": {
     "test": "turbo run test",
     "type-check": "turbo run type-check",
-    "e2e": "yarn workspace @ganttlines/web build && yarn workspace @ganttlines/e2e test:e2e"
+    "e2e": "yarn workspace @ganttlines/web build && yarn workspace @ganttlines/web build:local && yarn workspace @ganttlines/e2e test:e2e"
   },
   "devDependencies": {
     "turbo": "^2.11.4",

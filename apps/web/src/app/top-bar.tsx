@@ -1,6 +1,6 @@
 import type { UserDto } from "@ganttlines/protocol";
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate, useParams, useRouterState } from "@tanstack/react-router";
+import { Link, useNavigate, useParams, useRouterState } from "@tanstack/react-router";
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 import { errorMessage } from "../api/client";
@@ -11,6 +11,7 @@ import { useTheme, type ThemePreference } from "../theme";
 import { Avatar } from "../ui/avatar";
 import { Menu, MenuItem, MenuLabel, MenuRadio, MenuSeparator } from "../ui/menu";
 import { ThemeToggle } from "./theme-toggle";
+import { LOCAL_PERSON } from "../workspace/local";
 
 /** Stand-in store while no board is open (hooks can't be skipped). */
 const EMPTY = createStore<{ project?: { name: string } } | null>(() => null);
@@ -22,7 +23,7 @@ const THEMES: { value: ThemePreference; label: string }[] = [
 ];
 
 /** Top bar: current page title, the board's tools (on a board) and the account menu (theme, sign out). */
-export function TopBar({ user }: { user: UserDto }) {
+export function TopBar({ user, signIn, signOutTo }: { user: UserDto; signIn: boolean; signOutTo: "/" | "/login" }) {
   const navigate = useNavigate();
   const logout = useLogout();
   const { preference, setPreference } = useTheme();
@@ -50,22 +51,30 @@ export function TopBar({ user }: { user: UserDto }) {
       {shownBoard ? <BoardTools sync={shownBoard} /> : null}
       <div className="ml-auto flex shrink-0 items-center gap-2">
         <ThemeToggle />
-        <Menu
-          trigger={
-            <button type="button" aria-label="Account menu" className="rounded-full">
-              <Avatar name={user.name} color={color} size={28} />
-            </button>
-          }
-        >
-          <MenuLabel>
-            {user.name} · {user.email}
-          </MenuLabel>
-          <MenuSeparator />
-          <MenuLabel>Theme</MenuLabel>
-          <MenuRadio value={preference} options={THEMES} onChange={setPreference} />
-          <MenuSeparator />
-          <MenuItem onSelect={() => logout.mutate(undefined, { onSuccess: () => navigate({ to: "/login" }) })}>Sign out</MenuItem>
-        </Menu>
+        {user.id === LOCAL_PERSON.id ? (
+          signIn ? (
+            <Link to="/login" className="rounded-md px-2 py-1 text-sm font-medium hover:bg-surface-2">
+              Sign in
+            </Link>
+          ) : null
+        ) : (
+          <Menu
+            trigger={
+              <button type="button" aria-label="Account menu" className="rounded-full">
+                <Avatar name={user.name} color={color} size={28} />
+              </button>
+            }
+          >
+            <MenuLabel>
+              {user.name} · {user.email}
+            </MenuLabel>
+            <MenuSeparator />
+            <MenuLabel>Theme</MenuLabel>
+            <MenuRadio value={preference} options={THEMES} onChange={setPreference} />
+            <MenuSeparator />
+            <MenuItem onSelect={() => logout.mutate(undefined, { onSuccess: () => navigate({ to: signOutTo }) })}>Sign out</MenuItem>
+          </Menu>
+        )}
       </div>
       {logout.isError ? (
         <p role="alert" className="text-xs text-danger">

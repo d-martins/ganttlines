@@ -10,7 +10,7 @@ import { setSessionCookie, type RouteContext } from "./context";
  * code the server printed in its log.
  */
 export function setupRoutes(app: FastifyInstance, { config, sessions, firstRun, loginLimiter }: RouteContext): void {
-  app.get("/api/setup", async () => ({ needsSetup: await firstRun.needsSetup() }));
+  app.get("/api/setup", async () => ({ needsSetup: await firstRun.needsSetup(), localForVisitors: config.visitorWorkspace === "local" }));
 
   app.post("/api/setup", async (request, reply) => {
     const body = parseBody(SetupBody, request.body);

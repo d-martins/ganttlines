@@ -33,6 +33,8 @@ export interface Config {
   shutdownDelayMs: number;
   /** How copies share state: "single" (one process, in memory) or "postgres" (several copies, through the database) */
   cluster: "single" | "postgres";
+  /** "local": people who aren't signed in work in a workspace kept in their browser */
+  visitorWorkspace: "local" | null;
   /** The built web app to serve (apps/web/dist); null when it isn't built (development, tests) */
   webDir: string | null;
 }
@@ -59,6 +61,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     smtp: smtpSettings(env),
     cluster: parseCluster(env["CLUSTER"]),
     shutdownDelayMs: parseShutdownDelay(env["SHUTDOWN_DELAY_MS"], parseCluster(env["CLUSTER"])),
+    visitorWorkspace: parseVisitorWorkspace(env["VISITOR_WORKSPACE"]),
   };
 }
 
@@ -113,4 +116,10 @@ function required(env: NodeJS.ProcessEnv, name: string): string {
   const value = env[name];
   if (!value) throw new Error(`${name} is required`);
   return value;
+}
+
+function parseVisitorWorkspace(value: string | undefined): "local" | null {
+  if (value === undefined || value === "") return null;
+  if (value === "local") return "local";
+  throw new Error(`Invalid VISITOR_WORKSPACE: ${value} (use local, or leave it unset)`);
 }

@@ -31,7 +31,8 @@ import type {
 } from "@ganttlines/protocol";
 import { infiniteQueryOptions, queryOptions, useMutation, useQueryClient, type InfiniteData, type QueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "./client";
-import { workspace } from "../workspace";
+import { localOnly, workspace } from "../workspace";
+import { LOCAL_PERSON } from "../workspace/local";
 
 export const keys = {
   setup: ["setup"] as const,
@@ -63,19 +64,21 @@ export const keys = {
 
 export const setupStatus = queryOptions({
   queryKey: keys.setup,
-  queryFn: () => api<{ needsSetup: boolean }>("GET", "/api/setup"),
+  queryFn: () => api<{ needsSetup: boolean; localForVisitors?: boolean }>("GET", "/api/setup"),
 });
 
-/** The signed-in user, or null when nobody is signed in. */
+/** The signed-in user; in a local workspace with nobody signed in, the browser's own person; otherwise null. */
 export const currentUser = queryOptions({
   queryKey: keys.me,
-  queryFn: async () => {
+  queryFn: async (): Promise<UserDto | null> => {
+    if (localOnly()) return LOCAL_PERSON;
+    let user: UserDto | null = null;
     try {
-      return (await api<{ user: UserDto }>("GET", "/api/auth/me")).user;
+      user = (await api<{ user: UserDto }>("GET", "/api/auth/me")).user;
     } catch (error) {
-      if (error instanceof ApiError && error.status === 401) return null;
-      throw error;
+      if (!(error instanceof ApiError && error.status === 401)) throw error;
     }
+    return user ?? (workspace().kind === "local" ? LOCAL_PERSON : null);
   },
 });
 

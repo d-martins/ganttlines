@@ -17,6 +17,7 @@ import {
 import { Button } from "../ui/button";
 import { ErrorText, Field } from "../ui/field";
 import { TwoFactorSetup } from "./two-factor-setup";
+import { LOCAL_PERSON } from "../workspace/local";
 
 function Card({ title, subtitle, children }: { title: string; subtitle?: string | undefined; children: ReactNode }) {
   return (
@@ -99,8 +100,8 @@ export function LoginPage() {
   const login = useLogin();
   const [values, setValues] = useState({ email: "", password: "" });
   const [challenge, setChallenge] = useState<string | null>(null);
-  // Already signed in (e.g. a second tab): go straight back.
-  if (me.data && !login.isPending) return <Navigate to={redirect ?? "/"} />;
+  // Already signed in (e.g. a second tab): go straight back. The stand-in person of a browser workspace isn't an account.
+  if (me.data && me.data.id !== LOCAL_PERSON.id && !login.isPending) return <Navigate to={redirect ?? "/"} />;
   if (challenge) return <TwoFactorStep challenge={challenge} onDone={() => navigate({ to: redirect ?? "/" })} />;
   const sso = providers.data?.oidc;
   return (
