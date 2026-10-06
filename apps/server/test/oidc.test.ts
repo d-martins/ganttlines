@@ -145,7 +145,7 @@ describe("single sign-on (OIDC)", () => {
       expect(boss.headers.location).toBe("/p/123");
       const me = (await app.inject({ url: "/api/auth/me", headers: { cookie: sessionCookie(boss) } })).json().user;
       expect(me).toMatchObject({ email: "boss@example.com", name: "The Boss", role: "admin" });
-      expect((await app.inject({ url: "/api/setup" })).json()).toEqual({ needsSetup: false });
+      expect((await app.inject({ url: "/api/setup" })).json()).toEqual({ needsSetup: false, localForVisitors: false });
       expect((await app.inject({ url: "/api/auth/providers" })).json().oidc).toEqual({ name: "Test IdP" });
       // From now on it's the usual rules: the stranger is auto-created with the default role.
       const later = await signIn(app, { sub: "x-1", email: "someone@example.com", name: "Someone" });
