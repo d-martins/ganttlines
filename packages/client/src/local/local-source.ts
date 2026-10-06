@@ -1,4 +1,15 @@
-import { Calendar } from "@ganttlines/engine";
+import {
+  applyCommand,
+  baselineTasks,
+  Calendar,
+  diffRows,
+  findTreeProblem,
+  hasCycle,
+  revertChanges,
+  type Command,
+  type ProjectState,
+  type RowChange,
+} from "@ganttlines/engine";
 import type {
   BaselineDto,
   BaselineSnapshotDto,
@@ -12,6 +23,7 @@ import type {
   LocationBody,
   LocationDto,
   ProjectDto,
+  ProjectStateDto,
   PublicHolidayDto,
   ResourceDto,
   ServerMessage,
@@ -62,6 +74,8 @@ export class LocalSource implements WorkspaceSource {
   private calendarCache: Calendar | null = null;
   private serialized: Promise<unknown> = Promise.resolve();
   protected readonly links = new Set<LocalLink>();
+  /** per project: undo/redo stacks of command ids, and each command's changes (this visit only) */
+  private readonly history = new Map<string, { undo: string[]; redo: string[]; changes: Map<string, RowChange[]> }>();
 
   private constructor(
     private readonly store: LocalStore,
@@ -117,8 +131,22 @@ export class LocalSource implements WorkspaceSource {
     });
   }
 
-  openBoard(_projectId: string): BoardConnection {
-    throw new ApiError(501, "not_implemented", "Boards are not available yet");
+  openBoard(projectId: string): BoardConnection {
+    return {
+      load: async (): Promise<ProjectStateDto> => {
+        const project = this.mustProject(projectId);
+        return { project: toProjectDto(project), rows: copy(project.rows) };
+      },
+      openLink: () => {
+        const link = new LocalLink(
+          (from, data) => void this.receive(from, data),
+          (gone) => this.links.delete(gone),
+        );
+        this.links.add(link);
+        return link;
+      },
+      isFatal: (error) => error instanceof ApiError && error.status >= 400 && error.status < 500,
+    };
   }
 
   // —— highlights and baselines ——
@@ -162,17 +190,45 @@ export class LocalSource implements WorkspaceSource {
     });
   }
 
-  async baselines(_projectId: string): Promise<BaselineDto[]> {
-    throw new ApiError(501, "not_implemented", "Baselines are not available yet");
+  async baselines(projectId: string): Promise<BaselineDto[]> {
+    return this.baselineList(this.mustProject(projectId));
   }
-  async baselineSnapshot(_projectId: string, _baselineId: string): Promise<BaselineSnapshotDto> {
-    throw new ApiError(501, "not_implemented", "Baselines are not available yet");
+
+  async baselineSnapshot(projectId: string, baselineId: string): Promise<BaselineSnapshotDto> {
+    const baseline = this.mustProject(projectId).baselines.find((entry) => entry.id === baselineId);
+    if (!baseline) throw notFound("Baseline");
+    return { baseline: { id: baseline.id, name: baseline.name, createdAt: baseline.createdAt, createdBy: baseline.createdBy }, tasks: copy(baseline.tasks) };
   }
-  async createBaseline(_projectId: string, _name: string): Promise<BaselineDto> {
-    throw new ApiError(501, "not_implemented", "Baselines are not available yet");
+
+  createBaseline(projectId: string, name: string): Promise<BaselineDto> {
+    return this.serial(async () => {
+      const { check, protocol } = await validation();
+      const body = check(protocol.CreateBaselineBody, { name });
+      const project = this.mustProject(projectId);
+      if (project.archived) throw conflict("This project is archived");
+      if (project.baselines.length >= MAX_BASELINES) throw conflict(`At most ${MAX_BASELINES} baselines per project`);
+      const baseline = { id: this.newId(), name: body.name, createdAt: this.now().toISOString(), createdBy: "You", tasks: baselineTasks(stateOf(project), this.engineCalendar()) };
+      project.baselines.push(baseline);
+      await this.persist(() => this.store.saveProject(project));
+      this.broadcast(project.id, { type: "baselines", projectId: project.id, baselines: this.baselineList(project) });
+      return { id: baseline.id, name: baseline.name, createdAt: baseline.createdAt, createdBy: baseline.createdBy };
+    });
   }
-  async deleteBaseline(_projectId: string, _baselineId: string): Promise<void> {
-    throw new ApiError(501, "not_implemented", "Baselines are not available yet");
+
+  deleteBaseline(projectId: string, baselineId: string): Promise<void> {
+    return this.serial(async () => {
+      const project = this.mustProject(projectId);
+      if (!project.baselines.some((entry) => entry.id === baselineId)) throw notFound("Baseline");
+      project.baselines = project.baselines.filter((entry) => entry.id !== baselineId);
+      await this.persist(() => this.store.saveProject(project));
+      this.broadcast(project.id, { type: "baselines", projectId: project.id, baselines: this.baselineList(project) });
+    });
+  }
+
+  private baselineList(project: ProjectRecord): BaselineDto[] {
+    return [...project.baselines]
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
+      .map((baseline) => ({ id: baseline.id, name: baseline.name, createdAt: baseline.createdAt, createdBy: baseline.createdBy }));
   }
 
   // —— the team calendar ——
@@ -366,6 +422,121 @@ export class LocalSource implements WorkspaceSource {
 
   // —— shared machinery ——
 
+  /** A message from a board's link: join/leave, or an edit/undo/redo answered with ack or reject. */
+  private async receive(link: LocalLink, data: string): Promise<void> {
+    const { protocol } = await validation();
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(data);
+    } catch {
+      return;
+    }
+    const result = protocol.ClientMessage.safeParse(parsed);
+    if (!result.success) return;
+    const message = result.data;
+    if (message.type === "leave") {
+      link.projectId = null;
+      return;
+    }
+    if (message.type === "join") {
+      const project = this.projects.get(message.projectId);
+      if (!project) return link.deliver({ type: "error", message: "Project not found" });
+      link.projectId = project.id;
+      // There is no local command log: a board that is behind (or ahead) reloads.
+      if (message.version !== project.version) link.deliver({ type: "reload", projectId: project.id });
+      link.deliver({ type: "joined", projectId: project.id, version: project.version, instanceVersion: this.workspace.instanceVersion, viewers: [] });
+      return;
+    }
+    const reject = (error: string, text: string) => link.deliver({ type: "reject", commandId: message.commandId, error, message: text });
+    const projectId = link.projectId;
+    if (!projectId) return reject("invalid", "Join a project first");
+    try {
+      if (message.type === "command") {
+        const version = await this.apply(projectId, message.commandId, protocol.toEngineCommand(message.command));
+        link.deliver({ type: "ack", commandId: message.commandId, version });
+      } else {
+        const { version, skipped } = await this.revert(projectId, message.type, message.commandId);
+        link.deliver({ type: "ack", commandId: message.commandId, version, skipped });
+      }
+    } catch (error) {
+      if (error instanceof ApiError) return reject(error.code, error.message);
+      reject("internal", "Something went wrong");
+    }
+  }
+
+  private historyOf(projectId: string) {
+    let history = this.history.get(projectId);
+    if (!history) {
+      history = { undo: [], redo: [], changes: new Map() };
+      this.history.set(projectId, history);
+    }
+    return history;
+  }
+
+  private apply(projectId: string, commandId: string, command: Command): Promise<number> {
+    return this.serial(async () => {
+      const project = this.mustProject(projectId);
+      if (project.archived) throw conflict("This project is archived");
+      const state = stateOf(project);
+      this.checkAssignee(state, command);
+      const result = applyCommand(state, this.engineCalendar(), command);
+      if (!result.ok) throw new ApiError(422, result.reason, result.message);
+      if (result.changes.length === 0) return project.version;
+      const history = this.historyOf(projectId);
+      history.undo.push(commandId);
+      history.changes.set(commandId, result.changes);
+      for (const dropped of history.undo.splice(0, Math.max(0, history.undo.length - 100))) history.changes.delete(dropped);
+      for (const dropped of history.redo.splice(0)) history.changes.delete(dropped);
+      return this.commit(project, result.state, commandId, result.changes);
+    });
+  }
+
+  /** Undo/redo of this visit's own latest change (skip-on-conflict, like the server). */
+  private revert(projectId: string, direction: "undo" | "redo", commandId: string): Promise<{ version: number; skipped: number }> {
+    return this.serial(async () => {
+      const project = this.mustProject(projectId);
+      if (project.archived) throw conflict("This project is archived");
+      const history = this.historyOf(projectId);
+      const stack = history[direction];
+      const target = stack.at(-1);
+      if (!target) throw new ApiError(422, "invalid", direction === "undo" ? "Nothing to undo" : "Nothing to redo");
+      const state = stateOf(project);
+      const { state: next, skipped } = revertChanges(state, history.changes.get(target) ?? [], direction);
+      // A change that can't apply any more is dropped from the history, so the next undo moves on.
+      const discard = (error: ApiError) => {
+        stack.pop();
+        return error;
+      };
+      if (findTreeProblem(Object.values(next.rows)) || hasCycle(next, this.engineCalendar())) {
+        throw discard(new ApiError(409, "conflict", `Can't ${direction} this any more: the board changed since`));
+      }
+      const changes = diffRows(state, next);
+      if (changes.length === 0) throw discard(new ApiError(409, "conflict", `Nothing left to ${direction}: it was all changed since`));
+      stack.pop();
+      (direction === "undo" ? history.redo : history.undo).push(target);
+      return { version: await this.commit(project, next, commandId, changes), skipped };
+    });
+  }
+
+  /** New assignees must be existing, active team members (keeping the current one is always fine). */
+  private checkAssignee(state: ProjectState, command: Command): void {
+    if (command.type !== "setAssignee" || command.resourceId === null) return;
+    const row = state.rows[command.id];
+    if (row?.kind === "task" && row.resourceId === command.resourceId) return;
+    const person = this.workspace.team.find((entry) => entry.id === command.resourceId);
+    if (!person) throw new ApiError(422, "invalid", "That team member does not exist");
+    if (person.inactive) throw new ApiError(422, "invalid", "That team member is inactive");
+  }
+
+  /** Keeps the new board state as the next version, saves it and sends the patch to its open boards. */
+  private async commit(project: ProjectRecord, state: ProjectState, commandId: string, changes: RowChange[]): Promise<number> {
+    project.rows = Object.values(state.rows);
+    project.version++;
+    await this.persist(() => this.store.saveProject(project));
+    this.broadcast(project.id, { type: "patch", projectId: project.id, version: project.version, commandId, actor: { userId: null, label: "You" }, changes });
+    return project.version;
+  }
+
   protected now(): Date {
     return (this.options.now ?? (() => new Date()))();
   }
@@ -432,6 +603,10 @@ export class LocalSource implements WorkspaceSource {
 function buildCalendar(workspace: WorkspaceRecord): Calendar {
   const dto = toCalendarDto(workspace);
   return new Calendar({ workingWeekdays: dto.workingWeekdays, holidays: dto.holidays, timeOff: dto.timeOff });
+}
+
+function stateOf(project: ProjectRecord): ProjectState {
+  return { rows: Object.fromEntries(project.rows.map((row) => [row.id, row])) };
 }
 
 function assertPeople(workspace: WorkspaceRecord, ids: "all" | readonly string[]): void {

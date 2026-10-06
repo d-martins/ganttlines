@@ -4,6 +4,7 @@ import { MemoryStore } from "../src/local/store";
 import { validation } from "../src/local/validation";
 import { workspaceContract } from "../testing/contract";
 import { LocalSource } from "../src/local/local-source";
+import type { ServerMessage } from "@ganttlines/protocol";
 
 describe("local records", () => {
   it("starts empty, with Monday–Friday working days", async () => {
@@ -81,5 +82,66 @@ describe("local workspace storage", () => {
     await expect(source.createProject({ name: "" })).rejects.toMatchObject({ status: 400, code: "invalid_request" });
     await expect(source.updateResource("77777777-7777-4777-8777-777777777777", { name: "X" })).rejects.toMatchObject({ status: 404, message: "Team member not found" });
     await expect(source.setWorkingWeekdays([])).rejects.toMatchObject({ status: 400 });
+  });
+});
+
+const TASK = "11111111-1111-4111-8111-111111111111";
+const createDesign = (commandId: string) =>
+  JSON.stringify({ type: "command", commandId, command: { type: "createRow", id: TASK, kind: "task", parentId: null, afterId: null, title: "Design", start: "2026-10-05" } });
+/** Collects what a link receives; resolves once `count` messages arrived. */
+function inbox(link: { onmessage: ((event: { data: unknown }) => void) | null }) {
+  const messages: ServerMessage[] = [];
+  link.onmessage = (event) => messages.push(JSON.parse(String(event.data)) as ServerMessage);
+  return messages;
+}
+const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+describe("local boards", () => {
+  it("sends each change to every open board of the project, and the answer only to the sender", async () => {
+    const source = await LocalSource.open(new MemoryStore());
+    const project = await source.createProject({ name: "Launch" });
+    const board = source.openBoard(project.id);
+    const [a, b] = [board.openLink(), board.openLink()];
+    const [toA, toB] = [inbox(a), inbox(b)];
+    await settle();
+    for (const link of [a, b]) link.send(JSON.stringify({ type: "join", projectId: project.id, version: 0 }));
+    await settle();
+    a.send(createDesign("22222222-2222-4222-8222-222222222222"));
+    await settle();
+    expect(toA.map((message) => message.type)).toEqual(["joined", "patch", "ack"]);
+    expect(toB.map((message) => message.type)).toEqual(["joined", "patch"]);
+  });
+
+  it("starts each visit with an empty undo history", async () => {
+    const store = new MemoryStore();
+    const first = await LocalSource.open(store);
+    const project = await first.createProject({ name: "Launch" });
+    const link = first.openBoard(project.id).openLink();
+    await settle();
+    link.send(JSON.stringify({ type: "join", projectId: project.id, version: 0 }));
+    link.send(createDesign("22222222-2222-4222-8222-222222222222"));
+    await settle();
+    const again = await LocalSource.open(store);
+    const later = again.openBoard(project.id).openLink();
+    const received = inbox(later);
+    await settle();
+    later.send(JSON.stringify({ type: "join", projectId: project.id, version: 1 }));
+    later.send(JSON.stringify({ type: "undo", commandId: "33333333-3333-4333-8333-333333333333" }));
+    await settle();
+    expect(received).toContainEqual(expect.objectContaining({ type: "reject", message: "Nothing to undo" }));
+    expect((await again.openBoard(project.id).load()).rows).toEqual([expect.objectContaining({ id: TASK })]);
+  });
+
+  it("ends a deleted project's open boards", async () => {
+    const source = await LocalSource.open(new MemoryStore());
+    const project = await source.createProject({ name: "Launch" });
+    const link = source.openBoard(project.id).openLink();
+    const closed = new Promise<number>((resolve) => (link.onclose = (event) => resolve(event.code)));
+    await settle();
+    link.send(JSON.stringify({ type: "join", projectId: project.id, version: 0 }));
+    await settle();
+    await source.updateProject(project.id, { archived: true });
+    await source.deleteProject(project.id);
+    expect(await closed).toBe(4004);
   });
 });
