@@ -509,7 +509,7 @@ export function ListRows({
                 </CellButton>
               )}
             </span>
-            <span role="gridcell" className={`flex justify-end gap-0.5 ${selected ? "" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"}`}>
+            <span role="gridcell" className={`flex justify-end gap-1 ${selected ? "" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"}`}>
               <RowActions id={row.id} title={row.title} />
             </span>
           </div>
@@ -588,7 +588,7 @@ function RowActions({ id, title }: { id: RowId; title: string }) {
       <IconButton
         data-row-action
         label={`Show “${name}” on the chart`}
-        className="h-6 w-6"
+        className="h-6 w-auto! px-1"
         onClick={(event) => {
           event.stopPropagation();
           select(id, false);
@@ -601,7 +601,7 @@ function RowActions({ id, title }: { id: RowId; title: string }) {
         data-row-action
         label={`Open details of “${name}”`}
         aria-pressed={showing}
-        className={`h-6 w-6 ${showing ? "bg-accent-soft text-text" : ""}`}
+        className={`h-6 w-auto! px-1 ${showing ? "bg-accent-soft text-text" : ""}`}
         onClick={(event) => {
           event.stopPropagation();
           // A toggle for this row's details; on another row it just moves the panel there.
@@ -615,7 +615,7 @@ function RowActions({ id, title }: { id: RowId; title: string }) {
         <IconButton
           data-row-action
           label={`Delete “${name}”`}
-          className="h-6 w-6 hover:text-danger"
+          className="h-6 w-auto! px-1 hover:text-danger"
           onClick={(event) => {
             event.stopPropagation();
             const row = board.state.rows[id];
