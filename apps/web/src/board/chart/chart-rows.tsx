@@ -1,5 +1,5 @@
 import { fromDay, spanEnd, spanStart, type Command, type DayNum, type RowId } from "@ganttlines/engine";
-import { ArrowLeft, ArrowRight, UserRound } from "lucide-react";
+import { UserRound } from "lucide-react";
 import { useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { AssigneePicker } from "../assignee-picker";
 import { runCommand, useBoard } from "../board-context";
@@ -29,7 +29,6 @@ export function ChartRows({
   timeline,
   style,
   visibleLeft,
-  visibleWidth,
 }: {
   /** the rendered window (already showing any drag preview) */
   rows: readonly BoardRow[];
@@ -40,8 +39,6 @@ export function ChartRows({
   style: BarStyle;
   /** chart x of the first visible pixel (the list covers what's left of it) */
   visibleLeft: number;
-  /** how much of the chart is visible */
-  visibleWidth: number;
 }) {
   const board = useBoard();
   const { state, resources, resourceMap, canEdit, canCreateResources } = board;
@@ -213,9 +210,6 @@ export function ChartRows({
             {kind === "section" ? (
               <SectionBand title={row.title || "Untitled"} />
             ) : null}
-            {box && kind !== "section" ? (
-              <OffscreenPointers id={row.id} title={row.title || "Untitled"} box={box} visibleLeft={visibleLeft} visibleWidth={visibleWidth} />
-            ) : null}
             {span && kind !== "section" ? (
               <RowBar
                 entry={entry}
@@ -266,31 +260,28 @@ export function ChartRows({
                   className="absolute h-2.5 w-2.5 cursor-crosshair rounded-full border-2 border-[var(--dependency)] bg-bg opacity-0 group-hover/row:opacity-100 hover:scale-125"
                   style={{ left: box.right + 4, top: center - 5 }}
                 />
-                {/* Just left of the bar; sticky, so it stays past the task list and its edge arrow while the bar is in view. */}
-                <div className="pointer-events-none absolute left-0 flex items-center" style={{ width: box.right, top: center - 10, height: 20 }}>
-                  <div
-                    data-bar-tools
-                    className={`pointer-events-auto sticky flex gap-1 group-focus-within/row:opacity-100 group-hover/row:opacity-100 ${menuFor === row.id ? "opacity-100" : "opacity-0"}`}
-                    style={{ marginLeft: Math.max(box.left - 50, 0), left: "calc(var(--list-width) + 30px)" }}
-                    onClick={(event) => event.stopPropagation()}
-                  >
-                    <AssigneePicker
-                      value={task!.resourceId}
-                      resources={resources}
-                      canCreate={canCreateResources}
-                      onChange={(resourceId) => run({ type: "setAssignee", id: row.id, resourceId })}
-                      trigger={
-                        <button
-                          type="button"
-                          aria-label={`Assign “${row.title || "Untitled"}”`}
-                          className="flex h-5 w-5 items-center justify-center rounded bg-bg text-muted shadow-sm ring-1 ring-border hover:text-text"
-                        >
-                          <UserRound size={12} />
-                        </button>
-                      }
-                    />
-                    <BarMenu task={task!} isParent={entry.isParent} open={menuFor === row.id} onOpenChange={(open) => setMenuFor(open ? row.id : null)} />
-                  </div>
+                <div
+                  className={`absolute flex gap-1 group-focus-within/row:opacity-100 group-hover/row:opacity-100 ${menuFor === row.id ? "opacity-100" : "opacity-0"}`}
+                  // Left of the bar, but never under the task list (then it overlaps the bar's start).
+                  style={{ left: Math.max(box.left - 50, visibleLeft + 4), top: center - 10 }}
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <AssigneePicker
+                    value={task!.resourceId}
+                    resources={resources}
+                    canCreate={canCreateResources}
+                    onChange={(resourceId) => run({ type: "setAssignee", id: row.id, resourceId })}
+                    trigger={
+                      <button
+                        type="button"
+                        aria-label={`Assign “${row.title || "Untitled"}”`}
+                        className="flex h-5 w-5 items-center justify-center rounded bg-bg text-muted shadow-sm ring-1 ring-border hover:text-text"
+                      >
+                        <UserRound size={12} />
+                      </button>
+                    }
+                  />
+                  <BarMenu task={task!} isParent={entry.isParent} open={menuFor === row.id} onOpenChange={(open) => setMenuFor(open ? row.id : null)} />
                 </div>
               </>
             ) : null}
@@ -344,68 +335,6 @@ function SectionBand({ title }: { title: string }) {
       <span className="sticky text-xs font-semibold text-muted" style={{ left: "calc(var(--list-width) + 8px)" }}>
         {title}
       </span>
-    </div>
-  );
-}
-
-const ARROW =
-  "pointer-events-none sticky z-[3] flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-muted shadow-sm opacity-0 scale-75 transition duration-150 hover:text-text data-[shown=true]:pointer-events-auto data-[shown=true]:scale-100 data-[shown=true]:opacity-100";
-
-/**
- * Arrows pinned (sticky) to the visible chart's edges: the left one shows when the bar starts
- * before the view, the right one when it ends after it. A click scrolls to the bar.
- */
-function OffscreenPointers({
-  id,
-  title,
-  box,
-  visibleLeft,
-  visibleWidth,
-}: {
-  id: RowId;
-  title: string;
-  box: { left: number; right: number };
-  visibleLeft: number;
-  visibleWidth: number;
-}) {
-  const focus = useSelection((selection) => selection.center);
-  const visibleRight = visibleLeft + visibleWidth;
-  const before = visibleWidth > 0 && box.left < visibleLeft;
-  const after = visibleWidth > 0 && box.right > visibleRight;
-  // Wholly ahead: bring its start into view; partly: its end.
-  const aheadEdge = box.left >= visibleRight ? undefined : "end";
-  return (
-    <div className="pointer-events-none absolute inset-0 flex items-center justify-between">
-      <button
-        type="button"
-        aria-label={`Scroll back to “${title}”`}
-        data-shown={before}
-        tabIndex={before ? 0 : -1}
-        aria-hidden={!before}
-        className={ARROW}
-        style={{ left: "calc(var(--list-width) + 4px)" }}
-        onClick={(event) => {
-          event.stopPropagation();
-          focus(id);
-        }}
-      >
-        <ArrowLeft size={11} aria-hidden />
-      </button>
-      <button
-        type="button"
-        aria-label={`Scroll ahead to “${title}”`}
-        data-shown={after}
-        tabIndex={after ? 0 : -1}
-        aria-hidden={!after}
-        className={ARROW}
-        style={{ right: 4 }}
-        onClick={(event) => {
-          event.stopPropagation();
-          focus(id, aheadEdge);
-        }}
-      >
-        <ArrowRight size={11} aria-hidden />
-      </button>
     </div>
   );
 }
