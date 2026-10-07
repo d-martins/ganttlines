@@ -221,7 +221,10 @@ export function Board({
     const span = centerRequest ? model.rows.find((entry) => entry.row.id === centerRequest.id)?.span : null;
     if (!element || !span) return;
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const left = Math.max(timeline.x(span.start) - BAR_REVEAL_MARGIN, 0);
+    const left =
+      centerRequest?.edge === "end"
+        ? Math.max(timeline.xEnd(span.end) + BAR_REVEAL_MARGIN - chartWidth, 0)
+        : Math.max(timeline.x(span.start) - BAR_REVEAL_MARGIN, 0);
     if (typeof element.scrollTo === "function") element.scrollTo({ left, behavior: reduce ? "auto" : "smooth" });
     else element.scrollLeft = left;
     // Only a new request moves the chart; later edits to the row don't (model/timeline are read at request time).
@@ -236,7 +239,21 @@ export function Board({
     if (top < element.scrollTop) element.scrollTop = top;
     else if (visibleHeight > 0 && top + rowHeight > element.scrollTop + visibleHeight) element.scrollTop = top + rowHeight - visibleHeight;
   }, [selectedIndex, rowHeight]);
-  const grid = { backgroundImage: `linear-gradient(to bottom, transparent ${rowHeight - 1}px, var(--grid) ${rowHeight - 1}px)`, backgroundSize: `100% ${rowHeight}px` };
+  // Faint lines between rows, and between days (between weeks when zoomed out; none by month).
+  const scale = scaleOf(dayWidth);
+  const shownPerWeek = showWeekends ? 7 : calendarDto.workingWeekdays.length;
+  const column = scale === "day" ? dayWidth : scale === "week" ? dayWidth * shownPerWeek : 0;
+  const firstMonday = timeline.first + ((8 - weekday(timeline.first)) % 7);
+  const columnOffset = column > 0 && scale === "week" ? timeline.x(firstMonday) % column : 0;
+  const rowLines = `linear-gradient(to bottom, transparent ${rowHeight - 1}px, var(--grid) ${rowHeight - 1}px)`;
+  const grid =
+    column > 0
+      ? {
+          backgroundImage: `${rowLines}, linear-gradient(to right, var(--grid-day) 1px, transparent 1px)`,
+          backgroundSize: `100% ${rowHeight}px, ${column}px 100%`,
+          backgroundPosition: `0 0, ${columnOffset}px 0`,
+        }
+      : { backgroundImage: rowLines, backgroundSize: `100% ${rowHeight}px` };
 
   const startResize = (event: ReactPointerEvent) => {
     event.preventDefault();
@@ -329,7 +346,7 @@ export function Board({
               ) : null}
               <div aria-hidden className="absolute top-0 w-0.5 bg-[var(--today)]" style={{ left: timeline.x(todayDay) + timeline.dayWidth / 2 - 1, height: bodyHeight }} />
               <Dependencies rows={model.rows} firstRow={firstRow} lastRow={lastRow} timeline={timeline} style={barStyle} />
-              <ChartRows rows={shown} allRows={model.rows} firstRow={firstRow} timeline={timeline} style={barStyle} visibleLeft={viewport.left} />
+              <ChartRows rows={shown} allRows={model.rows} firstRow={firstRow} timeline={timeline} style={barStyle} visibleLeft={viewport.left} visibleWidth={chartWidth} />
             </div>
             </DayMenu>
           </div>

@@ -67,6 +67,35 @@ describe("chart editing", () => {
     useBoardView.getState().setBarStyle("compact");
   });
 
+  it("points to bars beyond the visible chart, and scrolls to them", async () => {
+    const { user } = await chartBoard();
+    const scroller = screen.getByTestId("board-scroller");
+    const scrollTo = vi.fn();
+    scroller.scrollTo = scrollTo as unknown as typeof scroller.scrollTo;
+    const left = (name: RegExp) => parseFloat((bar(name) as HTMLElement).style.left);
+    // hooks entirely to the right of the visible 700 px: an arrow with its title at the right edge.
+    scroller.scrollLeft = left(/^hooks,/) - 800;
+    fireEvent.scroll(scroller);
+    const later = await screen.findByRole("button", { name: "Scroll to “hooks”" });
+    expect(later).toHaveTextContent("hooks");
+    await user.click(later);
+    expect(scrollTo).toHaveBeenCalled();
+    // ui starting before the visible chart and ending inside it: just an arrow at the left edge.
+    scroller.scrollLeft = left(/^ui,/) + 40;
+    fireEvent.scroll(scroller);
+    const earlier = await screen.findByRole("button", { name: "Scroll to the start of “ui”" });
+    expect(earlier).not.toHaveTextContent("ui");
+    expect(screen.queryByRole("button", { name: "Scroll to the end of “ui”" })).not.toBeInTheDocument();
+  });
+
+  it("shows sections as dividers across the chart, without dates", async () => {
+    await chartBoard();
+    expect(screen.queryByLabelText(/^x,/)).not.toBeInTheDocument(); // no summary bar
+    expect(document.querySelector("[data-section-band]")).toHaveTextContent("x");
+    const sectionRow = screen.getAllByRole("row").find((row) => within(row).queryByText("x", { exact: true }))!;
+    expect(within(sectionRow).queryByRole("button", { name: /Working days/ })).not.toBeInTheDocument();
+  });
+
   it("names holidays in the date header (shown on hover)", async () => {
     await chartBoard();
     const marker = await screen.findByLabelText(/^Holiday .*Oct 5.*: Republic Day$/);

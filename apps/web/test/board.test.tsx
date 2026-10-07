@@ -95,13 +95,15 @@ describe("board", () => {
     expect(within(grid).getAllByRole("row")[1]).toHaveAttribute("aria-rowindex", "2"); // the first task, after the header
   });
 
-  it("draws bars, milestones, brackets, sections and dependency arrows", async () => {
+  it("draws bars, milestones, brackets, section dividers and dependency arrows", async () => {
     await joinedBoard();
     expect(screen.getByLabelText(`ui, ${d("2026-09-30")} – ${d("2026-10-08")}, Ana Silva`)).toBeInTheDocument();
     expect(screen.getByLabelText(`hooks, ${d("2026-10-09")} – ${d("2026-10-12")}`)).toBeInTheDocument();
     expect(screen.getByLabelText(`ms, ${d("2026-10-14")}`)).toBeInTheDocument();
     expect(screen.getByLabelText(`parent, ${d("2026-10-12")} – ${d("2026-10-14")}`)).toBeInTheDocument();
-    expect(screen.getByLabelText(`design, ${d("2026-09-30")} – ${d("2026-10-12")}`)).toBeInTheDocument();
+    // Sections are dividers across the chart, not bars.
+    expect(screen.queryByLabelText(/^design,/)).not.toBeInTheDocument();
+    expect([...document.querySelectorAll("[data-section-band]")].map((band) => band.textContent)).toContain("design");
     const arrows = screen.getAllByTestId("dependency");
     expect(arrows).toHaveLength(2);
     expect(arrows.filter((arrow) => arrow.dataset["violation"])).toHaveLength(1);
@@ -224,6 +226,17 @@ describe("board", () => {
     useBoardView.setState(initialBoardView());
     await joinedBoard();
     expect(barWidth(`hooks, ${d("2026-10-09")} – ${d("2026-10-12")}`)).toBe(4 * 12);
+  });
+
+  it("draws faint lines between days (between weeks when zoomed out)", async () => {
+    const { user } = await joinedBoard();
+    const body = () => document.querySelector("[data-chart-body]") as HTMLElement;
+    expect(body().style.backgroundImage).toContain("var(--grid-day)");
+    expect(body().style.backgroundSize).toContain("32px 100%");
+    await user.click(screen.getByRole("button", { name: "Week" }));
+    expect(body().style.backgroundSize).toContain(`${7 * 12}px 100%`);
+    await user.click(screen.getByRole("button", { name: "Month" }));
+    expect(body().style.backgroundImage).not.toContain("var(--grid-day)");
   });
 
   it("shows each day's weekday letter when days are wide enough", async () => {

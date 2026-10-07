@@ -11,6 +11,8 @@
   /* the task list's edge over the chart */
   --list-edge: #c4cad4;
   --list-shadow: 4px 0 10px -4px rgb(20 30 50 / 0.18);
+  /* a section's divider band across the chart */
+  --section-band: #eef1f5;
   --text: #1d2330;
   --muted: #5b6474;
   --accent: #1f6fd6;
@@ -20,6 +22,7 @@
   --focus: #1f6fd6;
   /* Chart. Task colors are dark enough for white titles (AA) except the light ones, which use dark ink. */
   --grid: #eef0f4;
+  --grid-day: rgb(20 30 50 / 0.05);
   --weekend: #f4f5f8;
   --holiday: #eceff4;
   --holiday-stripe: #dde1e8;
@@ -56,6 +59,7 @@
   --border-strong: #6f7380;
   --list-edge: #4a4c54;
   --list-shadow: 4px 0 12px -4px rgb(0 0 0 / 0.55);
+  --section-band: #2a2b30;
   --text: #e8e8ea;
   --muted: #a9acb5;
   --accent: #4a9eff;
@@ -64,6 +68,7 @@
   --danger: #ff7b7b;
   --focus: #6fb2ff;
   --grid: #2c2d31;
+  --grid-day: rgb(255 255 255 / 0.04);
   --weekend: #25262a;
   --holiday: #2a2b30;
   --holiday-stripe: #34353b;
