@@ -3,8 +3,6 @@ import { describe, expect, it } from "vitest";
 import { elbow } from "../src/board/chart/dependencies";
 import { chartRange, Timeline } from "../src/board/chart/timeline";
 import { dropMove } from "../src/board/list/list-actions";
-import { predecessorText } from "../src/board/list/task-list";
-import type { BoardRow } from "../src/board/model";
 import { outline } from "../src/board/rows";
 import { section, task } from "./board-fixtures";
 
@@ -69,13 +67,6 @@ describe("outline", () => {
 });
 
 describe("list and arrows", () => {
-  it("writes predecessors as their row number only (offsets are never shown)", () => {
-    const numbers = new Map([["p", 3]]);
-    const entry = (offset: number) => ({ row: task("t", { predecessorId: "p", offset }) }) as BoardRow;
-    expect(predecessorText(entry(0), numbers)).toBe("#3");
-    expect(predecessorText(entry(-8), numbers)).toBe("#3");
-  });
-
   it("routes arrows out of the predecessor's bottom or top into the successor's left side", () => {
     const pred = { left: 40, right: 100, y: 15, half: 7 };
     // successor starts after the predecessor ends: drop near the predecessor's end
@@ -94,7 +85,7 @@ describe("list width", () => {
     const { useBoardView, LIST_WIDTH } = await import("../src/board/view-store");
     useBoardView.getState().setListWidth(250);
     expect(useBoardView.getState().listWidth).toBe(LIST_WIDTH.min);
-    expect(LIST_WIDTH.min).toBe(40 + 96 + 120 + 40 + 40 + 56 + 48 + 8);
+    expect(LIST_WIDTH.min).toBe(40 + 96 + 120 + 40 + 40 + 76 + 8); // actions: three 24 px buttons, 2 px apart
   });
 });
 

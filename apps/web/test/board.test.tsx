@@ -69,10 +69,10 @@ describe("board", () => {
   });
   afterEach(() => vi.useRealTimers());
 
-  it("shows the outline with numbers, durations and predecessors", async () => {
+  it("shows the outline with numbers and durations (no predecessor column)", async () => {
     await joinedBoard();
     expect(within(listRow("hooks")).getByText("3")).toBeInTheDocument();
-    expect(within(listRow("hooks")).getByText("#2")).toBeInTheDocument();
+    expect(within(listRow("hooks")).queryByText("#2")).not.toBeInTheDocument(); // predecessors live in the details panel
     // ui: 5 working days over 9 calendar days
     expect(within(listRow("ui")).getByText("5")).toBeInTheDocument();
     expect(within(listRow("ui")).getByRole("gridcell", { name: "No actual work days" })).toBeInTheDocument();
@@ -88,7 +88,6 @@ describe("board", () => {
       "Assignee",
       "Working days",
       "Actual work days",
-      "Predecessor",
       "Actions",
     ]);
     expect(grid).toHaveAttribute("aria-rowcount", String(within(grid).getAllByRole("row").length));

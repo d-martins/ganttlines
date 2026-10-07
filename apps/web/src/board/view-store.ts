@@ -23,8 +23,8 @@ const isZoom = (value: unknown): value is Zoom => value === "day" || value === "
 const isBarStyle = (value: unknown): value is BarStyle => value === "compact" || value === "roomy";
 const isWidth = (value: unknown): value is number => typeof value === "number" && value >= LIST_WIDTH.min && value <= LIST_WIDTH.max;
 
-/** `min` fits every list column (see COLUMNS in list/task-list.tsx: 420 px of columns + 8 px padding). */
-export const LIST_WIDTH = { min: 448, max: 900, initial: 500 } as const;
+/** `min` fits every list column (see COLUMNS in list/task-list.tsx: 412 px of columns + 8 px padding). */
+export const LIST_WIDTH = { min: 420, max: 900, initial: 500 } as const;
 
 const isStep = (value: unknown): value is number => typeof value === "number" && (ZOOM_STEPS as readonly number[]).includes(value);
 
