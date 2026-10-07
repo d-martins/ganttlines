@@ -67,6 +67,13 @@ describe("chart editing", () => {
     useBoardView.getState().setBarStyle("compact");
   });
 
+  it("keeps a bar's quick tools just past the task list by CSS (sticky) while the bar starts under it", async () => {
+    await chartBoard();
+    const tools = screen.getByRole("button", { name: "Options for “ui”" }).closest("[data-bar-tools]") as HTMLElement;
+    expect(tools.className).toContain("sticky");
+    expect(tools.style.left).toBe("calc(var(--list-width) + 4px)");
+  });
+
   it("shows sections as dividers across the chart, without dates", async () => {
     await chartBoard();
     expect(screen.queryByLabelText(/^x,/)).not.toBeInTheDocument(); // no summary bar
