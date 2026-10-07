@@ -1,4 +1,4 @@
-import { fromDay, spanStart as spanStartHalf, TASK_COLORS, type Command } from "@ganttlines/engine";
+import { fromDay, TASK_COLORS, type Command } from "@ganttlines/engine";
 import type { Project } from "@ganttlines/db";
 import { CommandSchema, CreateProjectBody, toEngineCommand } from "@ganttlines/protocol";
 import { randomUUID } from "node:crypto";
@@ -29,6 +29,8 @@ export interface LastCall {
 class BoardEdit {
   readonly commandIds: string[] = [];
   rows: OutlineRow[] = [];
+  /** The task the call is working on now (named in its error, if it fails there). */
+  about: string | null = null;
 
   constructor(
     private readonly tools: ToolContext,
@@ -67,28 +69,47 @@ class BoardEdit {
     await this.tools.context.db.mcpConnection.updateMany({ where: { id: this.tools.caller.connectionId }, data: { lastCall: { ...lastCall } } });
   }
 
-  /** Runs the steps; on a failure, says how far it got (what was done stays, and can be undone). */
+  /** Runs the steps all or nothing: on a failure, this call's changes are reverted and the error names the task. */
   async steps(work: () => Promise<void>): Promise<void> {
     try {
       await work();
     } catch (error) {
-      await this.remember();
+      const left = await this.revert();
       if (!(error instanceof ToolProblem || error instanceof HttpError)) throw error;
-      const done = this.commandIds.length;
-      throw new ToolProblem(
-        `${error.message}${done ? ` — stopped there. ${done} ${done === 1 ? "change" : "changes"} before it ${done === 1 ? "was" : "were"} made; call undo to revert ${done === 1 ? "it" : "them"}.` : ""}`,
-      );
+      const message = /[.!?]$/.test(error.message) ? error.message : `${error.message}.`;
+      const outcome = left
+        ? ` ${left} of this call's changes couldn't be reverted (someone changed those rows meanwhile); undo won't reach them, so check the board.`
+        : " Nothing was changed.";
+      throw new ToolProblem(`${this.about ? `“${this.about}”: ` : ""}${message}${outcome}`);
     }
     await this.remember();
   }
 
-  /** The rows with these ids as they are now (dates computed). */
+  /** Reverts this call's changes, newest first; how many couldn't be. */
+  private async revert(): Promise<number> {
+    let left = 0;
+    for (const target of [...this.commandIds].reverse()) {
+      try {
+        left += (await this.tools.context.projects.undoCommand(this.project.id, this.actor, randomUUID(), target)).skipped > 0 ? 1 : 0;
+      } catch (error) {
+        if (!(error instanceof HttpError)) throw error;
+        left++;
+      }
+    }
+    this.commandIds.length = 0;
+    return left;
+  }
+
+  /** The rows with these ids as they are now (dates computed), in the order of `ids`. */
   async describe(ids: readonly string[]) {
     await this.load();
     const people = new Map((await this.tools.context.instance.resources()).map((person) => [person.id, person.name]));
     const names = { people, rows: new Map(this.rows.map((entry) => [entry.row.id, entry.row.title])) };
-    const wanted = new Set(ids);
-    return this.rows.filter((entry) => wanted.has(entry.row.id)).map((entry) => describeRow(entry, names));
+    const byId = new Map(this.rows.map((entry) => [entry.row.id, entry]));
+    return ids.flatMap((id) => {
+      const entry = byId.get(id);
+      return entry ? [describeRow(entry, names)] : [];
+    });
   }
 }
 
@@ -178,6 +199,7 @@ export const writePlans: ToolGroup = (server, tools) => {
         const added: { id: string; title: string }[] = [];
         await edit.steps(async () => {
           for (const item of tasks) {
+            edit.about = item.title;
             const kind = item.kind ?? "task";
             const parentId = item.parent ? edit.find(item.parent, "any", added).id : null;
             const siblings = edit.rows.filter((entry) => entry.row.parentId === parentId);
@@ -195,7 +217,12 @@ export const writePlans: ToolGroup = (server, tools) => {
           }
         });
         const rows = await edit.describe(added.map((row) => row.id));
-        return answer(`Added ${rows.length} ${rows.length === 1 ? "row" : "rows"} to “${edit.project.name}”.`, { project: edit.project.name, added: rows });
+        const notes = placementNotes(tasks.map((item, index) => ({ title: item.title, asked: item, row: rows[index] })));
+        return answer(`Added ${rows.length} ${rows.length === 1 ? "row" : "rows"} to “${edit.project.name}”.${notes.length ? ` ${notes.join(" ")}` : ""}`, {
+          project: edit.project.name,
+          added: rows,
+          ...(notes.length ? { notes } : {}),
+        });
       }),
   );
 
@@ -219,6 +246,7 @@ export const writePlans: ToolGroup = (server, tools) => {
       guarded(async () => {
         const edit = await editProject(tools, ref);
         const task = edit.find(taskRef, "task");
+        edit.about = task.title;
         await edit.steps(async () => {
           if (fields.title !== undefined) await edit.run({ type: "updateTitle", id: task.id, title: fields.title });
           await applyTaskFields(edit, task.id, fields, await people(), [], false);
@@ -226,7 +254,8 @@ export const writePlans: ToolGroup = (server, tools) => {
           if (fields.actualDurationDays !== undefined) await edit.run({ type: "setActualDuration", id: task.id, days: fields.actualDurationDays });
         });
         const [row] = await edit.describe([task.id]);
-        return answer(`Updated “${task.title}”.`, { task: row });
+        const notes = placementNotes([{ title: fields.title ?? task.title, asked: fields, row }]);
+        return answer(`Updated “${task.title}”.${notes.length ? ` ${notes.join(" ")}` : ""}`, { task: row, ...(notes.length ? { notes } : {}) });
       }),
   );
 
@@ -252,6 +281,7 @@ export const writePlans: ToolGroup = (server, tools) => {
           let previous: string | null =
             after === null ? null : (afterRow?.id ?? edit.rows.filter((entry) => entry.row.parentId === parentId && !moving.some((row) => row.id === entry.row.id)).at(-1)?.row.id ?? null);
           for (const row of moving) {
+            edit.about = row.title;
             await edit.run({ type: "moveRow", id: row.id, parentId, afterId: previous });
             previous = row.id;
             await edit.load();
@@ -315,6 +345,23 @@ export const writePlans: ToolGroup = (server, tools) => {
   );
 };
 
+/**
+ * Where a task asked to start on a date ended up elsewhere (its predecessor and lag, or the
+ * calendar, decide), says so — instead of reporting success as if it were stored as asked.
+ */
+function placementNotes(entries: { title: string; asked: { start?: string | undefined; half?: "morning" | "afternoon" | undefined }; row: unknown }[]): string[] {
+  const notes: string[] = [];
+  for (const { title, asked, row } of entries) {
+    const placed = row as { start?: string | null; startsAfternoon?: boolean } | undefined;
+    if (!asked.start || !placed?.start) continue;
+    const askedAfternoon = asked.half === "afternoon";
+    if (placed.start === asked.start && Boolean(placed.startsAfternoon) === askedAfternoon) continue;
+    const when = (day: string, afternoon: boolean) => `${day}${afternoon ? " (afternoon)" : ""}`;
+    notes.push(`“${title}” was asked to start ${when(asked.start, askedAfternoon)} but starts ${when(placed.start, Boolean(placed.startsAfternoon))}: its predecessor and lag, or the calendar, place it there.`);
+  }
+  return notes;
+}
+
 function spanStart(edit: BoardEdit, id: string): string | null {
   const span = edit.row(id)?.span;
   return span ? fromDay(span.start) : null;
@@ -344,6 +391,21 @@ async function applyTaskFields(
   if (fields.durationDays !== undefined) await edit.run({ type: "setDuration", id, duration: fields.durationDays });
   if (fields.start !== undefined && (!startAlready || fields.half === "afternoon")) {
     await edit.run({ type: "moveTask", id, start: fields.start, ...(fields.half ? { half: fields.half } : {}) });
+  } else if (fields.start === undefined && fields.half !== undefined) {
+    // Only the half day: the same start day, in the morning or the afternoon.
+    await edit.load();
+    const entry = edit.row(id);
+    if (!entry?.span) throw new ToolProblem("This task has no start date yet: give `start` along with `half`.");
+    const afternoon = fields.half === "afternoon";
+    if (entry.span.startsAfternoon !== afternoon) {
+      const row = entry.row as { predecessorId?: string | null; offset?: number; locked?: boolean };
+      if (row.predecessorId && !row.locked) {
+        // A follower keeps following: its lag moves by half a day (moving the bar would pin its date).
+        await edit.run({ type: "setOffset", id, offset: (row.offset ?? 0) + (afternoon ? 0.5 : -0.5) });
+      } else {
+        await edit.run({ type: "moveTask", id, start: fromDay(entry.span.start), half: fields.half });
+      }
+    }
   }
   if (fields.assignee !== undefined) {
     await edit.run({ type: "setAssignee", id, resourceId: fields.assignee === null ? null : pickPerson(team, fields.assignee).id });
@@ -353,13 +415,10 @@ async function applyTaskFields(
   } else if (fields.predecessor !== undefined) {
     const predecessor = edit.find(fields.predecessor, "task", added);
     await edit.load();
-    // The engine links two tasks with the earlier-starting one first. Here the direction is the AI's:
-    // a follower that isn't scheduled yet, or starts first, is placed where its predecessor starts,
-    // and the link then places it after.
-    const before = edit.row(predecessor.id)?.span;
-    const follower = edit.row(id)?.span;
-    if (before && (!follower || spanStartHalf(follower) < spanStartHalf(before))) {
-      await edit.run({ type: "moveTask", id, start: fromDay(before.start), ...(before.startsAfternoon ? { half: "afternoon" as const } : {}) });
+    if (!edit.row(id)?.span) {
+      // An unscheduled task can't be linked yet: place it where its predecessor starts first.
+      const start = spanStart(edit, predecessor.id);
+      if (start) await edit.run({ type: "moveTask", id, start });
     }
     await edit.run({ type: "linkTasks", fromId: predecessor.id, toId: id });
   }

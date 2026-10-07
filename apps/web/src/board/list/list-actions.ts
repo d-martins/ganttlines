@@ -56,20 +56,16 @@ export function deleteRow(board: Board, row: Row): void {
 }
 
 /**
- * Sets (or removes, with null) a task's predecessor. The engine makes the earlier-starting task
- * the predecessor, so picking one that starts later reverses the link (explained in a toast).
- * Offsets are never shown or typed: dragging a linked task records them.
+ * Sets (or removes, with null) a task's predecessor; the task then starts after it (moving later if
+ * needed). Offsets are never shown or typed: dragging a linked task records them.
  */
-export function setPredecessor(board: Board, task: TaskRow, predecessorId: RowId | null, numbers: ReadonlyMap<RowId, number>): void {
+export function setPredecessor(board: Board, task: TaskRow, predecessorId: RowId | null): void {
   if (predecessorId === task.predecessorId) return;
   if (predecessorId === null) {
     runCommand(board, { type: "removePredecessor", id: task.id });
     return;
   }
-  const linked = runCommand(board, { type: "linkTasks", fromId: predecessorId, toId: task.id });
-  if (linked && (linked.rows[task.id] as TaskRow).predecessorId !== predecessorId) {
-    toast(`Row #${numbers.get(predecessorId)} starts later, so it now follows this task instead`);
-  }
+  runCommand(board, { type: "linkTasks", fromId: predecessorId, toId: task.id });
 }
 
 /** "2.5" or "2,5" → 2.5; "" → null; NaN when unreadable. */

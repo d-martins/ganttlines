@@ -97,16 +97,81 @@ describe("AI access: editing plans", () => {
     await client.close();
   });
 
-  it("stops at the first problem, says what was done, and undo reverts that part", async () => {
+  it("sets the half day on its own, and says when a start isn\u2019t where it was asked", async () => {
+    const { client } = await editorsApp();
+    await call(client, "add_tasks", {
+      project: "Launch",
+      tasks: [
+        { title: "Solo", start: "2026-10-07", half: "afternoon", durationDays: 1 },
+        { title: "P", start: "2026-10-12", durationDays: 3 },
+        { title: "F", predecessor: "P", durationDays: 1 },
+      ],
+    });
+    // Only the half: the same day, now in the morning.
+    const morning = await call(client, "update_task", { project: "Launch", task: "Solo", half: "morning" });
+    expect(morning["task"]).toMatchObject({ start: "2026-10-07" });
+    expect((morning["task"] as { startsAfternoon?: boolean }).startsAfternoon).toBeFalsy();
+    // A start the predecessor and lag don't allow: placed where they say, and the answer says so.
+    const asked = await call(client, "update_task", { project: "Launch", task: "F", start: "2026-10-13", half: "afternoon", lagDays: 0 });
+    expect(asked["error"]).toBeUndefined();
+    expect(asked["task"]).toMatchObject({ start: "2026-10-15", predecessor: { title: "P" } });
+    expect(asked["notes"]).toEqual(["“F” was asked to start 2026-10-13 (afternoon) but starts 2026-10-15: its predecessor and lag, or the calendar, place it there."]);
+    // Stored as asked: no note.
+    const solo = await call(client, "update_task", { project: "Launch", task: "Solo", start: "2026-10-08", half: "afternoon" });
+    expect(solo["task"]).toMatchObject({ start: "2026-10-08", startsAfternoon: true });
+    expect(solo["notes"]).toBeUndefined();
+    await client.close();
+  });
+
+  it("answers about added tasks in the order asked, whatever their place on the board", async () => {
+    const { client } = await editorsApp();
+    await call(client, "add_tasks", { project: "Launch", tasks: [{ kind: "section", title: "Design" }, { kind: "section", title: "Build" }] });
+    const added = await call(client, "add_tasks", {
+      project: "Launch",
+      tasks: [
+        { title: "Wire API", parent: "Build", start: "2026-10-12" },
+        { title: "Mockups", parent: "Design", start: "2026-10-05" },
+      ],
+    });
+    expect((added["added"] as { title: string }[]).map((row) => row.title)).toEqual(["Wire API", "Mockups"]);
+    expect(added["notes"]).toBeUndefined(); // both start where asked
+    await client.close();
+  });
+
+  it("changing only the half day of a follower keeps it following (its lag moves by half a day)", async () => {
+    const { client } = await editorsApp();
+    await call(client, "add_tasks", {
+      project: "Launch",
+      tasks: [
+        { title: "P", start: "2026-10-12", durationDays: 1 },
+        { title: "F", predecessor: "P", lagDays: 2, durationDays: 1 },
+      ],
+    });
+    const later = await call(client, "update_task", { project: "Launch", task: "F", half: "afternoon" });
+    expect(later["task"]).toMatchObject({ predecessor: { title: "P", lagDays: 2.5 }, startsAfternoon: true });
+    // Still follows: P one day longer pushes F one day too.
+    const moved = await call(client, "update_task", { project: "Launch", task: "P", durationDays: 2 });
+    expect(moved["error"]).toBeUndefined();
+    const board = (await call(client, "get_project", { project: "Launch" }))["rows"] as { title: string; start: string }[];
+    expect(board.find((row) => row.title === "F")).toMatchObject({ start: "2026-10-16" });
+    await client.close();
+  });
+
+  it("changes nothing when part of a call fails, and says which task", async () => {
     const { ed, projectId, client } = await editorsApp();
     const result = await call(client, "add_tasks", {
       project: "Launch",
       tasks: [{ title: "One", start: "2026-10-05" }, { title: "Two", assignee: "Zed" }],
     });
-    expect(result["error"]).toMatch(/^No team member called “Zed”.* — stopped there\. 2 changes before it were made; call undo to revert them\.$/);
-    expect((await rowsOf(projectId, ed.cookie)).map((row) => row.title).sort()).toEqual(["One", "Two"]);
-    await call(client, "undo");
+    expect(result["error"]).toMatch(/^“Two”: No team member called “Zed”.* Nothing was changed\.$/);
     expect(await rowsOf(projectId, ed.cookie)).toEqual([]);
+    expect(await call(client, "undo")).toEqual({ error: "There's nothing to undo." });
+
+    // An engine refusal names the task too: a lag without a predecessor.
+    await call(client, "add_tasks", { project: "Launch", tasks: [{ title: "Build", start: "2026-10-05" }] });
+    const lag = await call(client, "update_task", { project: "Launch", task: "Build", title: "Build it", lagDays: 2 });
+    expect(lag["error"]).toBe("“Build”: This task has no predecessor. Nothing was changed.");
+    expect((await rowsOf(projectId, ed.cookie)).map((row) => row.title)).toEqual(["Build"]); // the rename was reverted too
     expect(await call(client, "add_tasks", { project: "Nope", tasks: [{ title: "x" }] })).toEqual({ error: expect.stringContaining("No project called “Nope”") });
     await client.close();
   });

@@ -35,7 +35,7 @@ export function PredecessorPicker({
 }) {
   const board = useBoard();
   const numberOf = (id: RowId) => numbers.get(id) ?? 0;
-  const pick = (id: RowId | null) => setPredecessor(board, task, id, numbers);
+  const pick = (id: RowId | null) => setPredecessor(board, task, id);
   const options = (query: string): SearchOption[] => {
     const needle = query.replace(/^#/, "").toLocaleLowerCase();
     const tasks = Object.values(state.rows)
