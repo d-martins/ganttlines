@@ -10,6 +10,12 @@ test("two-factor: turned on in Settings, then signing in asks for the app's code
   await resetDatabase();
   await setupAdmin(page.request);
   await page.goto("/settings");
+  await page.getByRole("button", { name: "Turn on two-factor" }).waitFor();
+  // Only the page's main area scrolls: nothing in the long settings page stretches the window too.
+  await page.setViewportSize({ width: 1280, height: 600 });
+  await page.getByRole("group", { name: "Who must use two-factor" }).waitFor({ state: "attached" });
+  expect(await page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight)).toBeLessThanOrEqual(0);
+  await page.setViewportSize({ width: 1440, height: 900 });
   await page.getByRole("button", { name: "Turn on two-factor" }).click();
   const key = (await page.getByLabel("Setup key").textContent())!.trim(); // as typed into an app
   await page.getByLabel("Code from the app").fill(code(key));
