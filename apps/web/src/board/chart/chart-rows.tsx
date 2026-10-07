@@ -349,7 +349,7 @@ function SectionBand({ title }: { title: string }) {
 }
 
 const ARROW =
-  "pointer-events-none sticky flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-muted shadow-sm opacity-0 scale-75 transition duration-150 hover:text-text data-[shown=true]:pointer-events-auto data-[shown=true]:scale-100 data-[shown=true]:opacity-100";
+  "pointer-events-none sticky z-[3] flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-muted shadow-sm opacity-0 scale-75 transition duration-150 hover:text-text data-[shown=true]:pointer-events-auto data-[shown=true]:scale-100 data-[shown=true]:opacity-100";
 
 /**
  * Arrows pinned (sticky) to the visible chart's edges: the left one shows when the bar starts
