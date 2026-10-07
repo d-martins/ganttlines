@@ -123,6 +123,40 @@ describe("AI access: editing plans", () => {
     await client.close();
   });
 
+  it("answers about added tasks in the order asked, whatever their place on the board", async () => {
+    const { client } = await editorsApp();
+    await call(client, "add_tasks", { project: "Launch", tasks: [{ kind: "section", title: "Design" }, { kind: "section", title: "Build" }] });
+    const added = await call(client, "add_tasks", {
+      project: "Launch",
+      tasks: [
+        { title: "Wire API", parent: "Build", start: "2026-10-12" },
+        { title: "Mockups", parent: "Design", start: "2026-10-05" },
+      ],
+    });
+    expect((added["added"] as { title: string }[]).map((row) => row.title)).toEqual(["Wire API", "Mockups"]);
+    expect(added["notes"]).toBeUndefined(); // both start where asked
+    await client.close();
+  });
+
+  it("changing only the half day of a follower keeps it following (its lag moves by half a day)", async () => {
+    const { client } = await editorsApp();
+    await call(client, "add_tasks", {
+      project: "Launch",
+      tasks: [
+        { title: "P", start: "2026-10-12", durationDays: 1 },
+        { title: "F", predecessor: "P", lagDays: 2, durationDays: 1 },
+      ],
+    });
+    const later = await call(client, "update_task", { project: "Launch", task: "F", half: "afternoon" });
+    expect(later["task"]).toMatchObject({ predecessor: { title: "P", lagDays: 2.5 }, startsAfternoon: true });
+    // Still follows: P one day longer pushes F one day too.
+    const moved = await call(client, "update_task", { project: "Launch", task: "P", durationDays: 2 });
+    expect(moved["error"]).toBeUndefined();
+    const board = (await call(client, "get_project", { project: "Launch" }))["rows"] as { title: string; start: string }[];
+    expect(board.find((row) => row.title === "F")).toMatchObject({ start: "2026-10-16" });
+    await client.close();
+  });
+
   it("changes nothing when part of a call fails, and says which task", async () => {
     const { ed, projectId, client } = await editorsApp();
     const result = await call(client, "add_tasks", {

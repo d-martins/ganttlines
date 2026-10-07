@@ -78,7 +78,7 @@ class BoardEdit {
       if (!(error instanceof ToolProblem || error instanceof HttpError)) throw error;
       const message = /[.!?]$/.test(error.message) ? error.message : `${error.message}.`;
       const outcome = left
-        ? ` ${left} of this call's changes couldn't be reverted (someone changed those rows meanwhile).`
+        ? ` ${left} of this call's changes couldn't be reverted (someone changed those rows meanwhile); undo won't reach them, so check the board.`
         : " Nothing was changed.";
       throw new ToolProblem(`${this.about ? `“${this.about}”: ` : ""}${message}${outcome}`);
     }
@@ -100,13 +100,16 @@ class BoardEdit {
     return left;
   }
 
-  /** The rows with these ids as they are now (dates computed). */
+  /** The rows with these ids as they are now (dates computed), in the order of `ids`. */
   async describe(ids: readonly string[]) {
     await this.load();
     const people = new Map((await this.tools.context.instance.resources()).map((person) => [person.id, person.name]));
     const names = { people, rows: new Map(this.rows.map((entry) => [entry.row.id, entry.row.title])) };
-    const wanted = new Set(ids);
-    return this.rows.filter((entry) => wanted.has(entry.row.id)).map((entry) => describeRow(entry, names));
+    const byId = new Map(this.rows.map((entry) => [entry.row.id, entry]));
+    return ids.flatMap((id) => {
+      const entry = byId.get(id);
+      return entry ? [describeRow(entry, names)] : [];
+    });
   }
 }
 
@@ -278,6 +281,7 @@ export const writePlans: ToolGroup = (server, tools) => {
           let previous: string | null =
             after === null ? null : (afterRow?.id ?? edit.rows.filter((entry) => entry.row.parentId === parentId && !moving.some((row) => row.id === entry.row.id)).at(-1)?.row.id ?? null);
           for (const row of moving) {
+            edit.about = row.title;
             await edit.run({ type: "moveRow", id: row.id, parentId, afterId: previous });
             previous = row.id;
             await edit.load();
@@ -390,9 +394,18 @@ async function applyTaskFields(
   } else if (fields.start === undefined && fields.half !== undefined) {
     // Only the half day: the same start day, in the morning or the afternoon.
     await edit.load();
-    const day = spanStart(edit, id);
-    if (!day) throw new ToolProblem("This task has no start date yet: give `start` along with `half`.");
-    await edit.run({ type: "moveTask", id, start: day, half: fields.half });
+    const entry = edit.row(id);
+    if (!entry?.span) throw new ToolProblem("This task has no start date yet: give `start` along with `half`.");
+    const afternoon = fields.half === "afternoon";
+    if (entry.span.startsAfternoon !== afternoon) {
+      const row = entry.row as { predecessorId?: string | null; offset?: number; locked?: boolean };
+      if (row.predecessorId && !row.locked) {
+        // A follower keeps following: its lag moves by half a day (moving the bar would pin its date).
+        await edit.run({ type: "setOffset", id, offset: (row.offset ?? 0) + (afternoon ? 0.5 : -0.5) });
+      } else {
+        await edit.run({ type: "moveTask", id, start: fromDay(entry.span.start), half: fields.half });
+      }
+    }
   }
   if (fields.assignee !== undefined) {
     await edit.run({ type: "setAssignee", id, resourceId: fields.assignee === null ? null : pickPerson(team, fields.assignee).id });
