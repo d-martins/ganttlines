@@ -239,21 +239,18 @@ export function Board({
     if (top < element.scrollTop) element.scrollTop = top;
     else if (visibleHeight > 0 && top + rowHeight > element.scrollTop + visibleHeight) element.scrollTop = top + rowHeight - visibleHeight;
   }, [selectedIndex, rowHeight]);
-  // Faint lines between rows, and between days (between weeks when zoomed out; none by month).
+  // Faint lines between days (between weeks when zoomed out; none by month).
   const scale = scaleOf(dayWidth);
   const shownPerWeek = showWeekends ? 7 : calendarDto.workingWeekdays.length;
   const column = scale === "day" ? dayWidth : scale === "week" ? dayWidth * shownPerWeek : 0;
   const firstMonday = timeline.first + ((8 - weekday(timeline.first)) % 7);
   const columnOffset = column > 0 && scale === "week" ? timeline.x(firstMonday) % column : 0;
-  const rowLines = `linear-gradient(to bottom, transparent ${rowHeight - 1}px, var(--grid) ${rowHeight - 1}px)`;
-  const grid =
+  // The list has lines between rows; the chart, faint lines between its columns only.
+  const listGrid = { backgroundImage: `linear-gradient(to bottom, transparent ${rowHeight - 1}px, var(--grid) ${rowHeight - 1}px)`, backgroundSize: `100% ${rowHeight}px` };
+  const chartGrid =
     column > 0
-      ? {
-          backgroundImage: `${rowLines}, linear-gradient(to right, var(--grid-day) 1px, transparent 1px)`,
-          backgroundSize: `100% ${rowHeight}px, ${column}px 100%`,
-          backgroundPosition: `0 0, ${columnOffset}px 0`,
-        }
-      : { backgroundImage: rowLines, backgroundSize: `100% ${rowHeight}px` };
+      ? { backgroundImage: "linear-gradient(to right, var(--grid-day) 1px, transparent 1px)", backgroundSize: `${column}px 100%`, backgroundPosition: `${columnOffset}px 0` }
+      : {};
 
   const startResize = (event: ReactPointerEvent) => {
     event.preventDefault();
@@ -315,7 +312,7 @@ export function Board({
                 event.currentTarget.focus({ preventScroll: true });
               }}
               className="sticky left-0 z-10 shrink-0 overflow-hidden border-r border-[var(--list-edge)] bg-surface shadow-[var(--list-shadow)] outline-none focus:outline-none focus-visible:outline-none"
-              style={{ width: listWidth, height: bodyHeight, ...grid }}
+              style={{ width: listWidth, height: bodyHeight, ...listGrid }}
             >
               <ListColumnHeaders />
               <ListRows rows={shown} allRows={model.rows} firstRow={firstRow} rowHeight={rowHeight} numbers={model.numbers} searching={query.trim() !== ""} />
@@ -329,7 +326,7 @@ export function Board({
               highlights={highlightDays}
               resources={resources}
             >
-            <div ref={chartBody} data-chart-body className="relative shrink-0 overflow-hidden" style={{ width: timeline.width, height: bodyHeight, ...grid }}>
+            <div ref={chartBody} data-chart-body className="relative shrink-0 overflow-hidden" style={{ width: timeline.width, height: bodyHeight, ...chartGrid }}>
               <Shading
                 timeline={timeline}
                 calendar={calendar}
