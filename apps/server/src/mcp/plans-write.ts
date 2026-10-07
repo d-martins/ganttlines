@@ -76,17 +76,23 @@ class BoardEdit {
     } catch (error) {
       let left = 0;
       let broken = false;
+      let undoable = false;
       try {
         left = await this.revert();
       } catch {
-        // Reverting failed outright: keep what's left for undo, and report the original problem.
+        // Reverting failed outright: keep what's left for undo (if that can be recorded), and report the original problem.
         broken = true;
-        await this.remember().catch(() => undefined);
+        undoable = await this.remember().then(
+          () => true,
+          () => false,
+        );
       }
       if (!(error instanceof ToolProblem || error instanceof HttpError)) throw error;
       const message = /[.!?]$/.test(error.message) ? error.message : `${error.message}.`;
       const outcome = broken
-        ? " Its changes couldn't all be reverted; call undo to revert the rest."
+        ? undoable
+          ? " Its changes couldn't all be reverted; call undo to revert the rest."
+          : " Its changes couldn't all be reverted, and undo can't reach them: check the board."
         : left
           ? ` ${left} of this call's changes couldn't be reverted (someone changed those rows meanwhile); undo won't reach them, so check the board.`
           : " Nothing was changed.";

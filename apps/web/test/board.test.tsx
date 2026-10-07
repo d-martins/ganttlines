@@ -198,6 +198,27 @@ describe("board", () => {
     expect(screen.getByRole("button", { name: "Zoom in" })).not.toBeDisabled();
   });
 
+  it("zooms one step per wheel notch, not per event: a trackpad pinch adds up", async () => {
+    await joinedBoard();
+    const hooks = `hooks, ${d("2026-10-09")} – ${d("2026-10-12")}`;
+    const chart = document.querySelector("[data-chart-body]")!;
+    for (let i = 0; i < 10; i++) fireEvent.wheel(chart, { deltaY: -8, ctrlKey: true }); // a gentle pinch: 80 px in all
+    expect(barWidth(hooks)).toBe(4 * 32);
+    for (let i = 0; i < 4; i++) fireEvent.wheel(chart, { deltaY: -8, ctrlKey: true }); // past one notch's worth
+    expect(barWidth(hooks)).toBe(4 * 48);
+  });
+
+  it("keeps week labels readable when weeks get narrow", async () => {
+    const { user } = await joinedBoard();
+    await user.click(screen.getByRole("button", { name: "Hide weekends" }));
+    await user.click(screen.getByRole("button", { name: "Week" }));
+    const weekLabels = () => [...document.querySelectorAll("[data-week]")].map((cell) => cell.textContent);
+    expect(weekLabels()).toContain("Oct 5");
+    await user.click(screen.getByRole("button", { name: "Zoom out" })); // 8 px: a 5-day week is 40 px
+    expect(weekLabels()).toContain("5");
+    expect(weekLabels().every((label) => !label?.includes("…"))).toBe(true);
+  });
+
   it("starts at the zoom chosen before zoom steps existed", async () => {
     localStorage.setItem("gp.zoom", JSON.stringify("week"));
     useBoardView.setState(initialBoardView());

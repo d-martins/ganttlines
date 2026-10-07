@@ -178,13 +178,21 @@ export function Board({
   useEffect(() => {
     const element = scroller.current;
     if (!element) return;
+    // Deltas add up: a mouse notch (~100 px) is one step; a trackpad pinch sends many small ones.
+    const total = { sum: 0, at: 0 };
     const onWheel = (event: WheelEvent) => {
       if (!(event.ctrlKey || event.metaKey) || event.deltaY === 0) return;
       const { timeline: current, dayWidth: width, listWidth: list } = wheelState.current;
       const body = element.querySelector("[data-chart-body]");
       if (!body || !(event.target instanceof Node) || !body.contains(event.target)) return;
       event.preventDefault();
-      const next = zoomStep(width, event.deltaY < 0 ? 1 : -1);
+      if (event.timeStamp - total.at > 150) total.sum = 0;
+      total.at = event.timeStamp;
+      total.sum += event.deltaY * (event.deltaMode === 1 ? 16 : 1);
+      if (Math.abs(total.sum) < 100) return;
+      const direction = total.sum < 0 ? 1 : -1;
+      total.sum = 0;
+      const next = zoomStep(width, direction);
       if (next === width) return;
       const x = event.clientX - body.getBoundingClientRect().left;
       const day = current.dayAt(x);

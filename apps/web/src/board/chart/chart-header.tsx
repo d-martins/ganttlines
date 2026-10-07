@@ -83,6 +83,8 @@ export function ChartHeader({
       {bottom.map((cell) => {
         const isToday = zoom === "day" && cell.key === String(todayDay);
         const day = zoom === "day" ? Number(cell.key) : null;
+        // A narrow week (zoomed out, weekends hidden) shows just its Monday's date: the month is in the row above.
+        const weekLabel = zoom === "week" && cell.right - cell.left < 44 ? String(dateParts(monday(Number(cell.key))).date) : cell.label;
         return (
           <div
             key={cell.key}
@@ -90,7 +92,7 @@ export function ChartHeader({
             style={{ left: cell.left, width: cell.right - cell.left }}
           >
             {day === null ? (
-              cell.label
+              zoom === "week" ? <span data-week>{weekLabel}</span> : cell.label
             ) : (
               <>
                 <span data-weekday data-day={formatDay(day)} aria-hidden className="text-[9px] opacity-70">
