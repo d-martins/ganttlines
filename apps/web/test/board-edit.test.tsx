@@ -141,6 +141,35 @@ describe("editing the task list", () => {
     expect(FakeWebSocket.last.sent.at(-1)).toMatchObject({ type: "undo" });
   });
 
+  it("deletes a row from its own Delete button; a section says how much went with it", async () => {
+    const { user } = await editableBoard();
+    await user.click(screen.getByRole("button", { name: "Delete “hooks”" }));
+    expect(sentCommands()).toEqual([{ type: "deleteRows", ids: ["hooks"] }]);
+    expect(await screen.findByText("Deleted “hooks”")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Delete “design”" }));
+    expect(sentCommands().at(-1)).toEqual({ type: "deleteRows", ids: ["design"] });
+    expect(await screen.findByText("Deleted “design” and 1 row inside")).toBeInTheDocument();
+    expect(screen.queryByText("ui", { exact: true })).not.toBeInTheDocument();
+  });
+
+  it("deletes the row shown in the details panel, and closes the panel", async () => {
+    const { user } = await editableBoard();
+    await user.click(screen.getByRole("button", { name: "Open details of “ui”" }));
+    const panel = await screen.findByRole("complementary", { name: "Details of “ui”" });
+    await user.click(within(panel).getByRole("button", { name: "Delete task" }));
+    expect(sentCommands()).toEqual([{ type: "deleteRows", ids: ["ui"] }]);
+    await waitFor(() => expect(screen.queryByRole("complementary")).not.toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Open details of “design”" }));
+    expect(within(await screen.findByRole("complementary", { name: "Details of “design”" })).getByRole("button", { name: "Delete section" })).toBeInTheDocument();
+  });
+
+  it("offers no delete buttons to viewers", async () => {
+    const { user } = await editableBoard(ROWS, VIEWER);
+    expect(screen.queryByRole("button", { name: /^Delete “/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Open details of “ui”" }));
+    expect(within(await screen.findByRole("complementary", { name: "Details of “ui”" })).queryByRole("button", { name: /^Delete / })).not.toBeInTheDocument();
+  });
+
   it("edits working days and predecessors from their columns", async () => {
     const { user } = await editableBoard();
     await user.click(screen.getByRole("button", { name: "Working days of “hooks”" }));

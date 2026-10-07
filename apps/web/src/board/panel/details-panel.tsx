@@ -1,7 +1,7 @@
 import { buildTree, childrenOf, computeSchedule, CycleError, fromDay, isParentTask, TASK_COLORS, type Row, type RowId, type Schedule, type TaskRow } from "@ganttlines/engine";
 import { COMMAND_LIMITS } from "@ganttlines/protocol/constants";
 import { useQuery } from "@tanstack/react-query";
-import { Lock, Plus, UserRound, X } from "lucide-react";
+import { Lock, Plus, Trash2, UserRound, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type InputHTMLAttributes, type KeyboardEvent, type ReactNode } from "react";
 import { currentUser } from "../../api/queries";
 import { Avatar } from "../../ui/avatar";
@@ -13,7 +13,7 @@ import { PredecessorPicker } from "../predecessor-picker";
 import { useBoard, useRun } from "../board-context";
 import { formatDay, taskColors } from "../format";
 import { formatDays } from "../chart/bars";
-import { addSubtask, parseDays, setActualDays, setWorkingDays } from "../list/list-actions";
+import { addSubtask, deleteRow, parseDays, setActualDays, setWorkingDays } from "../list/list-actions";
 import { actualDaysOf } from "../model";
 import { useSelection } from "../selection";
 import { Activity } from "./activity";
@@ -258,6 +258,18 @@ export function DetailsPanel({ numbers }: { numbers: ReadonlyMap<RowId, number> 
           </button>
         ) : null}
       </Section>
+      {board.canEdit ? (
+        <button
+          type="button"
+          className="flex items-center gap-1 self-start rounded px-1 py-0.5 text-xs text-danger hover:bg-surface-2"
+          onClick={() => {
+            deleteRow(board, row);
+            closePanel();
+          }}
+        >
+          <Trash2 size={13} /> Delete {row.kind === "section" ? "section" : "task"}
+        </button>
+      ) : null}
       {row.kind === "task" && capabilities.comments && capabilities.activity ? (
         <ConversationTabs
           comments={<Comments projectId={sync.projectId} taskId={row.id} canComment={board.canComment} isAdmin={me.data?.role === "admin"} maxHeight={halfHeight} />}
