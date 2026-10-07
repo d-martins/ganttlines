@@ -123,16 +123,21 @@ describe("AI access: editing plans", () => {
     await client.close();
   });
 
-  it("stops at the first problem, says what was done, and undo reverts that part", async () => {
+  it("changes nothing when part of a call fails, and says which task", async () => {
     const { ed, projectId, client } = await editorsApp();
     const result = await call(client, "add_tasks", {
       project: "Launch",
       tasks: [{ title: "One", start: "2026-10-05" }, { title: "Two", assignee: "Zed" }],
     });
-    expect(result["error"]).toMatch(/^No team member called “Zed”.* — stopped there\. 2 changes before it were made; call undo to revert them\.$/);
-    expect((await rowsOf(projectId, ed.cookie)).map((row) => row.title).sort()).toEqual(["One", "Two"]);
-    await call(client, "undo");
+    expect(result["error"]).toMatch(/^“Two”: No team member called “Zed”.* Nothing was changed\.$/);
     expect(await rowsOf(projectId, ed.cookie)).toEqual([]);
+    expect(await call(client, "undo")).toEqual({ error: "There's nothing to undo." });
+
+    // An engine refusal names the task too: a lag without a predecessor.
+    await call(client, "add_tasks", { project: "Launch", tasks: [{ title: "Build", start: "2026-10-05" }] });
+    const lag = await call(client, "update_task", { project: "Launch", task: "Build", title: "Build it", lagDays: 2 });
+    expect(lag["error"]).toBe("“Build”: This task has no predecessor. Nothing was changed.");
+    expect((await rowsOf(projectId, ed.cookie)).map((row) => row.title)).toEqual(["Build"]); // the rename was reverted too
     expect(await call(client, "add_tasks", { project: "Nope", tasks: [{ title: "x" }] })).toEqual({ error: expect.stringContaining("No project called “Nope”") });
     await client.close();
   });

@@ -29,6 +29,8 @@ export interface LastCall {
 class BoardEdit {
   readonly commandIds: string[] = [];
   rows: OutlineRow[] = [];
+  /** The task the call is working on now (named in its error, if it fails there). */
+  about: string | null = null;
 
   constructor(
     private readonly tools: ToolContext,
@@ -67,19 +69,35 @@ class BoardEdit {
     await this.tools.context.db.mcpConnection.updateMany({ where: { id: this.tools.caller.connectionId }, data: { lastCall: { ...lastCall } } });
   }
 
-  /** Runs the steps; on a failure, says how far it got (what was done stays, and can be undone). */
+  /** Runs the steps all or nothing: on a failure, this call's changes are reverted and the error names the task. */
   async steps(work: () => Promise<void>): Promise<void> {
     try {
       await work();
     } catch (error) {
-      await this.remember();
+      const left = await this.revert();
       if (!(error instanceof ToolProblem || error instanceof HttpError)) throw error;
-      const done = this.commandIds.length;
-      throw new ToolProblem(
-        `${error.message}${done ? ` — stopped there. ${done} ${done === 1 ? "change" : "changes"} before it ${done === 1 ? "was" : "were"} made; call undo to revert ${done === 1 ? "it" : "them"}.` : ""}`,
-      );
+      const message = /[.!?]$/.test(error.message) ? error.message : `${error.message}.`;
+      const outcome = left
+        ? ` ${left} of this call's changes couldn't be reverted (someone changed those rows meanwhile).`
+        : " Nothing was changed.";
+      throw new ToolProblem(`${this.about ? `“${this.about}”: ` : ""}${message}${outcome}`);
     }
     await this.remember();
+  }
+
+  /** Reverts this call's changes, newest first; how many couldn't be. */
+  private async revert(): Promise<number> {
+    let left = 0;
+    for (const target of [...this.commandIds].reverse()) {
+      try {
+        left += (await this.tools.context.projects.undoCommand(this.project.id, this.actor, randomUUID(), target)).skipped > 0 ? 1 : 0;
+      } catch (error) {
+        if (!(error instanceof HttpError)) throw error;
+        left++;
+      }
+    }
+    this.commandIds.length = 0;
+    return left;
   }
 
   /** The rows with these ids as they are now (dates computed). */
@@ -178,6 +196,7 @@ export const writePlans: ToolGroup = (server, tools) => {
         const added: { id: string; title: string }[] = [];
         await edit.steps(async () => {
           for (const item of tasks) {
+            edit.about = item.title;
             const kind = item.kind ?? "task";
             const parentId = item.parent ? edit.find(item.parent, "any", added).id : null;
             const siblings = edit.rows.filter((entry) => entry.row.parentId === parentId);
@@ -224,6 +243,7 @@ export const writePlans: ToolGroup = (server, tools) => {
       guarded(async () => {
         const edit = await editProject(tools, ref);
         const task = edit.find(taskRef, "task");
+        edit.about = task.title;
         await edit.steps(async () => {
           if (fields.title !== undefined) await edit.run({ type: "updateTitle", id: task.id, title: fields.title });
           await applyTaskFields(edit, task.id, fields, await people(), [], false);
