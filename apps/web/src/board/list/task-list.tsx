@@ -588,7 +588,7 @@ function RowActions({ id, title }: { id: RowId; title: string }) {
       <IconButton
         data-row-action
         label={`Show “${name}” on the chart`}
-        className="h-6 w-auto! px-1"
+        className="h-6 w-auto!"
         onClick={(event) => {
           event.stopPropagation();
           select(id, false);
@@ -601,7 +601,7 @@ function RowActions({ id, title }: { id: RowId; title: string }) {
         data-row-action
         label={`Open details of “${name}”`}
         aria-pressed={showing}
-        className={`h-6 w-auto! px-1 ${showing ? "bg-accent-soft text-text" : ""}`}
+        className={`h-6 w-auto! ${showing ? "bg-accent-soft text-text" : ""}`}
         onClick={(event) => {
           event.stopPropagation();
           // A toggle for this row's details; on another row it just moves the panel there.
@@ -615,7 +615,7 @@ function RowActions({ id, title }: { id: RowId; title: string }) {
         <IconButton
           data-row-action
           label={`Delete “${name}”`}
-          className="h-6 w-auto! px-1 hover:text-danger"
+          className="h-6 w-auto! hover:text-danger"
           onClick={(event) => {
             event.stopPropagation();
             const row = board.state.rows[id];
