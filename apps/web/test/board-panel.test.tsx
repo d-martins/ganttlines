@@ -191,9 +191,8 @@ describe("details panel", () => {
     const scrollTo = vi.fn();
     const scroller = screen.getByTestId("board-scroller");
     scroller.scrollTo = scrollTo as unknown as typeof scroller.scrollTo;
-    const [show, open] = within(rowOf("hooks")).getAllByRole("button").slice(-2);
-    expect(show).toHaveAccessibleName("Show “hooks” on the chart");
-    expect(open).toHaveAccessibleName("Open details of “hooks”");
+    const show = within(rowOf("hooks")).getByRole("button", { name: "Show “hooks” on the chart" });
+    const open = within(rowOf("hooks")).getByRole("button", { name: "Open details of “hooks”" });
     await user.click(show!);
     expect(scrollTo).toHaveBeenCalledTimes(1);
     expect(rowOf("hooks")).toHaveAttribute("aria-selected", "true");

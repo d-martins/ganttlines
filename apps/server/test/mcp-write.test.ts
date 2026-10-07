@@ -72,6 +72,31 @@ describe("AI access: editing plans", () => {
     await client.close();
   });
 
+  it("links the way it was asked, even when the follower starts before its predecessor", async () => {
+    const { client } = await editorsApp();
+    const added = await call(client, "add_tasks", {
+      project: "Launch",
+      tasks: [
+        { title: "Design", start: "2026-10-12", durationDays: 2 },
+        { title: "Build", start: "2026-10-05", durationDays: 2 },
+        { title: "QA", start: "2026-10-01", predecessor: "Design", durationDays: 1 },
+      ],
+    });
+    expect(added["error"]).toBeUndefined();
+    const byTitle = (rows: unknown) => Object.fromEntries((rows as { title: string }[]).map((row) => [row.title, row]));
+    // Added with an earlier start: still follows Design, placed after it.
+    expect(byTitle(added["added"])["QA"]).toMatchObject({ predecessor: { title: "Design" }, start: "2026-10-14" });
+    expect(byTitle(added["added"])["Design"]).toMatchObject({ predecessor: null, start: "2026-10-12" });
+
+    // Linked later, while starting a week earlier: Build follows Design, not the other way round.
+    const updated = await call(client, "update_task", { project: "Launch", task: "Build", predecessor: "Design" });
+    expect(updated["error"]).toBeUndefined();
+    expect(updated["task"]).toMatchObject({ title: "Build", predecessor: { title: "Design" }, start: "2026-10-14" });
+    const board = byTitle((await call(client, "get_project", { project: "Launch" }))["rows"]);
+    expect(board["Design"]).toMatchObject({ predecessor: null, start: "2026-10-12" });
+    await client.close();
+  });
+
   it("stops at the first problem, says what was done, and undo reverts that part", async () => {
     const { ed, projectId, client } = await editorsApp();
     const result = await call(client, "add_tasks", {

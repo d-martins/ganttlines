@@ -1,5 +1,5 @@
 import type { Calendar, RowId } from "@ganttlines/engine";
-import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, GripVertical, LocateFixed, IndentDecrease, IndentIncrease, MessageSquare, PanelRightOpen, Plus, Search } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, GripVertical, LocateFixed, IndentDecrease, IndentIncrease, MessageSquare, PanelRightOpen, Plus, Search, Trash2 } from "lucide-react";
 import { computeSchedule, CycleError } from "@ganttlines/engine";
 import { useEffect, useMemo, useRef, useState, type HTMLAttributes, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type Ref } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -635,6 +635,7 @@ function CellButton({
 
 /** The row's quick actions: bring its bar into view, then open its details (again: close them). */
 function RowActions({ id, title }: { id: RowId; title: string }) {
+  const board = useBoard();
   const { select, center, closePanel } = useSelection();
   const showing = useSelection((selection) => selection.panelOpen && selection.selectedId === id);
   const name = title || "Untitled";
@@ -666,6 +667,20 @@ function RowActions({ id, title }: { id: RowId; title: string }) {
       >
         <PanelRightOpen size={14} />
       </IconButton>
+      {board.canEdit ? (
+        <IconButton
+          data-row-action
+          label={`Delete “${name}”`}
+          className="h-6 w-6 hover:text-danger"
+          onClick={(event) => {
+            event.stopPropagation();
+            const row = board.state.rows[id];
+            if (row) deleteRow(board, row);
+          }}
+        >
+          <Trash2 size={14} />
+        </IconButton>
+      ) : null}
     </>
   );
 }

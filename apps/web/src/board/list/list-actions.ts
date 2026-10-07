@@ -4,7 +4,7 @@ import { runCommand, type BoardContextValue } from "../board-context";
 import { setCollapsed } from "../collapse";
 import { useSelection } from "../selection";
 
-type Board = Pick<BoardContextValue, "sync" | "calendar" | "canEdit">;
+type Board = Pick<BoardContextValue, "sync" | "calendar" | "canEdit" | "state">;
 
 const newId = () => crypto.randomUUID();
 
@@ -44,10 +44,15 @@ export function addAtEnd(board: Board, state: ProjectState, kind: Row["kind"], s
 
 /** Deletes a row and everything inside it, with an Undo in the confirmation toast. */
 export function deleteRow(board: Board, row: Row): void {
+  // Everything inside goes too: say how much, so a big deletion isn't missed.
+  const tree = buildTree(board.state);
+  const countInside = (id: RowId): number => childrenOf(tree, id).reduce((sum, child) => sum + 1 + countInside(child.id), 0);
+  const inside = countInside(row.id);
   if (!runCommand(board, { type: "deleteRows", ids: [row.id] })) return;
   const selection = useSelection.getState();
   if (selection.selectedId === row.id) selection.select(null);
-  toast(`Deleted “${row.title || "Untitled"}”`, { action: { label: "Undo", run: () => board.sync.requestHistory("undo") } });
+  const extra = inside === 0 ? "" : ` and ${inside} ${inside === 1 ? "row" : "rows"} inside`;
+  toast(`Deleted “${row.title || "Untitled"}”${extra}`, { action: { label: "Undo", run: () => board.sync.requestHistory("undo") } });
 }
 
 /**
