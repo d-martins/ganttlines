@@ -96,6 +96,10 @@ describe("chart editing", () => {
     await chartBoard();
     expect(screen.queryByLabelText(/^x,/)).not.toBeInTheDocument(); // no summary bar
     expect(document.querySelector("[data-section-band]")).toHaveTextContent("x");
+    // Its name sticks to the chart's visible left edge by CSS alone.
+    const label = document.querySelector("[data-section-band] span") as HTMLElement;
+    expect(label.className).toContain("sticky");
+    expect(label.style.left).toBe("calc(var(--list-width) + 8px)");
     const sectionRow = screen.getAllByRole("row").find((row) => within(row).queryByText("x", { exact: true }))!;
     expect(within(sectionRow).queryByRole("button", { name: /Working days/ })).not.toBeInTheDocument();
   });
