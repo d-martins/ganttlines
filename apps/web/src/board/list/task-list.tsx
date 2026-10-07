@@ -326,7 +326,7 @@ export function ListRows({
               center(row.id);
               select(row.id, true);
             }}
-            className={`group ${COLUMNS} absolute right-0 left-0 px-1 text-sm ${selected ? "bg-accent-soft" : "hover:bg-surface"} ${drag?.id === row.id ? "opacity-50" : ""}`}
+            className={`group ${COLUMNS} absolute right-0 left-0 px-1 text-sm ${selected ? "bg-accent-soft" : "hover:bg-surface-2"} ${drag?.id === row.id ? "opacity-50" : ""}`}
             style={{ top: (firstRow + index) * rowHeight, height: rowHeight }}
           >
             <span role="gridcell" aria-label={`Row ${entry.number}`} className="relative pr-2 text-right text-xs text-muted tabular-nums">

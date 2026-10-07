@@ -24,6 +24,8 @@ function segments(timeline: Timeline, days: readonly DayNum[], keyOf: (day: DayN
   return result;
 }
 
+/** Sunday first, as `weekday` counts. */
+const WEEKDAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"] as const;
 const monday = (day: DayNum) => day - ((weekday(day) + 6) % 7);
 const monthKey = (day: DayNum) => {
   const { year, month } = dateParts(day);
@@ -80,13 +82,23 @@ export function ChartHeader({
       ))}
       {bottom.map((cell) => {
         const isToday = zoom === "day" && cell.key === String(todayDay);
+        const day = zoom === "day" ? Number(cell.key) : null;
         return (
           <div
             key={cell.key}
-            className={`absolute top-6 h-6 truncate border-b border-l border-border text-center leading-6 ${isToday ? "font-bold text-[var(--today)]" : "text-muted"}`}
+            className={`absolute top-6 h-6 truncate border-b border-l border-border text-center ${day === null ? "leading-6" : "flex flex-col items-center justify-center leading-none"} ${isToday ? "font-bold text-[var(--today)]" : "text-muted"}`}
             style={{ left: cell.left, width: cell.right - cell.left }}
           >
-            {cell.label}
+            {day === null ? (
+              cell.label
+            ) : (
+              <>
+                <span data-weekday data-day={formatDay(day)} aria-hidden className="text-[9px] opacity-70">
+                  {WEEKDAY_LETTERS[weekday(day)]}
+                </span>
+                <span>{cell.label}</span>
+              </>
+            )}
           </div>
         );
       })}

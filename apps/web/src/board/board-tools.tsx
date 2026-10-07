@@ -2,7 +2,7 @@ import type { ResourceDto, Viewer } from "@ganttlines/protocol";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { CalendarRange, GalleryVertical, Layers, Redo2, Undo2 } from "lucide-react";
+import { CalendarRange, GalleryVertical, Layers, Redo2, Undo2, ZoomIn, ZoomOut } from "lucide-react";
 import { useState } from "react";
 import { useStore } from "zustand";
 import { errorMessage } from "../api/client";
@@ -15,7 +15,7 @@ import { Button, IconButton } from "../ui/button";
 import { Field } from "../ui/field";
 import { FormDialog } from "../ui/form-dialog";
 import { Menu, MenuItem, MenuLabel, MenuRadio, MenuSeparator } from "../ui/menu";
-import type { Zoom } from "./chart/timeline";
+import { DAY_WIDTH, ZOOM_STEPS, zoomStep, type Zoom } from "./chart/timeline";
 import { colorFor } from "./format";
 import type { CompareMode } from "./model";
 import { formatDay, today } from "./format";
@@ -33,7 +33,7 @@ const MAX_AVATARS = 5;
 
 /** Board controls in the top bar: baseline, zoom, bar style, weekends, today, connection, viewers. */
 export function BoardTools({ sync }: { sync: BoardSync }) {
-  const { zoom, barStyle, showWeekends, setZoom, setBarStyle, setShowWeekends, goToToday } = useBoardView();
+  const { dayWidth, barStyle, showWeekends, setDayWidth, setBarStyle, setShowWeekends, goToToday } = useBoardView();
   const canEdit = useActiveBoard((state) => state.canEdit);
   const capabilities = useCapabilities();
   const mod = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
@@ -48,18 +48,27 @@ export function BoardTools({ sync }: { sync: BoardSync }) {
           <Redo2 size={16} />
         </IconButton>
         <BaselinePicker projectId={sync.projectId} />
-        <div role="group" aria-label="Zoom" className="ml-1 flex rounded-md border border-border bg-bg p-0.5">
-          {ZOOMS.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              aria-pressed={zoom === option.value}
-              onClick={() => setZoom(option.value)}
-              className={`rounded px-2 py-0.5 text-xs ${zoom === option.value ? "bg-accent-soft font-semibold text-text" : "text-muted hover:text-text"}`}
-            >
-              {option.label}
-            </button>
-          ))}
+        <div role="group" aria-label="Zoom" className="ml-1 flex items-center rounded-md border border-border bg-bg p-0.5">
+          <IconButton label="Zoom out" className="h-6 w-6 disabled:opacity-40" disabled={dayWidth <= ZOOM_STEPS[0]} onClick={() => setDayWidth(zoomStep(dayWidth, -1))}>
+            <ZoomOut size={14} />
+          </IconButton>
+          {ZOOMS.map((option) => {
+            const pressed = dayWidth === DAY_WIDTH[option.value];
+            return (
+              <button
+                key={option.value}
+                type="button"
+                aria-pressed={pressed}
+                onClick={() => setDayWidth(DAY_WIDTH[option.value])}
+                className={`rounded px-2 py-0.5 text-xs ${pressed ? "bg-accent-soft font-semibold text-text" : "text-muted hover:text-text"}`}
+              >
+                {option.label}
+              </button>
+            );
+          })}
+          <IconButton label="Zoom in" className="h-6 w-6 disabled:opacity-40" disabled={dayWidth >= ZOOM_STEPS[ZOOM_STEPS.length - 1]!} onClick={() => setDayWidth(zoomStep(dayWidth, 1))}>
+            <ZoomIn size={14} />
+          </IconButton>
         </div>
         <IconButton
           label={barStyle === "roomy" ? "Compact bars" : "Roomy bars"}

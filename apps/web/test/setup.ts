@@ -2,6 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
 import { useCollapse } from "../src/board/collapse";
+import { initialBoardView, useBoardView } from "../src/board/view-store";
 import { resetSelection } from "../src/board/selection";
 import { useToasts } from "../src/ui/toast";
 
@@ -12,6 +13,7 @@ afterEach(() => {
   resetSelection();
   useCollapse.setState({ byProject: {} });
   localStorage.clear();
+  useBoardView.setState(initialBoardView());
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
