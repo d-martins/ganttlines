@@ -326,7 +326,13 @@ export function Board({
               highlights={highlightDays}
               resources={resources}
             >
-            <div ref={chartBody} data-chart-body className="relative shrink-0 overflow-hidden" style={{ width: timeline.width, height: bodyHeight, ...chartGrid }}>
+            <div
+              ref={chartBody}
+              data-chart-body
+              // clip, not hidden: rows' edge arrows stick to the scroll area, which a hidden overflow would cut them off from
+              className="relative shrink-0 overflow-clip"
+              style={{ width: timeline.width, height: bodyHeight, ["--list-width" as string]: `${listWidth}px`, ...chartGrid }}
+            >
               <Shading
                 timeline={timeline}
                 calendar={calendar}

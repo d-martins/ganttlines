@@ -67,25 +67,29 @@ describe("chart editing", () => {
     useBoardView.getState().setBarStyle("compact");
   });
 
-  it("points to bars beyond the visible chart, and scrolls to them", async () => {
+  it("shows arrows at the chart's edges for bars that run past them, and scrolls to them", async () => {
     const { user } = await chartBoard();
     const scroller = screen.getByTestId("board-scroller");
     const scrollTo = vi.fn();
     scroller.scrollTo = scrollTo as unknown as typeof scroller.scrollTo;
     const left = (name: RegExp) => parseFloat((bar(name) as HTMLElement).style.left);
-    // hooks entirely to the right of the visible 700 px: an arrow with its title at the right edge.
+    // Hidden arrows are aria-hidden (no accessible name): find them by their label.
+    const arrow = (name: string) => document.querySelector(`button[aria-label="${name}"]`) as HTMLElement;
+    // hooks entirely to the right of the visible 700 px: only its right arrow shows.
     scroller.scrollLeft = left(/^hooks,/) - 800;
     fireEvent.scroll(scroller);
-    const later = await screen.findByRole("button", { name: "Scroll to “hooks”" });
-    expect(later).toHaveTextContent("hooks");
-    await user.click(later);
+    await waitFor(() => expect(arrow("Scroll ahead to “hooks”")).toHaveAttribute("data-shown", "true"));
+    expect(arrow("Scroll back to “hooks”")).toHaveAttribute("data-shown", "false");
+    expect(arrow("Scroll ahead to “hooks”")).toHaveTextContent(""); // just the arrow
+    await user.click(arrow("Scroll ahead to “hooks”"));
     expect(scrollTo).toHaveBeenCalled();
-    // ui starting before the visible chart and ending inside it: just an arrow at the left edge.
+    // ui starting before the visible chart and ending inside it: only its left arrow.
     scroller.scrollLeft = left(/^ui,/) + 40;
     fireEvent.scroll(scroller);
-    const earlier = await screen.findByRole("button", { name: "Scroll to the start of “ui”" });
-    expect(earlier).not.toHaveTextContent("ui");
-    expect(screen.queryByRole("button", { name: "Scroll to the end of “ui”" })).not.toBeInTheDocument();
+    await waitFor(() => expect(arrow("Scroll back to “ui”")).toHaveAttribute("data-shown", "true"));
+    expect(arrow("Scroll ahead to “ui”")).toHaveAttribute("data-shown", "false");
+    // Hidden arrows can't be reached with the keyboard.
+    expect(arrow("Scroll ahead to “ui”")).toHaveAttribute("tabindex", "-1");
   });
 
   it("shows sections as dividers across the chart, without dates", async () => {
