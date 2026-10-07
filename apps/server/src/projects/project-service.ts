@@ -68,6 +68,8 @@ export interface OutlineRow {
   isParent: boolean;
   /** null for sections and unscheduled tasks */
   span: Span | null;
+  /** a locked task starting before its predecessor allows */
+  violation: boolean;
 }
 
 export class ProjectService {
@@ -185,7 +187,8 @@ export class ProjectService {
       const rows: OutlineRow[] = [];
       const visit = (parentId: string | null, depth: number) => {
         for (const row of childrenOf(tree, parentId)) {
-          rows.push({ row, depth, isParent: isParentTask(tree, row), span: schedule.get(row.id)?.span ?? null });
+          const computed = schedule.get(row.id);
+          rows.push({ row, depth, isParent: isParentTask(tree, row), span: computed?.span ?? null, violation: computed?.violation ?? false });
           visit(row.id, depth + 1);
         }
       };

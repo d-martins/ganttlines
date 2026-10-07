@@ -8,7 +8,7 @@ import { answer, guarded, type ToolContext, type ToolGroup } from "./tools";
 const ISO_DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "a date as YYYY-MM-DD");
 
 /** A board row as the AI sees it: dates computed, people and predecessors by id and name. */
-export function describeRow({ row, depth, isParent, span }: OutlineRow, names: { people: Map<string, string>; rows: Map<string, string> }) {
+export function describeRow({ row, depth, isParent, span, violation }: OutlineRow, names: { people: Map<string, string>; rows: Map<string, string> }) {
   const base = { id: row.id, title: row.title, depth, parentId: row.parentId };
   if (row.kind === "section") return { ...base, type: "section" as const };
   return {
@@ -22,6 +22,7 @@ export function describeRow({ row, depth, isParent, span }: OutlineRow, names: {
     assignee: row.resourceId ? { id: row.resourceId, name: names.people.get(row.resourceId) ?? "Unknown" } : null,
     predecessor: row.predecessorId ? { id: row.predecessorId, title: names.rows.get(row.predecessorId) ?? "Unknown", lagDays: row.offset } : null,
     ...(row.locked ? { locked: true } : {}),
+    ...(violation ? { startsTooEarly: true } : {}),
     ...(row.actualDuration !== null ? { actualDurationDays: row.actualDuration } : {}),
     color: row.color,
     ...(row.description ? { description: row.description } : {}),

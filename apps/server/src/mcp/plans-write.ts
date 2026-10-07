@@ -74,12 +74,22 @@ class BoardEdit {
     try {
       await work();
     } catch (error) {
-      const left = await this.revert();
+      let left = 0;
+      let broken = false;
+      try {
+        left = await this.revert();
+      } catch {
+        // Reverting failed outright: keep what's left for undo, and report the original problem.
+        broken = true;
+        await this.remember().catch(() => undefined);
+      }
       if (!(error instanceof ToolProblem || error instanceof HttpError)) throw error;
       const message = /[.!?]$/.test(error.message) ? error.message : `${error.message}.`;
-      const outcome = left
-        ? ` ${left} of this call's changes couldn't be reverted (someone changed those rows meanwhile); undo won't reach them, so check the board.`
-        : " Nothing was changed.";
+      const outcome = broken
+        ? " Its changes couldn't all be reverted; call undo to revert the rest."
+        : left
+          ? ` ${left} of this call's changes couldn't be reverted (someone changed those rows meanwhile); undo won't reach them, so check the board.`
+          : " Nothing was changed.";
       throw new ToolProblem(`${this.about ? `“${this.about}”: ` : ""}${message}${outcome}`);
     }
     await this.remember();
@@ -88,15 +98,16 @@ class BoardEdit {
   /** Reverts this call's changes, newest first; how many couldn't be. */
   private async revert(): Promise<number> {
     let left = 0;
-    for (const target of [...this.commandIds].reverse()) {
+    while (this.commandIds.length > 0) {
+      const target = this.commandIds[this.commandIds.length - 1]!;
       try {
         left += (await this.tools.context.projects.undoCommand(this.project.id, this.actor, randomUUID(), target)).skipped > 0 ? 1 : 0;
       } catch (error) {
-        if (!(error instanceof HttpError)) throw error;
+        if (!(error instanceof HttpError)) throw error; // the rest stays in commandIds, for undo
         left++;
       }
+      this.commandIds.pop();
     }
-    this.commandIds.length = 0;
     return left;
   }
 
@@ -352,7 +363,11 @@ export const writePlans: ToolGroup = (server, tools) => {
 function placementNotes(entries: { title: string; asked: { start?: string | undefined; half?: "morning" | "afternoon" | undefined }; row: unknown }[]): string[] {
   const notes: string[] = [];
   for (const { title, asked, row } of entries) {
-    const placed = row as { start?: string | null; startsAfternoon?: boolean } | undefined;
+    const placed = row as { start?: string | null; startsAfternoon?: boolean; startsTooEarly?: boolean } | undefined;
+    if (placed?.startsTooEarly) {
+      notes.push(`“${title}” is locked and starts before its predecessor allows (shown in red on the board): unlock it, or move it later.`);
+      continue;
+    }
     if (!asked.start || !placed?.start) continue;
     const askedAfternoon = asked.half === "afternoon";
     if (placed.start === asked.start && Boolean(placed.startsAfternoon) === askedAfternoon) continue;
@@ -391,21 +406,6 @@ async function applyTaskFields(
   if (fields.durationDays !== undefined) await edit.run({ type: "setDuration", id, duration: fields.durationDays });
   if (fields.start !== undefined && (!startAlready || fields.half === "afternoon")) {
     await edit.run({ type: "moveTask", id, start: fields.start, ...(fields.half ? { half: fields.half } : {}) });
-  } else if (fields.start === undefined && fields.half !== undefined) {
-    // Only the half day: the same start day, in the morning or the afternoon.
-    await edit.load();
-    const entry = edit.row(id);
-    if (!entry?.span) throw new ToolProblem("This task has no start date yet: give `start` along with `half`.");
-    const afternoon = fields.half === "afternoon";
-    if (entry.span.startsAfternoon !== afternoon) {
-      const row = entry.row as { predecessorId?: string | null; offset?: number; locked?: boolean };
-      if (row.predecessorId && !row.locked) {
-        // A follower keeps following: its lag moves by half a day (moving the bar would pin its date).
-        await edit.run({ type: "setOffset", id, offset: (row.offset ?? 0) + (afternoon ? 0.5 : -0.5) });
-      } else {
-        await edit.run({ type: "moveTask", id, start: fromDay(entry.span.start), half: fields.half });
-      }
-    }
   }
   if (fields.assignee !== undefined) {
     await edit.run({ type: "setAssignee", id, resourceId: fields.assignee === null ? null : pickPerson(team, fields.assignee).id });
@@ -423,6 +423,22 @@ async function applyTaskFields(
     await edit.run({ type: "linkTasks", fromId: predecessor.id, toId: id });
   }
   if (fields.lagDays !== undefined) await edit.run({ type: "setOffset", id, offset: fields.lagDays });
+  if (fields.half !== undefined && (fields.start === undefined || fields.predecessor || fields.lagDays !== undefined)) {
+    // The half day last, on whichever day the task now starts (a link or lag places it in whole days).
+    await edit.load();
+    const entry = edit.row(id);
+    if (!entry?.span) throw new ToolProblem("This task has no start date yet: give `start` along with `half`.");
+    const afternoon = fields.half === "afternoon";
+    if (entry.span.startsAfternoon !== afternoon) {
+      const row = entry.row as { predecessorId?: string | null; offset?: number; locked?: boolean };
+      if (row.predecessorId && !row.locked) {
+        // A follower keeps following: its lag moves by half a day (moving the bar would pin its date).
+        await edit.run({ type: "setOffset", id, offset: (row.offset ?? 0) + (afternoon ? 0.5 : -0.5) });
+      } else {
+        await edit.run({ type: "moveTask", id, start: fromDay(entry.span.start), half: fields.half });
+      }
+    }
+  }
   if (fields.description !== undefined) await edit.run({ type: "setDescription", id, description: fields.description });
   if (fields.color !== undefined) await edit.run({ type: "setColor", id, color: fields.color });
 }
