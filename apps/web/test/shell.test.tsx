@@ -125,13 +125,20 @@ describe("sidebar and top bar", () => {
     expect(document.documentElement.dataset["theme"]).toBe("dark");
   });
 
-  it("toggles light and dark with one click from the top bar", async () => {
+  it("cycles the theme from the top bar: match my system, light, dark", async () => {
     signedIn(ADMIN, [project("p1", "Launch")]);
     useTheme.getState().setPreference("system"); // the system is light here
     const { user } = renderApp("/p/p1");
-    await user.click(await screen.findByRole("button", { name: "Switch to dark theme" }));
+    await user.click(await screen.findByRole("button", { name: "Theme: matching your system. Switch to light" }));
+    expect(useTheme.getState().preference).toBe("light");
+    await user.click(screen.getByRole("button", { name: "Theme: light. Switch to dark" }));
+    expect(useTheme.getState().preference).toBe("dark");
     expect(document.documentElement.dataset["theme"]).toBe("dark");
-    await user.click(screen.getByRole("button", { name: "Switch to light theme" }));
+    await user.click(screen.getByRole("button", { name: "Theme: dark. Switch to matching your system" }));
+    expect(useTheme.getState().preference).toBe("system");
     expect(document.documentElement.dataset["theme"]).toBe("light");
+    await user.click(screen.getByRole("button", { name: "Account menu" }));
+    expect(await screen.findByRole("menuitemradio", { name: /^Match my system/ })).toHaveAttribute("aria-checked", "true");
   });
+
 });
