@@ -1,14 +1,12 @@
 import type { Calendar, RowId } from "@ganttlines/engine";
 import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, GripVertical, LocateFixed, IndentDecrease, IndentIncrease, MessageSquare, PanelRightOpen, Plus, Search, Trash2 } from "lucide-react";
-import { computeSchedule, CycleError } from "@ganttlines/engine";
-import { useEffect, useMemo, useRef, useState, type HTMLAttributes, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type Ref } from "react";
+import { useEffect, useRef, useState, type HTMLAttributes, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type Ref } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { commentCounts } from "../../api/queries";
 import { Avatar } from "../../ui/avatar";
 import { IconButton } from "../../ui/button";
 import { AssigneePicker } from "../assignee-picker";
 import { useBoard, useRun } from "../board-context";
-import { PredecessorPicker } from "../predecessor-picker";
 import { setCollapsed } from "../collapse";
 import { formatDays } from "../chart/bars";
 import type { BoardRow } from "../model";
@@ -18,10 +16,11 @@ import { AUTO_SCROLL_STEP, AUTO_SCROLL_TICK_MS, edgePush, HEADER_HEIGHT } from "
 import { useCapabilities } from "../../workspace";
 
 /**
- * Column template shared by the header and the rows: # · title · assignee · WD · AWD · predecessor · row actions (show the bar, open details).
+ * Column template shared by the header and the rows: # · title · assignee · WD · AWD · row actions (show the bar, open details, delete).
+ * (Predecessors are set in the details panel, or by linking bars on the chart.)
  * Fixed columns + the title's minimum + padding = LIST_WIDTH.min, so no column is ever cut off.
  */
-const COLUMNS = "grid grid-cols-[40px_minmax(96px,1fr)_120px_40px_40px_56px_48px] items-center";
+const COLUMNS = "grid grid-cols-[40px_minmax(96px,1fr)_120px_40px_40px_76px] items-center";
 const INDENT = 16;
 
 export function ListHeader({ query, onQuery }: { query: string; onQuery: (query: string) => void }) {
@@ -77,9 +76,6 @@ export function ListHeader({ query, onQuery }: { query: string; onQuery: (query:
         <span title="Actual work days" className="px-1 text-right">
           AWD
         </span>
-        <span title="Predecessor (row #)" className="px-1 text-right">
-          Pred.
-        </span>
         <span />
       </div>
     </div>
@@ -103,15 +99,6 @@ export function durations(entry: BoardRow, calendar: Calendar): { working: strin
 
 /** Actual work days against the plan: red when over, green when under (single tasks). */
 const ACTUAL_TINT = { over: "text-[var(--awd-over)]", under: "text-[var(--awd-under)]", even: "" } as const;
-
-/** "#3": the predecessor's row number */
-export function predecessorText(entry: Pick<BoardRow, "row">, numbers: ReadonlyMap<RowId, number>): string {
-  const { row } = entry;
-  if (row.kind !== "task" || !row.predecessorId) return "";
-  const number = numbers.get(row.predecessorId);
-  if (number === undefined) return "";
-  return `#${number}`;
-}
 
 /** A text box that commits once: on Enter or when it loses focus; Escape cancels. */
 function InlineInput({
@@ -179,15 +166,8 @@ function InlineInput({
   );
 }
 
-type Column = "wd" | "awd" | "pred";
+type Column = "wd" | "awd";
 
-/** After a picker closes, carry on from its cell — unless focus already went somewhere else. */
-function refocusCell(cell: string) {
-  setTimeout(() => {
-    if (document.activeElement && document.activeElement !== document.body) return;
-    document.querySelector<HTMLElement>(`[data-cell="${CSS.escape(cell)}"]`)?.focus();
-  });
-}
 interface DragState {
   id: RowId;
   target: { index: number; zone: DropZone } | null;
@@ -197,7 +177,7 @@ interface DragState {
 export function ListColumnHeaders() {
   return (
     <div role="row" aria-rowindex={1} className="sr-only">
-      {["Row number", "Task", "Assignee", "Working days", "Actual work days", "Predecessor", "Actions"].map((name) => (
+      {["Row number", "Task", "Assignee", "Working days", "Actual work days", "Actions"].map((name) => (
         <span key={name} role="columnheader">
           {name}
         </span>
@@ -231,16 +211,6 @@ export function ListRows({
   const { selectedId, editingId, draftId, select, edit, center } = useSelection();
   const [cell, setCell] = useState<{ id: RowId; column: Column } | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
-  // Dates shown in the predecessor picker.
-  const schedule = useMemo(() => {
-    try {
-      return computeSchedule(state, calendar);
-    } catch (error) {
-      if (error instanceof CycleError) return null;
-      throw error;
-    }
-  }, [state, calendar]);
-
   // A row being edited can vanish (deleted by someone else): stop editing it.
   useEffect(() => {
     if (editingId && !state.rows[editingId]) edit(null);
@@ -305,7 +275,6 @@ export function ListRows({
         const task = row.kind === "task" ? row : null;
         const assignee = task?.resourceId ? resourceMap.get(task.resourceId) : undefined;
         const { working, actual } = durations(entry, calendar);
-        const predecessor = predecessorText(entry, numbers);
         const weight = row.kind === "section" ? "font-bold" : entry.isParent ? "font-semibold" : "";
         const selected = selectedId === row.id;
         const editing = editingId === row.id && canEdit;
@@ -540,32 +509,7 @@ export function ListRows({
                 </CellButton>
               )}
             </span>
-            <span role="gridcell" aria-label={predecessor ? `After ${predecessor}` : "No predecessor"} className="text-right text-xs tabular-nums">
-              {task && canEdit ? (
-                // A searchable list of tasks (like the assignee picker), opened by a click or Space / Enter.
-                <PredecessorPicker
-                  task={task}
-                  state={state}
-                  schedule={schedule}
-                  numbers={numbers}
-                  open={editingCell === "pred"}
-                  onOpenChange={(open) => {
-                    setCell(open ? { id: row.id, column: "pred" } : null);
-                    if (!open) refocusCell(`${row.id}:pred`);
-                  }}
-                  trigger={
-                    <CellButton editable label={`Predecessor of “${row.title || "Untitled"}”`} cell={`${row.id}:pred`} onEdit={() => setCell({ id: row.id, column: "pred" })}>
-                      {predecessor}
-                    </CellButton>
-                  }
-                />
-              ) : (
-                <CellButton editable={false} label="" cell="" onEdit={() => undefined}>
-                  {predecessor}
-                </CellButton>
-              )}
-            </span>
-            <span role="gridcell" className={`flex justify-end ${selected ? "" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"}`}>
+            <span role="gridcell" className={`flex justify-end gap-0.5 ${selected ? "" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"}`}>
               <RowActions id={row.id} title={row.title} />
             </span>
           </div>

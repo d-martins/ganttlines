@@ -30,6 +30,13 @@ async function editableBoard(rows: ProjectStateDto["rows"] = ROWS, user = ADMIN)
 /** Commands the board sent, without their ids. */
 const sentCommands = (): Command[] =>
   FakeWebSocket.last.sent.flatMap((message) => ((message as { type: string }).type === "command" ? [(message as { command: Command }).command] : []));
+/** Opens a task's predecessor picker, in its details panel (the list has no predecessor column). */
+async function pickPredecessorOf(user: ReturnType<typeof renderApp>["user"], title: string) {
+  await user.click(screen.getByRole("button", { name: `Open details of “${title}”` }));
+  const panel = await screen.findByRole("complementary", { name: `Details of “${title}”` });
+  await user.click(within(panel).getByRole("button", { name: /^Predecessor: / }));
+  return panel;
+}
 const listRow = (title: string) => screen.getAllByRole("row").find((row) => within(row).queryByText(title, { exact: true }))!;
 
 describe("editing the task list", () => {
@@ -165,11 +172,10 @@ describe("editing the task list", () => {
 
   it("keeps a picked predecessor that starts later: the task moves after it", async () => {
     const { user } = await editableBoard();
-    await user.click(screen.getByRole("button", { name: "Predecessor of “ui”" }));
+    const panel = await pickPredecessorOf(user, "ui");
     await user.type(screen.getByRole("combobox", { name: "Find a predecessor" }), "#3{Enter}");
     expect(sentCommands().at(-1)).toEqual({ type: "linkTasks", fromId: "hooks", toId: "ui" });
-    expect(within(listRow("ui")).getByText("#3")).toBeInTheDocument(); // ui follows hooks, as picked
-    expect(within(listRow("hooks")).queryByText("#2")).not.toBeInTheDocument();
+    expect(within(panel).getByRole("button", { name: /^Predecessor: #3 hooks/ })).toBeInTheDocument(); // ui follows hooks, as picked
     expect(screen.queryByText(/so it now follows this task instead/)).not.toBeInTheDocument();
   });
 
@@ -180,27 +186,28 @@ describe("editing the task list", () => {
     expect(within(await screen.findByRole("complementary", { name: "Details of “ui”" })).queryByRole("button", { name: /^Delete / })).not.toBeInTheDocument();
   });
 
-  it("edits working days and predecessors from their columns", async () => {
+  it("edits working days from their column, and predecessors from the details panel (no list column)", async () => {
     const { user } = await editableBoard();
     await user.click(screen.getByRole("button", { name: "Working days of “hooks”" }));
     await user.keyboard("{Control>}a{/Control}0{Enter}");
     expect(sentCommands().at(-1)).toEqual({ type: "convertMilestone", id: "hooks", milestone: true });
+    expect(screen.queryByRole("columnheader", { name: /Pred/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Predecessor of/ })).not.toBeInTheDocument();
     // The predecessor opens a searchable list of tasks (row number or title), like the assignee picker.
-    await user.click(screen.getByRole("button", { name: "Predecessor of “hooks”" }));
+    const panel = await pickPredecessorOf(user, "hooks");
     const search = screen.getByRole("combobox", { name: "Find a predecessor" });
     expect(screen.getByRole("option", { selected: true })).toHaveTextContent("No predecessor");
     expect(screen.queryByRole("option", { name: /design/ })).not.toBeInTheDocument(); // sections can't be predecessors
     await user.type(search, "#2{Enter}");
     expect(sentCommands().at(-1)).toEqual({ type: "linkTasks", fromId: "ui", toId: "hooks" });
-    expect(within(listRow("hooks")).getByText("#2")).toBeInTheDocument();
-    await user.keyboard(" "); // Space on the focused cell opens it again: the choice is checked, no offset to edit
+    await user.click(within(panel).getByRole("button", { name: /^Predecessor: #2 ui/ })); // opens again: the choice is checked, no offset to edit
     expect(screen.getByRole("option", { selected: true })).toHaveTextContent("#2 ui");
     expect(screen.queryByRole("spinbutton", { name: /offset/i })).not.toBeInTheDocument();
   });
 
   it("explains edits the engine refuses and doesn't send them", async () => {
     const { user } = await editableBoard([...ROWS, task("idea", { parentId: "design", position: "a2" })]);
-    await user.click(screen.getByRole("button", { name: "Predecessor of “hooks”" }));
+    await pickPredecessorOf(user, "hooks");
     await user.type(screen.getByRole("combobox", { name: "Find a predecessor" }), "idea{Enter}");
     expect(await screen.findByRole("alert")).toHaveTextContent("Both tasks need dates before they can be linked");
     expect(sentCommands()).toEqual([]);
@@ -246,9 +253,9 @@ describe("editing the task list", () => {
       "Assignee of “ui”: nobody",
       "Working days of “ui”",
       "Actual work days of “ui”",
-      "Predecessor of “ui”",
       "Show “ui” on the chart",
       "Open details of “ui”",
+      "Delete “ui”",
     ]);
     screen.getByRole("button", { name: "Title “ui”" }).focus();
     await user.keyboard(" ");
