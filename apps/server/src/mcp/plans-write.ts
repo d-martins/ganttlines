@@ -195,7 +195,12 @@ export const writePlans: ToolGroup = (server, tools) => {
           }
         });
         const rows = await edit.describe(added.map((row) => row.id));
-        return answer(`Added ${rows.length} ${rows.length === 1 ? "row" : "rows"} to “${edit.project.name}”.`, { project: edit.project.name, added: rows });
+        const notes = placementNotes(tasks.map((item, index) => ({ title: item.title, asked: item, row: rows[index] })));
+        return answer(`Added ${rows.length} ${rows.length === 1 ? "row" : "rows"} to “${edit.project.name}”.${notes.length ? ` ${notes.join(" ")}` : ""}`, {
+          project: edit.project.name,
+          added: rows,
+          ...(notes.length ? { notes } : {}),
+        });
       }),
   );
 
@@ -226,7 +231,8 @@ export const writePlans: ToolGroup = (server, tools) => {
           if (fields.actualDurationDays !== undefined) await edit.run({ type: "setActualDuration", id: task.id, days: fields.actualDurationDays });
         });
         const [row] = await edit.describe([task.id]);
-        return answer(`Updated “${task.title}”.`, { task: row });
+        const notes = placementNotes([{ title: fields.title ?? task.title, asked: fields, row }]);
+        return answer(`Updated “${task.title}”.${notes.length ? ` ${notes.join(" ")}` : ""}`, { task: row, ...(notes.length ? { notes } : {}) });
       }),
   );
 
@@ -315,6 +321,23 @@ export const writePlans: ToolGroup = (server, tools) => {
   );
 };
 
+/**
+ * Where a task asked to start on a date ended up elsewhere (its predecessor and lag, or the
+ * calendar, decide), says so — instead of reporting success as if it were stored as asked.
+ */
+function placementNotes(entries: { title: string; asked: { start?: string | undefined; half?: "morning" | "afternoon" | undefined }; row: unknown }[]): string[] {
+  const notes: string[] = [];
+  for (const { title, asked, row } of entries) {
+    const placed = row as { start?: string | null; startsAfternoon?: boolean } | undefined;
+    if (!asked.start || !placed?.start) continue;
+    const askedAfternoon = asked.half === "afternoon";
+    if (placed.start === asked.start && Boolean(placed.startsAfternoon) === askedAfternoon) continue;
+    const when = (day: string, afternoon: boolean) => `${day}${afternoon ? " (afternoon)" : ""}`;
+    notes.push(`“${title}” was asked to start ${when(asked.start, askedAfternoon)} but starts ${when(placed.start, Boolean(placed.startsAfternoon))}: its predecessor and lag, or the calendar, place it there.`);
+  }
+  return notes;
+}
+
 function spanStart(edit: BoardEdit, id: string): string | null {
   const span = edit.row(id)?.span;
   return span ? fromDay(span.start) : null;
@@ -344,6 +367,12 @@ async function applyTaskFields(
   if (fields.durationDays !== undefined) await edit.run({ type: "setDuration", id, duration: fields.durationDays });
   if (fields.start !== undefined && (!startAlready || fields.half === "afternoon")) {
     await edit.run({ type: "moveTask", id, start: fields.start, ...(fields.half ? { half: fields.half } : {}) });
+  } else if (fields.start === undefined && fields.half !== undefined) {
+    // Only the half day: the same start day, in the morning or the afternoon.
+    await edit.load();
+    const day = spanStart(edit, id);
+    if (!day) throw new ToolProblem("This task has no start date yet: give `start` along with `half`.");
+    await edit.run({ type: "moveTask", id, start: day, half: fields.half });
   }
   if (fields.assignee !== undefined) {
     await edit.run({ type: "setAssignee", id, resourceId: fields.assignee === null ? null : pickPerson(team, fields.assignee).id });

@@ -97,6 +97,32 @@ describe("AI access: editing plans", () => {
     await client.close();
   });
 
+  it("sets the half day on its own, and says when a start isn\u2019t where it was asked", async () => {
+    const { client } = await editorsApp();
+    await call(client, "add_tasks", {
+      project: "Launch",
+      tasks: [
+        { title: "Solo", start: "2026-10-07", half: "afternoon", durationDays: 1 },
+        { title: "P", start: "2026-10-12", durationDays: 3 },
+        { title: "F", predecessor: "P", durationDays: 1 },
+      ],
+    });
+    // Only the half: the same day, now in the morning.
+    const morning = await call(client, "update_task", { project: "Launch", task: "Solo", half: "morning" });
+    expect(morning["task"]).toMatchObject({ start: "2026-10-07" });
+    expect((morning["task"] as { startsAfternoon?: boolean }).startsAfternoon).toBeFalsy();
+    // A start the predecessor and lag don't allow: placed where they say, and the answer says so.
+    const asked = await call(client, "update_task", { project: "Launch", task: "F", start: "2026-10-13", half: "afternoon", lagDays: 0 });
+    expect(asked["error"]).toBeUndefined();
+    expect(asked["task"]).toMatchObject({ start: "2026-10-15", predecessor: { title: "P" } });
+    expect(asked["notes"]).toEqual(["“F” was asked to start 2026-10-13 (afternoon) but starts 2026-10-15: its predecessor and lag, or the calendar, place it there."]);
+    // Stored as asked: no note.
+    const solo = await call(client, "update_task", { project: "Launch", task: "Solo", start: "2026-10-08", half: "afternoon" });
+    expect(solo["task"]).toMatchObject({ start: "2026-10-08", startsAfternoon: true });
+    expect(solo["notes"]).toBeUndefined();
+    await client.close();
+  });
+
   it("stops at the first problem, says what was done, and undo reverts that part", async () => {
     const { ed, projectId, client } = await editorsApp();
     const result = await call(client, "add_tasks", {
