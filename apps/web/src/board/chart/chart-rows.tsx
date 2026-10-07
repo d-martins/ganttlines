@@ -211,7 +211,7 @@ export function ChartRows({
             {entry.ghost ? <GhostBar ghost={entry.ghost} timeline={timeline} style={style} /> : null}
             <ActualTrack entry={entry} timeline={timeline} style={style} />
             {kind === "section" ? (
-              <SectionBand title={row.title || "Untitled"} visibleLeft={visibleLeft} />
+              <SectionBand title={row.title || "Untitled"} />
             ) : null}
             {box && kind !== "section" ? (
               <OffscreenPointers id={row.id} title={row.title || "Untitled"} box={box} visibleLeft={visibleLeft} visibleWidth={visibleWidth} />
@@ -334,11 +334,11 @@ export function ChartRows({
   );
 }
 
-/** A section on the chart: a band across the board, its name pinned at the visible left edge. */
-function SectionBand({ title, visibleLeft }: { title: string; visibleLeft: number }) {
+/** A section on the chart: a band across the board, its name stuck (CSS) to the visible left edge. */
+function SectionBand({ title }: { title: string }) {
   return (
-    <div data-section-band className="pointer-events-none absolute inset-0 border-y border-border bg-[var(--section-band)]">
-      <span className="absolute top-0 flex h-full items-center text-xs font-semibold text-muted" style={{ left: visibleLeft + 8 }}>
+    <div data-section-band className="pointer-events-none absolute inset-0 flex items-center border-y border-border bg-[var(--section-band)]">
+      <span className="sticky text-xs font-semibold text-muted" style={{ left: "calc(var(--list-width) + 8px)" }}>
         {title}
       </span>
     </div>
