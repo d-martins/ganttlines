@@ -221,10 +221,7 @@ export function Board({
     const span = centerRequest ? model.rows.find((entry) => entry.row.id === centerRequest.id)?.span : null;
     if (!element || !span) return;
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const left =
-      centerRequest?.edge === "end"
-        ? Math.max(timeline.xEnd(span.end) + BAR_REVEAL_MARGIN - chartWidth, 0)
-        : Math.max(timeline.x(span.start) - BAR_REVEAL_MARGIN, 0);
+    const left = Math.max(timeline.x(span.start) - BAR_REVEAL_MARGIN, 0);
     if (typeof element.scrollTo === "function") element.scrollTo({ left, behavior: reduce ? "auto" : "smooth" });
     else element.scrollLeft = left;
     // Only a new request moves the chart; later edits to the row don't (model/timeline are read at request time).
@@ -329,7 +326,7 @@ export function Board({
             <div
               ref={chartBody}
               data-chart-body
-              // clip, not hidden: rows' edge arrows stick to the scroll area, which a hidden overflow would cut them off from
+              // clip, not hidden: section names stick to the scroll area, which a hidden overflow would cut them off from
               className="relative shrink-0 overflow-clip"
               style={{ width: timeline.width, height: bodyHeight, ["--list-width" as string]: `${listWidth}px`, ...chartGrid }}
             >
@@ -349,7 +346,7 @@ export function Board({
               ) : null}
               <div aria-hidden className="absolute top-0 w-0.5 bg-[var(--today)]" style={{ left: timeline.x(todayDay) + timeline.dayWidth / 2 - 1, height: bodyHeight }} />
               <Dependencies rows={model.rows} firstRow={firstRow} lastRow={lastRow} timeline={timeline} style={barStyle} />
-              <ChartRows rows={shown} allRows={model.rows} firstRow={firstRow} timeline={timeline} style={barStyle} visibleLeft={viewport.left} visibleWidth={chartWidth} />
+              <ChartRows rows={shown} allRows={model.rows} firstRow={firstRow} timeline={timeline} style={barStyle} visibleLeft={viewport.left} />
             </div>
             </DayMenu>
           </div>
