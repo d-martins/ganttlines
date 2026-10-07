@@ -266,29 +266,31 @@ export function ChartRows({
                   className="absolute h-2.5 w-2.5 cursor-crosshair rounded-full border-2 border-[var(--dependency)] bg-bg opacity-0 group-hover/row:opacity-100 hover:scale-125"
                   style={{ left: box.right + 4, top: center - 5 }}
                 />
-                <div
-                  className={`absolute flex gap-1 group-focus-within/row:opacity-100 group-hover/row:opacity-100 ${menuFor === row.id ? "opacity-100" : "opacity-0"}`}
-                  // Left of the bar, but never under the task list (then it overlaps the bar's start),
-                  // nor over the edge arrow shown when the bar starts before the view.
-                  style={{ left: Math.max(box.left - 50, visibleLeft + (box.left < visibleLeft ? 30 : 4)), top: center - 10 }}
-                  onClick={(event) => event.stopPropagation()}
-                >
-                  <AssigneePicker
-                    value={task!.resourceId}
-                    resources={resources}
-                    canCreate={canCreateResources}
-                    onChange={(resourceId) => run({ type: "setAssignee", id: row.id, resourceId })}
-                    trigger={
-                      <button
-                        type="button"
-                        aria-label={`Assign “${row.title || "Untitled"}”`}
-                        className="flex h-5 w-5 items-center justify-center rounded bg-bg text-muted shadow-sm ring-1 ring-border hover:text-text"
-                      >
-                        <UserRound size={12} />
-                      </button>
-                    }
-                  />
-                  <BarMenu task={task!} isParent={entry.isParent} open={menuFor === row.id} onOpenChange={(open) => setMenuFor(open ? row.id : null)} />
+                {/* Just left of the bar; sticky, so it stays past the task list and its edge arrow while the bar is in view. */}
+                <div className="pointer-events-none absolute left-0 flex items-center" style={{ width: box.right, top: center - 10, height: 20 }}>
+                  <div
+                    data-bar-tools
+                    className={`pointer-events-auto sticky flex gap-1 group-focus-within/row:opacity-100 group-hover/row:opacity-100 ${menuFor === row.id ? "opacity-100" : "opacity-0"}`}
+                    style={{ marginLeft: Math.max(box.left - 50, 0), left: "calc(var(--list-width) + 30px)" }}
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <AssigneePicker
+                      value={task!.resourceId}
+                      resources={resources}
+                      canCreate={canCreateResources}
+                      onChange={(resourceId) => run({ type: "setAssignee", id: row.id, resourceId })}
+                      trigger={
+                        <button
+                          type="button"
+                          aria-label={`Assign “${row.title || "Untitled"}”`}
+                          className="flex h-5 w-5 items-center justify-center rounded bg-bg text-muted shadow-sm ring-1 ring-border hover:text-text"
+                        >
+                          <UserRound size={12} />
+                        </button>
+                      }
+                    />
+                    <BarMenu task={task!} isParent={entry.isParent} open={menuFor === row.id} onOpenChange={(open) => setMenuFor(open ? row.id : null)} />
+                  </div>
                 </div>
               </>
             ) : null}

@@ -91,8 +91,10 @@ describe("chart editing", () => {
     // Hidden arrows can't be reached with the keyboard.
     expect(arrow("Scroll ahead to “ui”")).toHaveAttribute("tabindex", "-1");
     // The bar's quick tools (assignee, options) move aside so the left arrow stays clickable.
-    const tools = screen.getByRole("button", { name: "Options for “ui”" }).closest("div[style]") as HTMLElement;
-    expect(parseFloat(tools.style.left)).toBeGreaterThanOrEqual(scroller.scrollLeft + 30);
+    // (sticky past the list and the arrow, by CSS alone)
+    const tools = screen.getByRole("button", { name: "Options for “ui”" }).closest("[data-bar-tools]") as HTMLElement;
+    expect(tools.className).toContain("sticky");
+    expect(tools.style.left).toBe("calc(var(--list-width) + 30px)");
   });
 
   it("shows sections as dividers across the chart, without dates", async () => {
