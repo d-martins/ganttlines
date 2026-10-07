@@ -1,4 +1,4 @@
-import { fromDay, spanStart as spanStartHalf, TASK_COLORS, type Command } from "@ganttlines/engine";
+import { fromDay, TASK_COLORS, type Command } from "@ganttlines/engine";
 import type { Project } from "@ganttlines/db";
 import { CommandSchema, CreateProjectBody, toEngineCommand } from "@ganttlines/protocol";
 import { randomUUID } from "node:crypto";
@@ -353,13 +353,10 @@ async function applyTaskFields(
   } else if (fields.predecessor !== undefined) {
     const predecessor = edit.find(fields.predecessor, "task", added);
     await edit.load();
-    // The engine links two tasks with the earlier-starting one first. Here the direction is the AI's:
-    // a follower that isn't scheduled yet, or starts first, is placed where its predecessor starts,
-    // and the link then places it after.
-    const before = edit.row(predecessor.id)?.span;
-    const follower = edit.row(id)?.span;
-    if (before && (!follower || spanStartHalf(follower) < spanStartHalf(before))) {
-      await edit.run({ type: "moveTask", id, start: fromDay(before.start), ...(before.startsAfternoon ? { half: "afternoon" as const } : {}) });
+    if (!edit.row(id)?.span) {
+      // An unscheduled task can't be linked yet: place it where its predecessor starts first.
+      const start = spanStart(edit, predecessor.id);
+      if (start) await edit.run({ type: "moveTask", id, start });
     }
     await edit.run({ type: "linkTasks", fromId: predecessor.id, toId: id });
   }

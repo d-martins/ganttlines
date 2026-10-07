@@ -288,13 +288,12 @@ class Execution {
 
   private linkTasks(fromId: RowId, toId: RowId): ProjectState {
     if (fromId === toId) throw new Rejection("invalid", "A task cannot depend on itself");
-    const from = this.task(fromId);
-    const to = this.task(toId);
-    const fromSpan = this.spanOf(fromId);
-    const toSpan = this.spanOf(toId);
-    if (!fromSpan || !toSpan) throw new Rejection("unscheduled", "Both tasks need dates before they can be linked");
-    const [predecessor, successor] = spanStart(toSpan) < spanStart(fromSpan) ? [to, from] : [from, to];
-    return this.patch(successor, { predecessorId: predecessor.id, offset: 0 });
+    this.task(fromId);
+    const successor = this.task(toId);
+    if (!this.spanOf(fromId) || !this.spanOf(toId)) throw new Rejection("unscheduled", "Both tasks need dates before they can be linked");
+    // `toId` follows `fromId` as asked; if it starts earlier, scheduling places it after its
+    // predecessor (its own start stays its "not before" date).
+    return this.patch(successor, { predecessorId: fromId, offset: 0 });
   }
 
   private removePredecessor(id: RowId): ProjectState {

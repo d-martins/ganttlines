@@ -163,6 +163,16 @@ describe("editing the task list", () => {
     expect(within(await screen.findByRole("complementary", { name: "Details of “design”" })).getByRole("button", { name: "Delete section" })).toBeInTheDocument();
   });
 
+  it("keeps a picked predecessor that starts later: the task moves after it", async () => {
+    const { user } = await editableBoard();
+    await user.click(screen.getByRole("button", { name: "Predecessor of “ui”" }));
+    await user.type(screen.getByRole("combobox", { name: "Find a predecessor" }), "#3{Enter}");
+    expect(sentCommands().at(-1)).toEqual({ type: "linkTasks", fromId: "hooks", toId: "ui" });
+    expect(within(listRow("ui")).getByText("#3")).toBeInTheDocument(); // ui follows hooks, as picked
+    expect(within(listRow("hooks")).queryByText("#2")).not.toBeInTheDocument();
+    expect(screen.queryByText(/so it now follows this task instead/)).not.toBeInTheDocument();
+  });
+
   it("offers no delete buttons to viewers", async () => {
     const { user } = await editableBoard(ROWS, VIEWER);
     expect(screen.queryByRole("button", { name: /^Delete “/ })).not.toBeInTheDocument();

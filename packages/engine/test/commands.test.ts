@@ -452,18 +452,15 @@ describe("setLocked", () => {
 describe("linkTasks", () => {
   const base = project(task("a", { userStart: "2026-10-05", duration: 3 }), task("b", { userStart: "2026-10-06" }));
 
-  it("makes the earlier-starting task the predecessor, whichever was dragged", () => {
-    for (const [fromId, toId] of [["a", "b"], ["b", "a"]] as const) {
-      const state = run(base, cal, { type: "linkTasks", fromId, toId });
-      expect(taskIn(state, "b")).toMatchObject({ predecessorId: "a", offset: 0 });
-      expect(datesIn(state, "b")?.start).toBe("2026-10-08");
-    }
-  });
-
-  it("uses the dragged-from task as predecessor when both start the same day", () => {
-    const sameDay = project(task("a", { userStart: "2026-10-05" }), task("b", { userStart: "2026-10-05" }));
-    const state = run(sameDay, cal, { type: "linkTasks", fromId: "b", toId: "a" });
-    expect(taskIn(state, "a").predecessorId).toBe("b");
+  it("makes the linked-to task follow the linked-from one, moving it after if it starts earlier", () => {
+    const forward = run(base, cal, { type: "linkTasks", fromId: "a", toId: "b" });
+    expect(taskIn(forward, "b")).toMatchObject({ predecessorId: "a", offset: 0 });
+    expect(datesIn(forward, "b")?.start).toBe("2026-10-08");
+    // Linked the other way: a (which starts first) now follows b, so it moves after b ends.
+    const backward = run(base, cal, { type: "linkTasks", fromId: "b", toId: "a" });
+    expect(taskIn(backward, "a")).toMatchObject({ predecessorId: "b", offset: 0, userStart: "2026-10-05" });
+    expect(taskIn(backward, "b").predecessorId).toBeNull();
+    expect(datesIn(backward, "a")?.start).toBe("2026-10-07");
   });
 
   it("replaces an existing predecessor", () => {
