@@ -228,11 +228,15 @@ describe("board", () => {
     expect(barWidth(`hooks, ${d("2026-10-09")} – ${d("2026-10-12")}`)).toBe(4 * 12);
   });
 
-  it("draws faint lines between days (between weeks when zoomed out)", async () => {
+  it("draws faint lines between days on the chart (between weeks when zoomed out), and row lines only in the list", async () => {
     const { user } = await joinedBoard();
     const body = () => document.querySelector("[data-chart-body]") as HTMLElement;
     expect(body().style.backgroundImage).toContain("var(--grid-day)");
     expect(body().style.backgroundSize).toContain("32px 100%");
+    expect(body().style.backgroundImage).not.toContain("var(--grid)"); // no row lines across the chart
+    const list = screen.getByRole("treegrid", { name: "Tasks" });
+    expect(list.style.backgroundImage).toContain("var(--grid)"); // the list keeps its row lines…
+    expect(list.style.backgroundImage).not.toContain("var(--grid-day)"); // …without the day lines
     await user.click(screen.getByRole("button", { name: "Week" }));
     expect(body().style.backgroundSize).toContain(`${7 * 12}px 100%`);
     await user.click(screen.getByRole("button", { name: "Month" }));
