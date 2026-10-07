@@ -498,7 +498,7 @@ export function ListRows({
                   }}
                   onCancel={() => setCell(null)}
                 />
-              ) : (
+              ) : row.kind === "section" ? null : (
                 <CellButton
                   editable={canEdit && !!task && !entry.isParent}
                   hint={canEdit ? (entry.isParent || !task ? "Worked out from the tasks inside" : undefined) : undefined}

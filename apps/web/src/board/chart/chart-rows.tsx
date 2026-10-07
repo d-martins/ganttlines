@@ -1,5 +1,5 @@
 import { fromDay, spanEnd, spanStart, type Command, type DayNum, type RowId } from "@ganttlines/engine";
-import { UserRound } from "lucide-react";
+import { ArrowLeft, ArrowRight, UserRound } from "lucide-react";
 import { useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { AssigneePicker } from "../assignee-picker";
 import { runCommand, useBoard } from "../board-context";
@@ -29,6 +29,7 @@ export function ChartRows({
   timeline,
   style,
   visibleLeft,
+  visibleWidth,
 }: {
   /** the rendered window (already showing any drag preview) */
   rows: readonly BoardRow[];
@@ -39,6 +40,8 @@ export function ChartRows({
   style: BarStyle;
   /** chart x of the first visible pixel (the list covers what's left of it) */
   visibleLeft: number;
+  /** how much of the chart is visible */
+  visibleWidth: number;
 }) {
   const board = useBoard();
   const { state, resources, resourceMap, canEdit, canCreateResources } = board;
@@ -207,7 +210,13 @@ export function ChartRows({
           >
             {entry.ghost ? <GhostBar ghost={entry.ghost} timeline={timeline} style={style} /> : null}
             <ActualTrack entry={entry} timeline={timeline} style={style} />
-            {span ? (
+            {kind === "section" ? (
+              <SectionBand title={row.title || "Untitled"} visibleLeft={visibleLeft} />
+            ) : null}
+            {box && kind !== "section" ? (
+              <OffscreenPointers id={row.id} title={row.title || "Untitled"} box={box} visibleLeft={visibleLeft} visibleWidth={visibleWidth} center={rowHeight / 2} />
+            ) : null}
+            {span && kind !== "section" ? (
               <RowBar
                 entry={entry}
                 span={span}
@@ -320,6 +329,85 @@ export function ChartRows({
           <line x1={drag.line.x1} y1={drag.line.y1} x2={drag.line.x2} y2={drag.line.y2} stroke="var(--accent)" strokeWidth={2} strokeDasharray="4 3" />
           <circle cx={drag.line.x2} cy={drag.line.y2} r={4} fill="var(--accent)" />
         </svg>
+      ) : null}
+    </>
+  );
+}
+
+/** A section on the chart: a band across the board, its name pinned at the visible left edge. */
+function SectionBand({ title, visibleLeft }: { title: string; visibleLeft: number }) {
+  return (
+    <div data-section-band className="pointer-events-none absolute inset-0 border-y border-border bg-[var(--section-band)]">
+      <span className="absolute top-0 flex h-full items-center text-xs font-semibold text-muted" style={{ left: visibleLeft + 8 }}>
+        {title}
+      </span>
+    </div>
+  );
+}
+
+const POINTER = "absolute z-[1] flex h-6 items-center gap-1 rounded-md border border-border bg-surface px-1.5 text-xs text-text shadow-sm hover:bg-surface-2";
+
+/**
+ * Arrows at the visible chart's edges for a bar that runs past them: on the left when it starts
+ * before the view, on the right when it ends after it; with its title when it's entirely off screen.
+ * A click scrolls to it.
+ */
+function OffscreenPointers({
+  id,
+  title,
+  box,
+  visibleLeft,
+  visibleWidth,
+  center,
+}: {
+  id: RowId;
+  title: string;
+  box: { left: number; right: number };
+  visibleLeft: number;
+  visibleWidth: number;
+  center: number;
+}) {
+  const focus = useSelection((selection) => selection.center);
+  const visibleRight = visibleLeft + visibleWidth;
+  if (visibleWidth <= 0) return null;
+  const top = center - 12;
+  const go = (event: { stopPropagation: () => void }, edge?: "end") => {
+    event.stopPropagation();
+    focus(id, edge);
+  };
+  if (box.right <= visibleLeft || box.left >= visibleRight) {
+    const later = box.left >= visibleRight;
+    return (
+      <button
+        type="button"
+        aria-label={`Scroll to “${title}”`}
+        className={POINTER}
+        style={later ? { left: visibleRight - 8, top, transform: "translateX(-100%)" } : { left: visibleLeft + 8, top }}
+        onClick={(event) => go(event)}
+      >
+        {later ? null : <ArrowLeft size={13} aria-hidden />}
+        <span className="max-w-40 truncate">{title}</span>
+        {later ? <ArrowRight size={13} aria-hidden /> : null}
+      </button>
+    );
+  }
+  return (
+    <>
+      {box.left < visibleLeft ? (
+        <button type="button" aria-label={`Scroll to the start of “${title}”`} className={POINTER} style={{ left: visibleLeft + 8, top }} onClick={(event) => go(event)}>
+          <ArrowLeft size={13} aria-hidden />
+        </button>
+      ) : null}
+      {box.right > visibleRight ? (
+        <button
+          type="button"
+          aria-label={`Scroll to the end of “${title}”`}
+          className={POINTER}
+          style={{ left: visibleRight - 8, top, transform: "translateX(-100%)" }}
+          onClick={(event) => go(event, "end")}
+        >
+          <ArrowRight size={13} aria-hidden />
+        </button>
       ) : null}
     </>
   );
