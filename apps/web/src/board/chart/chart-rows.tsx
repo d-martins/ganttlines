@@ -214,7 +214,7 @@ export function ChartRows({
               <SectionBand title={row.title || "Untitled"} visibleLeft={visibleLeft} />
             ) : null}
             {box && kind !== "section" ? (
-              <OffscreenPointers id={row.id} title={row.title || "Untitled"} box={box} visibleLeft={visibleLeft} visibleWidth={visibleWidth} center={rowHeight / 2} />
+              <OffscreenPointers id={row.id} title={row.title || "Untitled"} box={box} visibleLeft={visibleLeft} visibleWidth={visibleWidth} />
             ) : null}
             {span && kind !== "section" ? (
               <RowBar
@@ -345,12 +345,12 @@ function SectionBand({ title, visibleLeft }: { title: string; visibleLeft: numbe
   );
 }
 
-const POINTER = "absolute z-[1] flex h-6 items-center gap-1 rounded-md border border-border bg-surface px-1.5 text-xs text-text shadow-sm hover:bg-surface-2";
+const ARROW =
+  "pointer-events-none sticky flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-muted shadow-sm opacity-0 scale-75 transition duration-150 hover:text-text data-[shown=true]:pointer-events-auto data-[shown=true]:scale-100 data-[shown=true]:opacity-100";
 
 /**
- * Arrows at the visible chart's edges for a bar that runs past them: on the left when it starts
- * before the view, on the right when it ends after it; with its title when it's entirely off screen.
- * A click scrolls to it.
+ * Arrows pinned (sticky) to the visible chart's edges: the left one shows when the bar starts
+ * before the view, the right one when it ends after it. A click scrolls to the bar.
  */
 function OffscreenPointers({
   id,
@@ -358,57 +358,51 @@ function OffscreenPointers({
   box,
   visibleLeft,
   visibleWidth,
-  center,
 }: {
   id: RowId;
   title: string;
   box: { left: number; right: number };
   visibleLeft: number;
   visibleWidth: number;
-  center: number;
 }) {
   const focus = useSelection((selection) => selection.center);
   const visibleRight = visibleLeft + visibleWidth;
-  if (visibleWidth <= 0) return null;
-  const top = center - 12;
-  const go = (event: { stopPropagation: () => void }, edge?: "end") => {
-    event.stopPropagation();
-    focus(id, edge);
-  };
-  if (box.right <= visibleLeft || box.left >= visibleRight) {
-    const later = box.left >= visibleRight;
-    return (
+  const before = visibleWidth > 0 && box.left < visibleLeft;
+  const after = visibleWidth > 0 && box.right > visibleRight;
+  // Wholly ahead: bring its start into view; partly: its end.
+  const aheadEdge = box.left >= visibleRight ? undefined : "end";
+  return (
+    <div className="pointer-events-none absolute inset-0 flex items-center justify-between">
       <button
         type="button"
-        aria-label={`Scroll to “${title}”`}
-        className={POINTER}
-        style={later ? { left: visibleRight - 8, top, transform: "translateX(-100%)" } : { left: visibleLeft + 8, top }}
-        onClick={(event) => go(event)}
+        aria-label={`Scroll back to “${title}”`}
+        data-shown={before}
+        tabIndex={before ? 0 : -1}
+        aria-hidden={!before}
+        className={ARROW}
+        style={{ left: "calc(var(--list-width) + 4px)" }}
+        onClick={(event) => {
+          event.stopPropagation();
+          focus(id);
+        }}
       >
-        {later ? null : <ArrowLeft size={13} aria-hidden />}
-        <span className="max-w-40 truncate">{title}</span>
-        {later ? <ArrowRight size={13} aria-hidden /> : null}
+        <ArrowLeft size={11} aria-hidden />
       </button>
-    );
-  }
-  return (
-    <>
-      {box.left < visibleLeft ? (
-        <button type="button" aria-label={`Scroll to the start of “${title}”`} className={POINTER} style={{ left: visibleLeft + 8, top }} onClick={(event) => go(event)}>
-          <ArrowLeft size={13} aria-hidden />
-        </button>
-      ) : null}
-      {box.right > visibleRight ? (
-        <button
-          type="button"
-          aria-label={`Scroll to the end of “${title}”`}
-          className={POINTER}
-          style={{ left: visibleRight - 8, top, transform: "translateX(-100%)" }}
-          onClick={(event) => go(event, "end")}
-        >
-          <ArrowRight size={13} aria-hidden />
-        </button>
-      ) : null}
-    </>
+      <button
+        type="button"
+        aria-label={`Scroll ahead to “${title}”`}
+        data-shown={after}
+        tabIndex={after ? 0 : -1}
+        aria-hidden={!after}
+        className={ARROW}
+        style={{ right: 4 }}
+        onClick={(event) => {
+          event.stopPropagation();
+          focus(id, aheadEdge);
+        }}
+      >
+        <ArrowRight size={11} aria-hidden />
+      </button>
+    </div>
   );
 }
