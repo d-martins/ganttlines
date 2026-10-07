@@ -22,6 +22,7 @@
   --focus: #1f6fd6;
   /* Chart. Task colors are dark enough for white titles (AA) except the light ones, which use dark ink. */
   --grid: #eef0f4;
+  --grid-day: rgb(20 30 50 / 0.05);
   --weekend: #f4f5f8;
   --holiday: #eceff4;
   --holiday-stripe: #dde1e8;
@@ -67,6 +68,7 @@
   --danger: #ff7b7b;
   --focus: #6fb2ff;
   --grid: #2c2d31;
+  --grid-day: rgb(255 255 255 / 0.04);
   --weekend: #25262a;
   --holiday: #2a2b30;
   --holiday-stripe: #34353b;

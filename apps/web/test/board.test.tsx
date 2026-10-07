@@ -228,6 +228,17 @@ describe("board", () => {
     expect(barWidth(`hooks, ${d("2026-10-09")} – ${d("2026-10-12")}`)).toBe(4 * 12);
   });
 
+  it("draws faint lines between days (between weeks when zoomed out)", async () => {
+    const { user } = await joinedBoard();
+    const body = () => document.querySelector("[data-chart-body]") as HTMLElement;
+    expect(body().style.backgroundImage).toContain("var(--grid-day)");
+    expect(body().style.backgroundSize).toContain("32px 100%");
+    await user.click(screen.getByRole("button", { name: "Week" }));
+    expect(body().style.backgroundSize).toContain(`${7 * 12}px 100%`);
+    await user.click(screen.getByRole("button", { name: "Month" }));
+    expect(body().style.backgroundImage).not.toContain("var(--grid-day)");
+  });
+
   it("shows each day's weekday letter when days are wide enough", async () => {
     const { user } = await joinedBoard();
     const letters = () => [...document.querySelectorAll("[data-weekday]")].map((cell) => [cell.getAttribute("data-day"), cell.textContent]);
