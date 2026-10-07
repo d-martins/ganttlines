@@ -1,8 +1,9 @@
 import { toDay } from "@ganttlines/engine";
 import type { ProjectStateDto } from "@ganttlines/protocol";
-import { waitFor, within } from "@testing-library/react";
+import { fireEvent, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { formatDay } from "../src/board/format";
+import { initialBoardView, useBoardView } from "../src/board/view-store";
 import { ANA, BASELINE_ID, CALENDAR, FakeWebSocket, PROJECT_ID, projectState, section, task } from "./board-fixtures";
 import { ADMIN, project, renderApp, screen, signedIn } from "./utils";
 
@@ -171,6 +172,67 @@ describe("board", () => {
     await user.click(screen.getByRole("button", { name: "Week" }));
     expect(barWidth(hooks)).toBe(2 * 12);
     expect(screen.getByRole("button", { name: "Show weekends" })).toBeInTheDocument();
+  });
+
+  it("zooms a step at a time, with presets and with Ctrl + the scroll wheel, and remembers it", async () => {
+    const { user } = await joinedBoard();
+    const hooks = `hooks, ${d("2026-10-09")} – ${d("2026-10-12")}`;
+    expect(barWidth(hooks)).toBe(4 * 32);
+    await user.click(screen.getByRole("button", { name: "Zoom in" }));
+    expect(barWidth(hooks)).toBe(4 * 48);
+    await user.click(screen.getByRole("button", { name: "Zoom out" }));
+    await user.click(screen.getByRole("button", { name: "Zoom out" }));
+    expect(barWidth(hooks)).toBe(4 * 24);
+    expect(screen.getByRole("button", { name: "Day" })).toHaveAttribute("aria-pressed", "false"); // between presets
+    await user.click(screen.getByRole("button", { name: "Week" }));
+    expect(barWidth(hooks)).toBe(4 * 12);
+    expect(screen.getByRole("button", { name: "Week" })).toHaveAttribute("aria-pressed", "true");
+    const chart = document.querySelector("[data-chart-body]")!;
+    fireEvent.wheel(chart, { deltaY: -100, ctrlKey: true });
+    expect(barWidth(hooks)).toBe(4 * 16);
+    fireEvent.wheel(chart, { deltaY: 100 }); // without Ctrl it just scrolls
+    expect(barWidth(hooks)).toBe(4 * 16);
+    expect(localStorage.getItem("gp.dayWidth")).toBe("16");
+    await user.click(screen.getByRole("button", { name: "Month" })); // 4 px: the narrowest step
+    expect(screen.getByRole("button", { name: "Zoom out" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Zoom in" })).not.toBeDisabled();
+  });
+
+  it("zooms one step per wheel notch, not per event: a trackpad pinch adds up", async () => {
+    await joinedBoard();
+    const hooks = `hooks, ${d("2026-10-09")} – ${d("2026-10-12")}`;
+    const chart = document.querySelector("[data-chart-body]")!;
+    for (let i = 0; i < 10; i++) fireEvent.wheel(chart, { deltaY: -8, ctrlKey: true }); // a gentle pinch: 80 px in all
+    expect(barWidth(hooks)).toBe(4 * 32);
+    for (let i = 0; i < 4; i++) fireEvent.wheel(chart, { deltaY: -8, ctrlKey: true }); // past one notch's worth
+    expect(barWidth(hooks)).toBe(4 * 48);
+  });
+
+  it("keeps week labels readable when weeks get narrow", async () => {
+    const { user } = await joinedBoard();
+    await user.click(screen.getByRole("button", { name: "Hide weekends" }));
+    await user.click(screen.getByRole("button", { name: "Week" }));
+    const weekLabels = () => [...document.querySelectorAll("[data-week]")].map((cell) => cell.textContent);
+    expect(weekLabels()).toContain("Oct 5");
+    await user.click(screen.getByRole("button", { name: "Zoom out" })); // 8 px: a 5-day week is 40 px
+    expect(weekLabels()).toContain("5");
+    expect(weekLabels().every((label) => !label?.includes("…"))).toBe(true);
+  });
+
+  it("starts at the zoom chosen before zoom steps existed", async () => {
+    localStorage.setItem("gp.zoom", JSON.stringify("week"));
+    useBoardView.setState(initialBoardView());
+    await joinedBoard();
+    expect(barWidth(`hooks, ${d("2026-10-09")} – ${d("2026-10-12")}`)).toBe(4 * 12);
+  });
+
+  it("shows each day's weekday letter when days are wide enough", async () => {
+    const { user } = await joinedBoard();
+    const letters = () => [...document.querySelectorAll("[data-weekday]")].map((cell) => [cell.getAttribute("data-day"), cell.textContent]);
+    expect(letters()).toContainEqual([d("2026-10-05"), "M"]);
+    expect(letters()).toContainEqual([d("2026-10-10"), "S"]);
+    await user.click(screen.getByRole("button", { name: "Week" }));
+    expect(letters()).toEqual([]);
   });
 
   it("overlays a baseline's dates as ghosts", async () => {

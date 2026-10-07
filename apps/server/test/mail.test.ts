@@ -98,6 +98,8 @@ describe("email", () => {
 
     const broken = await testApp({ db: t.db, config: testConfig, mailer: outbox(true) });
     const failed = await broken.inject({ method: "POST", url: "/api/settings/test-email", headers: { cookie: admin } });
+    // Not a 502/504: proxies in front of the app replace those with their own "server not responding" page.
+    expect(failed.statusCode).toBe(422);
     expect(failed.json()).toMatchObject({ error: "mail_failed", message: expect.stringContaining("ECONNREFUSED") });
     await broken.close();
   });

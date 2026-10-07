@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ProjectService } from "../src/projects/project-service";
 import { createUser, setupAdmin, useTestApp } from "./helpers";
 import { call, connect, enableMcp, mcpClient, registerApp } from "./mcp-support";
 
 const t = useTestApp();
+afterEach(() => vi.restoreAllMocks());
 
 /** An editor (Ed) whose AI app may do everything; a project "Launch"; Ana on the team. */
 async function editorsApp() {
@@ -58,7 +60,7 @@ describe("AI access: editing plans", () => {
       ],
     });
     const updated = await call(client, "update_task", { project: "Launch", task: "build", predecessor: "Design", lagDays: 1, title: "Build it", half: "afternoon", start: "2026-10-05" });
-    expect(updated["task"]).toMatchObject({ title: "Build it", start: "2026-10-08", predecessor: { title: "Design", lagDays: 1 } });
+    expect(updated["task"]).toMatchObject({ title: "Build it", start: "2026-10-08", startsAfternoon: true, predecessor: { title: "Design", lagDays: 1.5 } });
 
     await call(client, "move_tasks", { project: "Launch", tasks: ["Build it"], parent: "Later" });
     const later = (await rowsOf(projectId, ed.cookie)).find((row) => row.title === "Later")!;
@@ -115,7 +117,7 @@ describe("AI access: editing plans", () => {
     const asked = await call(client, "update_task", { project: "Launch", task: "F", start: "2026-10-13", half: "afternoon", lagDays: 0 });
     expect(asked["error"]).toBeUndefined();
     expect(asked["task"]).toMatchObject({ start: "2026-10-15", predecessor: { title: "P" } });
-    expect(asked["notes"]).toEqual(["“F” was asked to start 2026-10-13 (afternoon) but starts 2026-10-15: its predecessor and lag, or the calendar, place it there."]);
+    expect(asked["notes"]).toEqual(["“F” was asked to start 2026-10-13 (afternoon) but starts 2026-10-15 (afternoon): its predecessor and lag, or the calendar, place it there."]);
     // Stored as asked: no note.
     const solo = await call(client, "update_task", { project: "Launch", task: "Solo", start: "2026-10-08", half: "afternoon" });
     expect(solo["task"]).toMatchObject({ start: "2026-10-08", startsAfternoon: true });
@@ -173,6 +175,58 @@ describe("AI access: editing plans", () => {
     expect(lag["error"]).toBe("“Build”: This task has no predecessor. Nothing was changed.");
     expect((await rowsOf(projectId, ed.cookie)).map((row) => row.title)).toEqual(["Build"]); // the rename was reverted too
     expect(await call(client, "add_tasks", { project: "Nope", tasks: [{ title: "x" }] })).toEqual({ error: expect.stringContaining("No project called “Nope”") });
+    await client.close();
+  });
+
+  it("after a failed call, undo still reverts the call before it", async () => {
+    const { ed, projectId, client } = await editorsApp();
+    await call(client, "add_tasks", { project: "Launch", tasks: [{ title: "One", start: "2026-10-05" }] });
+    expect((await call(client, "add_tasks", { project: "Launch", tasks: [{ title: "Two", assignee: "Zed" }] }))["error"]).toMatch(/Nothing was changed\.$/);
+    await call(client, "undo");
+    expect(await rowsOf(projectId, ed.cookie)).toEqual([]);
+    await client.close();
+  });
+
+  it("says when part of a failed call couldn't be reverted", async () => {
+    const { client } = await editorsApp();
+    vi.spyOn(ProjectService.prototype, "undoCommand").mockResolvedValueOnce({ skipped: 1 } as never);
+    const result = await call(client, "add_tasks", { project: "Launch", tasks: [{ title: "One", start: "2026-10-05" }, { title: "Two", assignee: "Zed" }] });
+    expect(result["error"]).toMatch(/^“Two”: No team member called “Zed”.* couldn't be reverted/);
+    await client.close();
+  });
+
+  it("keeps the original error, and lets undo finish, when reverting itself breaks", async () => {
+    const { ed, projectId, client } = await editorsApp();
+    vi.spyOn(ProjectService.prototype, "undoCommand").mockRejectedValueOnce(new Error("database went away"));
+    const result = await call(client, "add_tasks", { project: "Launch", tasks: [{ title: "One", start: "2026-10-05" }, { title: "Two", assignee: "Zed" }] });
+    expect(result["error"]).toMatch(/^“Two”: No team member called “Zed”.*call undo/);
+    vi.restoreAllMocks();
+    await call(client, "undo");
+    expect(await rowsOf(projectId, ed.cookie)).toEqual([]);
+    await client.close();
+  });
+
+  it("keeps a half day given with a predecessor or a lag", async () => {
+    const { client } = await editorsApp();
+    const added = await call(client, "add_tasks", {
+      project: "Launch",
+      tasks: [
+        { title: "P", start: "2026-10-12", durationDays: 1 },
+        { title: "F", predecessor: "P", half: "afternoon", durationDays: 1 },
+      ],
+    });
+    expect((added["added"] as unknown[])[1]).toMatchObject({ title: "F", start: "2026-10-13", startsAfternoon: true });
+    const lagged = await call(client, "update_task", { project: "Launch", task: "F", lagDays: 1, half: "afternoon" });
+    expect(lagged["task"]).toMatchObject({ start: "2026-10-14", startsAfternoon: true });
+    await client.close();
+  });
+
+  it("says when a link leaves a locked task starting too early", async () => {
+    const { client } = await editorsApp();
+    await call(client, "add_tasks", { project: "Launch", tasks: [{ title: "P", start: "2026-10-12", durationDays: 3 }, { title: "L", start: "2026-10-13" }] });
+    await call(client, "update_task", { project: "Launch", task: "L", locked: true });
+    const linked = await call(client, "update_task", { project: "Launch", task: "L", predecessor: "P" });
+    expect(linked["notes"]).toEqual([expect.stringMatching(/^“L” is locked and starts before its predecessor allows/)]);
     await client.close();
   });
 

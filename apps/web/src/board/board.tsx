@@ -8,7 +8,7 @@ import { useChartDrag } from "./chart/drag";
 import { ChartHeader } from "./chart/chart-header";
 import { Dependencies } from "./chart/dependencies";
 import { Shading } from "./chart/shading";
-import { chartRange, DAY_WIDTH, Timeline } from "./chart/timeline";
+import { chartRange, scaleOf, Timeline, zoomStep } from "./chart/timeline";
 import { today } from "./format";
 import { useBoard } from "./board-context";
 import { useCollapse, useCollapsed } from "./collapse";
@@ -79,7 +79,7 @@ export function Board({
   highlights: readonly HighlightDto[];
   baseline: { mode: CompareMode; tasks: readonly BaselineTaskDto[] } | null;
 }) {
-  const { zoom, barStyle, showWeekends, listWidth, todayRequest, setListWidth } = useBoardView();
+  const { dayWidth, barStyle, showWeekends, listWidth, todayRequest, setListWidth } = useBoardView();
   const [query, setQuery] = useState("");
   const { canEdit, canEditCalendar, sync } = useBoard();
   const collapsed = useCollapsed(sync.projectId);
@@ -121,8 +121,8 @@ export function Board({
   const timeline = useMemo(() => {
     const working = new Set(calendarDto.workingWeekdays);
     const hidden = showWeekends ? undefined : (day: DayNum) => !working.has(weekday(day));
-    return new Timeline(first, last, DAY_WIDTH[zoom], hidden);
-  }, [first, last, zoom, showWeekends, calendarDto.workingWeekdays]);
+    return new Timeline(first, last, dayWidth, hidden);
+  }, [first, last, dayWidth, showWeekends, calendarDto.workingWeekdays]);
 
   const scroller = useRef<HTMLDivElement>(null);
   const chartBody = useRef<HTMLDivElement>(null);
@@ -133,6 +133,8 @@ export function Board({
    * rounding to the day's start on every change made the chart creep backwards while dragging.
    */
   const anchor = useRef<{ day: DayNum; fraction: number }>({ day: todayDay, fraction: 0.5 });
+  /** Where on the chart the anchor goes after the next change (the pointer, when zooming with the wheel); otherwise ANCHOR. */
+  const anchorAt = useRef<number | null>(null);
   const frame = useRef(0);
 
   const chartWidth = Math.max(viewport.width - listWidth, 0);
@@ -164,18 +166,52 @@ export function Board({
       anchor.current = { day: todayDay, fraction: 0.5 };
     }
     const { day, fraction } = anchor.current;
-    element.scrollLeft = Math.max(timeline.x(day) + fraction * timeline.dayWidth - chartWidth * ANCHOR, 0);
+    element.scrollLeft = Math.max(timeline.x(day) + fraction * timeline.dayWidth - (anchorAt.current ?? chartWidth * ANCHOR), 0);
+    anchorAt.current = null;
     setViewport(measure(element));
     // chartWidth is left out on purpose: resizing the window should not jump the chart.
   }, [timeline, todayRequest, todayDay]);
+
+  // Ctrl/⌘ + the scroll wheel zooms around the pointer (a native listener: React's wheel events can't stop the page zooming).
+  const wheelState = useRef({ timeline, dayWidth, listWidth });
+  wheelState.current = { timeline, dayWidth, listWidth };
+  useEffect(() => {
+    const element = scroller.current;
+    if (!element) return;
+    // Deltas add up: a mouse notch (~100 px) is one step; a trackpad pinch sends many small ones.
+    const total = { sum: 0, at: 0 };
+    const onWheel = (event: WheelEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.deltaY === 0) return;
+      const { timeline: current, dayWidth: width, listWidth: list } = wheelState.current;
+      const body = element.querySelector("[data-chart-body]");
+      if (!body || !(event.target instanceof Node) || !body.contains(event.target)) return;
+      event.preventDefault();
+      if (event.timeStamp - total.at > 150) total.sum = 0;
+      total.at = event.timeStamp;
+      total.sum += event.deltaY * (event.deltaMode === 1 ? 16 : 1);
+      if (Math.abs(total.sum) < 100) return;
+      const direction = total.sum < 0 ? 1 : -1;
+      total.sum = 0;
+      const next = zoomStep(width, direction);
+      if (next === width) return;
+      const x = event.clientX - body.getBoundingClientRect().left;
+      const day = current.dayAt(x);
+      anchor.current = { day, fraction: Math.min(Math.max((x - current.x(day)) / current.dayWidth, 0), 1) };
+      anchorAt.current = Math.max(event.clientX - element.getBoundingClientRect().left - list, 0);
+      useBoardView.getState().setDayWidth(next);
+    };
+    element.addEventListener("wheel", onWheel, { passive: false });
+    return () => element.removeEventListener("wheel", onWheel);
+  }, []);
 
   const rowHeight = ROW_HEIGHT[barStyle];
   const firstRow = Math.max(Math.floor(viewport.top / rowHeight) - OVERSCAN_ROWS, 0);
   const lastRow = Math.min(Math.ceil((viewport.top + viewport.height) / rowHeight) + OVERSCAN_ROWS, model.rows.length);
   const shown = model.rows.slice(firstRow, lastRow);
   const days = timeline.daysBetween(viewport.left - OVERSCAN_PX, viewport.left + chartWidth + OVERSCAN_PX);
-  // One spare row under the last task holds "+ Add task / + Add section".
-  const bodyHeight = Math.max((model.rows.length + (canEdit ? 1 : 0)) * rowHeight, viewport.height - HEADER_HEIGHT);
+  // One spare row under the last task holds "+ Add task / + Add section"; below it, room to scroll the end up to mid-screen.
+  const visibleHeight = Math.max(viewport.height - HEADER_HEIGHT, 0);
+  const bodyHeight = Math.max((model.rows.length + (canEdit ? 1 : 0)) * rowHeight + Math.round(visibleHeight / 2), visibleHeight);
   const selectedIndex = model.rows.findIndex((entry) => entry.row.id === selectedId);
 
   // Bring a row's bar into view when asked (a click on the already selected row, or a double-click):
@@ -234,11 +270,11 @@ export function Board({
       <div ref={scroller} onScroll={onScroll} data-testid="board-scroller" className="relative min-h-0 flex-1 overflow-auto">
         <div style={{ width: listWidth + timeline.width }}>
           <div className="sticky top-0 z-20 flex" style={{ height: HEADER_HEIGHT }}>
-            <div className="sticky left-0 z-10 shrink-0 overflow-hidden border-r border-border bg-surface" style={{ width: listWidth }}>
+            <div className="sticky left-0 z-10 shrink-0 overflow-hidden border-r border-[var(--list-edge)] bg-surface shadow-[var(--list-shadow)]" style={{ width: listWidth }}>
               <ListHeader query={query} onQuery={setQuery} />
               {divider}
             </div>
-            <ChartHeader timeline={timeline} zoom={zoom} stickyLeft={listWidth} days={days} highlights={highlightDays} holidays={holidayNames} todayDay={todayDay} />
+            <ChartHeader timeline={timeline} zoom={scaleOf(dayWidth)} stickyLeft={listWidth} days={days} highlights={highlightDays} holidays={holidayNames} todayDay={todayDay} />
           </div>
           <div className="flex" style={{ height: bodyHeight }}>
             <div
@@ -261,7 +297,7 @@ export function Board({
                 }
                 event.currentTarget.focus({ preventScroll: true });
               }}
-              className="sticky left-0 z-10 shrink-0 overflow-hidden border-r border-border bg-bg outline-none focus:outline-none focus-visible:outline-none"
+              className="sticky left-0 z-10 shrink-0 overflow-hidden border-r border-[var(--list-edge)] bg-surface shadow-[var(--list-shadow)] outline-none focus:outline-none focus-visible:outline-none"
               style={{ width: listWidth, height: bodyHeight, ...grid }}
             >
               <ListColumnHeaders />

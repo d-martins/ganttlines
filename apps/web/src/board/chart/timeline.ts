@@ -1,7 +1,18 @@
 import { dayOf, halfDay, isAfternoon, weekday, type DayNum, type HalfDay } from "@ganttlines/engine";
 
 export type Zoom = "day" | "week" | "month";
+/** The presets' day widths (px), on the zoom scale below. */
 export const DAY_WIDTH: Record<Zoom, number> = { day: 32, week: 12, month: 4 };
+/** Every zoom step: a day's width in px, narrowest first. */
+export const ZOOM_STEPS = [4, 6, 8, 12, 16, 24, 32, 48, 64, 96] as const;
+/** What the date header shows at a day width: days, weeks or months. */
+export const scaleOf = (dayWidth: number): Zoom => (dayWidth >= 16 ? "day" : dayWidth >= 6 ? "week" : "month");
+/** The next step in (1) or out (-1) from `dayWidth`; the same width at either end. */
+export function zoomStep(dayWidth: number, direction: 1 | -1): number {
+  const index = ZOOM_STEPS.findIndex((step) => step >= dayWidth);
+  const at = index < 0 ? ZOOM_STEPS.length - 1 : ZOOM_STEPS[index] === dayWidth ? index : direction > 0 ? index - 1 : index;
+  return ZOOM_STEPS[Math.min(Math.max(at + direction, 0), ZOOM_STEPS.length - 1)]!;
+}
 
 /**
  * Maps days to horizontal pixels. Hidden days (the team's non-working weekdays when weekends

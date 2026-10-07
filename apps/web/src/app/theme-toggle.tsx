@@ -1,26 +1,19 @@
-import { Moon, Sun } from "lucide-react";
-import { useSyncExternalStore } from "react";
-import { resolveTheme, useTheme } from "../theme";
+import { Monitor, Moon, Sun } from "lucide-react";
+import { useTheme, type ThemePreference } from "../theme";
 import { IconButton } from "../ui/button";
 
-const darkQuery = () => window.matchMedia("(prefers-color-scheme: dark)");
-const subscribe = (onChange: () => void) => {
-  const query = darkQuery();
-  query.addEventListener("change", onChange);
-  return () => query.removeEventListener("change", onChange);
-};
+const NEXT: Record<ThemePreference, ThemePreference> = { system: "light", light: "dark", dark: "system" };
+const NAMES: Record<ThemePreference, string> = { system: "matching your system", light: "light", dark: "dark" };
+const ICONS: Record<ThemePreference, typeof Sun> = { system: Monitor, light: Sun, dark: Moon };
 
-/**
- * One click between light and dark (the account menu still offers "System"). Shows what a click
- * switches to; follows the OS while the preference is "system".
- */
+/** One click through the themes: match my system → light → dark. Shows the current one; says what a click picks. */
 export function ThemeToggle() {
   const { preference, setPreference } = useTheme();
-  const systemDark = useSyncExternalStore(subscribe, () => darkQuery().matches);
-  const dark = resolveTheme(preference, systemDark) === "dark";
+  const Icon = ICONS[preference];
+  const next = NEXT[preference];
   return (
-    <IconButton label={dark ? "Switch to light theme" : "Switch to dark theme"} onClick={() => setPreference(dark ? "light" : "dark")}>
-      {dark ? <Sun size={16} /> : <Moon size={16} />}
+    <IconButton label={`Theme: ${NAMES[preference]}. Switch to ${NAMES[next]}`} onClick={() => setPreference(next)}>
+      <Icon size={16} />
     </IconButton>
   );
 }

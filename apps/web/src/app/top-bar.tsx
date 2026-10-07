@@ -18,7 +18,7 @@ import { LOCAL_PERSON } from "../workspace/local";
 const EMPTY = createStore<{ project?: { name: string } } | null>(() => null);
 
 const THEMES: { value: ThemePreference; label: string }[] = [
-  { value: "system", label: "System" },
+  { value: "system", label: "Match my system" },
   { value: "light", label: "Light" },
   { value: "dark", label: "Dark" },
 ];

@@ -125,7 +125,7 @@ export function AppLayout() {
       <div className="flex min-w-0 flex-1 flex-col">
         {wantLocal && storageFailed ? <StorageBanner problem={storageFailed} /> : null}
         <TopBar user={me.data} signIn={wantLocal && visitorsWorkLocally} signOutTo={visitorsWorkLocally ? "/" : "/login"} />
-        <main className="min-h-0 flex-1 overflow-auto">
+        <main className="relative min-h-0 flex-1 overflow-auto">
           <Outlet />
         </main>
         <Toaster />

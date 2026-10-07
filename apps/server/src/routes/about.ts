@@ -30,7 +30,7 @@ export function aboutRoutes(app: FastifyInstance, { db, config, mailer, twoFacto
     try {
       await mailer.send(testEmail(admin.email, admin.name, config.publicUrl.origin));
     } catch (error) {
-      throw new HttpError(502, "mail_failed", `Sending failed: ${(error as Error).message}`);
+      throw new HttpError(422, "mail_failed", `Sending failed: ${(error as Error).message}`);
     }
     return { sentTo: admin.email };
   });
