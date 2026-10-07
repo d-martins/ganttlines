@@ -268,8 +268,9 @@ export function ChartRows({
                 />
                 <div
                   className={`absolute flex gap-1 group-focus-within/row:opacity-100 group-hover/row:opacity-100 ${menuFor === row.id ? "opacity-100" : "opacity-0"}`}
-                  // Left of the bar, but never under the task list (then it overlaps the bar's start).
-                  style={{ left: Math.max(box.left - 50, visibleLeft + 4), top: center - 10 }}
+                  // Left of the bar, but never under the task list (then it overlaps the bar's start),
+                  // nor over the edge arrow shown when the bar starts before the view.
+                  style={{ left: Math.max(box.left - 50, visibleLeft + (box.left < visibleLeft ? 30 : 4)), top: center - 10 }}
                   onClick={(event) => event.stopPropagation()}
                 >
                   <AssigneePicker
