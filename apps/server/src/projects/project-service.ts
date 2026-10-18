@@ -16,11 +16,13 @@ import {
   isParentTask,
   type Link,
   linkKey,
+  type LinkKey,
   type LinkRef,
   type ProjectState,
   revertChanges,
   type Row,
   type Span,
+  violatedLinks,
 } from "@ganttlines/engine";
 import type { BaselineTaskDto, ChangesDto, CommandResultDto, ProjectDto, ProjectStateDto } from "@ganttlines/protocol";
 import { createHash } from "node:crypto";
@@ -73,8 +75,12 @@ export interface OutlineRow {
   isParent: boolean;
   /** null for sections and unscheduled tasks */
   span: Span | null;
-  /** a locked task starting before its predecessor allows */
+  /** a locked task starting before one of its links allows */
   violation: boolean;
+  /** the links it waits on and those that wait on it, each ordered by key */
+  links: { into: Link[]; outOf: Link[] };
+  /** the keys of the links it waits on that it starts too early for */
+  violatedLinks: LinkKey[];
 }
 
 export class ProjectService {
@@ -187,13 +193,34 @@ export class ProjectService {
   outline(projectId: string): Promise<{ project: ProjectDto; rows: OutlineRow[] }> {
     return this.queue.run(projectId, async () => {
       const { meta, state } = await this.load(projectId);
-      const schedule = computeSchedule(state, (await this.instance.current()).calendar);
+      const { calendar } = await this.instance.current();
+      const schedule = computeSchedule(state, calendar);
+      const violated = violatedLinks(state, calendar, schedule);
       const tree = buildTree(state);
+      const into = new Map<string, Link[]>();
+      const outOf = new Map<string, Link[]>();
+      const keyed = Object.values(state.links).map((link) => [linkKey(link), link] as const);
+      for (const [, link] of keyed.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+        for (const [byRow, id] of [[into, link.followerId], [outOf, link.predecessorId]] as const) {
+          const list = byRow.get(id);
+          if (list) list.push(link);
+          else byRow.set(id, [link]);
+        }
+      }
       const rows: OutlineRow[] = [];
       const visit = (parentId: string | null, depth: number) => {
         for (const row of childrenOf(tree, parentId)) {
           const computed = schedule.get(row.id);
-          rows.push({ row, depth, isParent: isParentTask(tree, row), span: computed?.span ?? null, violation: computed?.violation ?? false });
+          const links = { into: into.get(row.id) ?? [], outOf: outOf.get(row.id) ?? [] };
+          rows.push({
+            row,
+            depth,
+            isParent: isParentTask(tree, row),
+            span: computed?.span ?? null,
+            violation: computed?.violation ?? false,
+            links,
+            violatedLinks: links.into.map(linkKey).filter((key) => violated.has(key)),
+          });
           visit(row.id, depth + 1);
         }
       };

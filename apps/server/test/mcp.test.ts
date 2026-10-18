@@ -19,7 +19,7 @@ async function plannedProject() {
     { type: "setAssignee", id: design, resourceId: ana.id },
     { type: "createRow", id: build, kind: "task", parentId: phase, afterId: design, title: "Build", start: "2026-10-05" },
     { type: "setDuration", id: build, duration: 5 },
-    { type: "linkTasks", fromId: design, toId: build },
+    { type: "addLink", predecessorId: design, followerId: build, kind: "FS" },
   ];
   for (const command of commands) {
     const response = await t.app.inject({ method: "POST", url: `/api/projects/${projectId}/commands`, headers: { cookie: editor }, payload: { commandId: randomUUID(), command } });
@@ -65,11 +65,20 @@ describe("AI access: read tools", () => {
         end: "2026-10-07",
         durationDays: 3,
         assignee: { id: ana.id, name: "Ana" },
-        predecessor: null,
+        predecessors: [],
+        followers: [{ task: { id: ids.build, title: "Build" }, kind: "FS", kindInWords: "after it finishes" }],
       }),
       // Build follows Design: 5 working days from Thu 8 end on Wed 14.
-      expect.objectContaining({ id: ids.build, type: "task", start: "2026-10-08", end: "2026-10-14", predecessor: { id: ids.design, title: "Design", lagDays: 0 } }),
+      expect.objectContaining({
+        id: ids.build,
+        type: "task",
+        start: "2026-10-08",
+        end: "2026-10-14",
+        predecessors: [{ task: { id: ids.design, title: "Design" }, kind: "FS", kindInWords: "after it finishes", lagDays: 0 }],
+        followers: [],
+      }),
     ]);
+    expect(board["rows"]).not.toContainEqual(expect.objectContaining({ predecessor: expect.anything() }));
 
     expect(await call(client, "get_project", { project: "nope" })).toEqual({ error: expect.stringContaining("No project called “nope”") });
 
@@ -80,12 +89,42 @@ describe("AI access: read tools", () => {
 
     const history = await call(client, "get_recent_changes", { project: "Launch", limit: 2 });
     expect(history["changes"]).toEqual([
-      { at: expect.any(String), by: "Ed", change: "linkTasks", tasks: ["Build"] },
+      { at: expect.any(String), by: "Ed", change: "addLink", tasks: ["Design", "Build"] },
       { at: expect.any(String), by: "Ed", change: "setDuration", tasks: ["Build"] },
     ]);
     // Every answer also comes as text (which every app reads).
     const raw = await client.callTool({ name: "list_projects", arguments: {} });
     expect((raw.content as { text: string }[])[0]!.text).toMatch(/^1 project\.\n\n\{"projects":/);
+    await client.close();
+  });
+
+  it("get_board shows several predecessors with kinds in words", async () => {
+    const { admin, editor, projectId, ids } = await plannedProject();
+    const review = randomUUID();
+    const commands = [
+      { type: "createRow", id: review, kind: "task", parentId: ids.phase, afterId: ids.build, title: "Review", start: "2026-10-05" },
+      { type: "setDuration", id: review, duration: 2 },
+      { type: "addLink", predecessorId: ids.design, followerId: review, kind: "SS", lag: 1 },
+      { type: "addLink", predecessorId: ids.build, followerId: review, kind: "FF" },
+    ];
+    for (const command of commands) {
+      const response = await t.app.inject({ method: "POST", url: `/api/projects/${projectId}/commands`, headers: { cookie: editor }, payload: { commandId: randomUUID(), command } });
+      expect(response.statusCode, response.body).toBe(200);
+    }
+    const client = await mcpClient(t.app, (await connect(t.app, admin, await registerApp(t.app))).access_token);
+    const rows = (await call(client, "get_project", { project: "Launch" }))["rows"] as { title: string }[];
+    expect(rows.find((row) => row.title === "Review")).toMatchObject({
+      predecessors: [
+        { task: { id: ids.build, title: "Build" }, kind: "FF", kindInWords: "can't finish before it", lagDays: 0 },
+        { task: { id: ids.design, title: "Design" }, kind: "SS", kindInWords: "once it starts", lagDays: 1 },
+      ].sort((a, b) => (a.task.id < b.task.id ? -1 : 1)),
+      // Review can't finish before Build (Wed 14): two days end on Wed 14.
+      start: "2026-10-13",
+      end: "2026-10-14",
+    });
+    expect(rows.find((row) => row.title === "Design")).toMatchObject({
+      followers: expect.arrayContaining([{ task: { id: ids.build, title: "Build" }, kind: "FS", kindInWords: "after it finishes" }, { task: { id: review, title: "Review" }, kind: "SS", kindInWords: "once it starts" }]),
+    });
     await client.close();
   });
 

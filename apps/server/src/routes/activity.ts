@@ -1,4 +1,4 @@
-import { isLinkChange, type Change } from "@ganttlines/engine";
+import { changedRowIds, isLinkChange, type Change } from "@ganttlines/engine";
 import { BOARD_LIMITS, type ActivityDto } from "@ganttlines/protocol";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
@@ -50,7 +50,7 @@ export function activityRoutes(app: FastifyInstance, context: RouteContext): voi
           name: entry.name,
           actor: { userId: entry.actorUserId, label: entry.actorLabel, linkId: entry.actorLinkId },
           createdAt: entry.createdAt.toISOString(),
-          rowIds: [...new Set(changes.flatMap((change) => (isLinkChange(change) ? [change.link.predecessorId, change.link.followerId] : [change.rowId])))],
+          rowIds: changedRowIds(changes),
           changes: rowId === undefined ? changes : changes.filter((change) => touches(change, rowId)),
         };
       }),

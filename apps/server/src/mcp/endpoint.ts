@@ -24,7 +24,7 @@ const GROUPS: Record<McpScope, ToolGroup> = {
 
 const INSTRUCTIONS =
   "GanttLines is a team's Gantt planner. Projects are boards of sections and tasks; tasks have working-day durations, " +
-  "can follow a predecessor (with a lag), and are scheduled around weekends, holidays and their assignee's time off. " +
+  "can wait on several tasks — after they finish, once they start, or not finishing before them — each with a lag, and are scheduled around weekends, holidays and their assignee's time off. " +
   "Look projects and people up by name or id; dates are YYYY-MM-DD. Changes show up live for everyone, credited to the person " +
   "who connected this app; a call that fails part-way changes nothing, and undo reverts this app's last board change.";
 

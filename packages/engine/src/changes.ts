@@ -27,6 +27,11 @@ export type Change = RowChange | LinkChange;
 
 export const isLinkChange = (change: Change): change is LinkChange => "link" in change;
 
+/** The rows the changes touch, each once in first-seen order: a link change touches both its ends. */
+export function changedRowIds(changes: readonly Change[]): RowId[] {
+  return [...new Set(changes.flatMap((change) => (isLinkChange(change) ? [change.link.predecessorId, change.link.followerId] : [change.rowId])))];
+}
+
 /** Task fields older history may still carry but rows no longer have; dependencies are links now. */
 const DROPPED_FIELDS = ["predecessorId", "offset"];
 

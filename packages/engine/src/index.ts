@@ -1,5 +1,5 @@
 export { Calendar, type CalendarData, type Holiday, type ResourceId, type TimeOff } from "./calendar";
-export { applyChanges, diffState, isLinkChange, type Change, type LinkChange, type RowChange } from "./changes";
+export { applyChanges, changedRowIds, diffState, isLinkChange, type Change, type LinkChange, type RowChange } from "./changes";
 export {
   applyCommand,
   MAX_DATE,
@@ -13,6 +13,7 @@ export {
 export { dayOf, fromDay, halfDay, isAfternoon, toDay, weekday, type DayNum, type HalfDay, type IsoDate } from "./date";
 export {
   findLinkProblem,
+  LINK_KIND_WORDS,
   LINK_KINDS,
   linkKey,
   linksInto,

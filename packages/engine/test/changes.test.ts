@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyChanges, diffState } from "../src/changes";
+import { applyChanges, changedRowIds, diffState } from "../src/changes";
 import { linkKey, type Link } from "../src/links";
 import type { ProjectState } from "../src/model";
 import { link, project, section, task } from "./fixtures";
@@ -86,5 +86,18 @@ describe("diffState / applyChanges", () => {
     it("refuses to change the lag of a missing link", () => {
       expect(() => applyChanges(base, [{ link: { predecessorId: "A", followerId: "B", kind: "FS" }, field: "lag", before: 0, after: 1 }])).toThrow(RangeError);
     });
+  });
+});
+
+describe("changedRowIds", () => {
+  it("lists each row once, with both ends of a link change", () => {
+    const ref = { predecessorId: "a", followerId: "b", kind: "FS" as const };
+    expect(
+      changedRowIds([
+        { rowId: "b", field: "title", before: "x", after: "y" },
+        { link: ref, field: "lag", before: 0, after: 1 },
+        { rowId: "c", field: "*", before: null, after: {} },
+      ]),
+    ).toEqual(["b", "a", "c"]);
   });
 });
