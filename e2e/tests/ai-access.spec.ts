@@ -121,7 +121,7 @@ test("AI access: tasks an app adds show up live on an open board, credited to th
 
   await page.goto(`/p/${projectId}`);
   await expect(listRow(page, "Design")).toBeVisible();
-  const added = await callTool(token, "add_tasks", { project: "Launch", tasks: [{ title: "Build", predecessor: "Design", durationDays: 2 }, { title: "Ship", predecessor: "Build" }] });
+  const added = await callTool(token, "add_tasks", { project: "Launch", tasks: [{ title: "Build", predecessor: "Design", durationDays: 2 }, { title: "Ship", predecessors: [{ task: "Build", kind: "FS" }] }] });
   expect(added.isError).toBeFalsy();
   await expect(listRow(page, "Build")).toBeVisible();
   await expect(listRow(page, "Ship")).toBeVisible();

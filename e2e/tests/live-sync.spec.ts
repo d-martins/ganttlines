@@ -7,7 +7,7 @@ test("two people see each other's edits live, including cascades and undo", asyn
   const projectId = await createProject(page.request, "Launch");
   const build = await addTask(page.request, projectId, "Build", "2026-10-05", 1);
   const design = await addTask(page.request, projectId, "Design", "2026-10-05", 2); // Mon 5 – Tue 6
-  await command(page.request, projectId, { type: "linkTasks", fromId: design, toId: build });
+  await command(page.request, projectId, { type: "addLink", predecessorId: design, followerId: build, kind: "FS" });
   const eve = await signedInUser(browser, page.request, { email: "eve@example.test", name: "Eve Editor", role: "editor" });
 
   await page.goto(`/p/${projectId}`);
