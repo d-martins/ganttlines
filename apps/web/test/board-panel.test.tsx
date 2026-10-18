@@ -267,12 +267,12 @@ describe("details panel", () => {
     const waitsOn = within(panel()).getByRole("group", { name: "Waits on" });
     const [first] = within(waitsOn).getAllByRole("listitem");
     expect(within(first!).getByRole("button", { name: "#2 ui" })).toBeInTheDocument();
-    expect(within(first!).getByRole("combobox", { name: "Link kind" })).toHaveDisplayValue("after it finishes");
-    expect(within(first!).getByRole("spinbutton", { name: "Delay in days" })).toHaveValue(2);
+    expect(within(first!).getByRole("combobox", { name: "Kind of link with #2 ui" })).toHaveDisplayValue("after it finishes");
+    expect(within(first!).getByRole("spinbutton", { name: "Delay after #2 ui" })).toHaveValue(2);
     const neededBy = within(panel()).getByRole("group", { name: "Needed by" });
     const [line] = within(neededBy).getAllByRole("listitem");
     expect(within(line!).getByRole("button", { name: "#4 qa" })).toBeInTheDocument();
-    expect(within(line!).getByRole("combobox", { name: "Link kind" })).toHaveDisplayValue("once it starts");
+    expect(within(line!).getByRole("combobox", { name: "Kind of link with #4 qa" })).toHaveDisplayValue("once it starts");
     expect(within(line!).getAllByRole("option").map((option) => option.textContent)).toEqual(["after it finishes", "once it starts", "can't finish before it"]);
     await user.click(within(first!).getByRole("button", { name: "#2 ui" })); // goes to the linked task
     expect(panel()).toHaveAccessibleName("Details of “ui”");
@@ -283,13 +283,31 @@ describe("details panel", () => {
     const { user } = await panelBoard(LINK_ROWS, ADMIN, [], LINKS);
     await selectRow(user, "hooks");
     const [line] = within(within(panel()).getByRole("group", { name: "Waits on" })).getAllByRole("listitem");
-    await user.selectOptions(within(line!).getByRole("combobox", { name: "Link kind" }), "can't finish before it");
+    await user.selectOptions(within(line!).getByRole("combobox", { name: "Kind of link with #2 ui" }), "can't finish before it");
     expect(sentCommands().at(-1)).toEqual({ type: "updateLink", predecessorId: "ui", followerId: "hooks", kind: "FS", newKind: "FF" });
     const [changed] = within(within(panel()).getByRole("group", { name: "Waits on" })).getAllByRole("listitem");
-    const delay = within(changed!).getByRole("spinbutton", { name: "Delay in days" });
+    const delay = within(changed!).getByRole("spinbutton", { name: "Delay after #2 ui" });
     await user.clear(delay);
     await user.type(delay, "1.5{Enter}");
     expect(sentCommands().at(-1)).toEqual({ type: "updateLink", predecessorId: "ui", followerId: "hooks", kind: "FF", lag: 1.5 });
+  });
+
+  it("changing the kind from the keyboard keeps focus on the line's kind, one updateLink per change", async () => {
+    const { user } = await panelBoard(LINK_ROWS, ADMIN, [], LINKS);
+    await selectRow(user, "hooks");
+    const kind = () => within(panel()).getByRole("combobox", { name: "Kind of link with #2 ui" });
+    kind().focus();
+    const before = sentCommands().length;
+    // Arrow keys on a closed select change it at once (Windows, Linux): each press is one change.
+    fireEvent.change(kind(), { target: { value: "SS" } });
+    expect(kind()).toHaveDisplayValue("once it starts");
+    expect(kind()).toHaveFocus();
+    fireEvent.change(kind(), { target: { value: "FF" } });
+    expect(kind()).toHaveFocus();
+    expect(sentCommands().slice(before)).toEqual([
+      { type: "updateLink", predecessorId: "ui", followerId: "hooks", kind: "FS", newKind: "SS" },
+      { type: "updateLink", predecessorId: "ui", followerId: "hooks", kind: "SS", newKind: "FF" },
+    ]);
   });
 
   it("the add-link picker leaves out the task's own parent and subtasks", async () => {
@@ -318,7 +336,7 @@ describe("details panel", () => {
     const { user } = await panelBoard(LINK_ROWS, ADMIN, [], LINKS);
     await selectRow(user, "hooks");
     const [line] = within(within(panel()).getByRole("group", { name: "Needed by" })).getAllByRole("listitem");
-    await user.click(within(line!).getByRole("button", { name: "Remove link" }));
+    await user.click(within(line!).getByRole("button", { name: "Remove link with #4 qa" }));
     expect(sentCommands().at(-1)).toEqual({ type: "removeLink", predecessorId: "hooks", followerId: "qa", kind: "SS" });
     expect(within(panel()).queryByRole("group", { name: "Needed by" })).not.toBeInTheDocument(); // none left
   });
@@ -331,15 +349,15 @@ describe("details panel", () => {
     expect(line).toHaveTextContent("after it finishes, 2 days later");
     expect(within(panel()).getByRole("group", { name: "Needed by" })).toHaveTextContent("once it starts");
     expect(within(panel()).queryByRole("combobox", { name: /link/i })).not.toBeInTheDocument();
-    expect(within(panel()).queryByRole("spinbutton", { name: "Delay in days" })).not.toBeInTheDocument();
-    expect(within(panel()).queryByRole("button", { name: /^(Add|Remove) link$/ })).not.toBeInTheDocument();
+    expect(within(panel()).queryByRole("spinbutton", { name: /^Delay after/ })).not.toBeInTheDocument();
+    expect(within(panel()).queryByRole("button", { name: /^(Add link|Remove link with)/ })).not.toBeInTheDocument();
   });
 
   it("is read-only for viewers, who can still comment", async () => {
     const { user } = await panelBoard(ROWS, VIEWER);
     await selectRow(user, "hooks");
     expect(within(panel()).getByRole("textbox", { name: "Task title" })).toBeDisabled();
-    expect(within(panel()).queryByRole("button", { name: /^(Add|Remove) link$/ })).not.toBeInTheDocument();
+    expect(within(panel()).queryByRole("button", { name: /^(Add link|Remove link with)/ })).not.toBeInTheDocument();
     expect(within(panel()).queryByRole("button", { name: /^Add a/ })).not.toBeInTheDocument();
     expect(within(panel()).getByRole("textbox", { name: "Write a comment" })).toBeEnabled();
   });

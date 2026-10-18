@@ -7,6 +7,7 @@ import {
   linksOutOf,
   type Command,
   type Link,
+  type LinkKey,
   type LinkKind,
   type ProjectState,
   type Row,
@@ -15,7 +16,7 @@ import {
   type TaskRow,
 } from "@ganttlines/engine";
 import { Plus, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState, type Ref } from "react";
 import { IconButton } from "../../ui/button";
 import { parseDays } from "../list/list-actions";
 import { useSelection } from "../selection";
@@ -31,9 +32,9 @@ const DIRECTIONS: readonly { id: Direction; label: string }[] = [
 
 const SELECT = `${INPUT} w-auto min-w-0`;
 
-function KindSelect({ value, label, onChange }: { value: LinkKind; label: string; onChange: (kind: LinkKind) => void }) {
+function KindSelect({ value, label, onChange, selectRef }: { value: LinkKind; label: string; onChange: (kind: LinkKind) => void; selectRef?: Ref<HTMLSelectElement> }) {
   return (
-    <select aria-label={label} value={value} onChange={(event) => onChange(event.target.value as LinkKind)} className={SELECT}>
+    <select ref={selectRef} aria-label={label} value={value} onChange={(event) => onChange(event.target.value as LinkKind)} className={SELECT}>
       {LINK_KINDS.map((kind) => (
         <option key={kind} value={kind}>
           {LINK_KIND_WORDS[kind]}
@@ -43,10 +44,38 @@ function KindSelect({ value, label, onChange }: { value: LinkKind; label: string
   );
 }
 
-/** One link, named by its task at the far end: a button that goes there, then its kind and delay. */
-function LinkLine({ link, otherId, state, numbers, canEdit, run }: { link: Link; otherId: RowId; state: ProjectState; numbers: ReadonlyMap<RowId, number>; canEdit: boolean; run: (command: Command) => unknown }) {
+/**
+ * One link, named by its task at the far end: a button that goes there, then its kind and delay.
+ * A new kind makes it another link (and line), so `focusKind` puts focus back on its kind.
+ */
+function LinkLine({
+  link,
+  otherId,
+  state,
+  numbers,
+  canEdit,
+  run,
+  focusKind,
+  onKindChanged,
+}: {
+  link: Link;
+  otherId: RowId;
+  state: ProjectState;
+  numbers: ReadonlyMap<RowId, number>;
+  canEdit: boolean;
+  run: (command: Command) => unknown;
+  focusKind: boolean;
+  onKindChanged: (key: LinkKey | null) => void;
+}) {
   const select = useSelection((selection) => selection.select);
+  const kindSelect = useRef<HTMLSelectElement>(null);
+  useEffect(() => {
+    if (!focusKind) return;
+    kindSelect.current?.focus();
+    onKindChanged(null);
+  }, [focusKind]);
   const ref = { predecessorId: link.predecessorId, followerId: link.followerId, kind: link.kind };
+  const other = `#${numbers.get(otherId)} ${state.rows[otherId]?.title || "Untitled"}`;
   return (
     <li className="flex flex-wrap items-center gap-1.5 text-sm">
       <button type="button" onClick={() => select(otherId)} className="flex min-w-0 items-center gap-2 rounded px-1 py-0.5 text-left hover:bg-surface-2">
@@ -55,10 +84,17 @@ function LinkLine({ link, otherId, state, numbers, canEdit, run }: { link: Link;
       </button>
       {canEdit ? (
         <div className="ml-auto flex items-center gap-1">
-          <KindSelect value={link.kind} label="Link kind" onChange={(newKind) => newKind !== link.kind && run({ type: "updateLink", ...ref, newKind })} />
+          <KindSelect
+            value={link.kind}
+            label={`Kind of link with ${other}`}
+            selectRef={kindSelect}
+            onChange={(newKind) => {
+              if (newKind !== link.kind && run({ type: "updateLink", ...ref, newKind }) !== null) onKindChanged(linkKey({ ...ref, kind: newKind }));
+            }}
+          />
           <CommitInput
             type="number"
-            aria-label="Delay in days"
+            aria-label={`Delay after ${other}`}
             title={link.kind === "FS" ? "Delay in working days (negative: overlap)" : "Delay in working days"}
             step={0.5}
             min={link.kind === "FS" ? undefined : 0}
@@ -66,7 +102,7 @@ function LinkLine({ link, otherId, state, numbers, canEdit, run }: { link: Link;
             onCommit={(value) => run({ type: "updateLink", ...ref, lag: parseDays(value) ?? 0 })}
             className="w-16"
           />
-          <IconButton label="Remove link" onClick={() => run({ type: "removeLink", ...ref })}>
+          <IconButton label={`Remove link with ${other}`} onClick={() => run({ type: "removeLink", ...ref })}>
             <X size={14} />
           </IconButton>
         </div>
@@ -102,6 +138,7 @@ export function LinksSection({
 }) {
   const [direction, setDirection] = useState<Direction>("into");
   const [kind, setKind] = useState<LinkKind>("FS");
+  const [focusKind, setFocusKind] = useState<LinkKey | null>(null);
   const groups = [
     { ...DIRECTIONS[0]!, links: linksInto(state, task.id), otherOf: (link: Link) => link.predecessorId },
     { ...DIRECTIONS[1]!, links: linksOutOf(state, task.id), otherOf: (link: Link) => link.followerId },
@@ -119,7 +156,17 @@ export function LinksSection({
             <h4 className="text-xs font-medium text-muted">{label}</h4>
             <ul className="flex flex-col gap-1">
               {links.map((link) => (
-                <LinkLine key={linkKey(link)} link={link} otherId={otherOf(link)} state={state} numbers={numbers} canEdit={canEdit} run={run} />
+                <LinkLine
+                  key={linkKey(link)}
+                  link={link}
+                  otherId={otherOf(link)}
+                  state={state}
+                  numbers={numbers}
+                  canEdit={canEdit}
+                  run={run}
+                  focusKind={focusKind === linkKey(link)}
+                  onKindChanged={setFocusKind}
+                />
               ))}
             </ul>
           </div>
