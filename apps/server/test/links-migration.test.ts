@@ -36,6 +36,7 @@ beforeAll(async () => {
   await row(id(4), project, id(9), 2); // the predecessor does not exist
   await row(id(5), other, id(1), 1); // the predecessor is in another project
   await row(id(6), project, null, 3); // an offset without a predecessor
+  await row(id(7), project, id(7), 1); // names itself
 
   await client.query(sql(LINKS));
 }, 120_000);

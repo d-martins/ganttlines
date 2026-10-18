@@ -19,11 +19,11 @@ ALTER TABLE "Link" ADD CONSTRAINT "Link_predecessorId_fkey" FOREIGN KEY ("predec
 
 ALTER TABLE "Link" ADD CONSTRAINT "Link_followerId_fkey" FOREIGN KEY ("followerId") REFERENCES "Row"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
--- Every predecessor that exists in the same project becomes a finish-to-start link; a dangling id is left out.
+-- Every predecessor that exists in the same project becomes a finish-to-start link; a dangling id or a task naming itself is left out.
 INSERT INTO "Link" ("projectId", "predecessorId", "followerId", "kind", "lag")
 SELECT r."projectId", r."predecessorId", r."id", 'FS', r."offset"
 FROM "Row" r
 JOIN "Row" p ON p."id" = r."predecessorId" AND p."projectId" = r."projectId"
-WHERE r."predecessorId" IS NOT NULL;
+WHERE r."predecessorId" IS NOT NULL AND r."id" <> r."predecessorId";
 
 ALTER TABLE "Row" DROP COLUMN "predecessorId", DROP COLUMN "offset";
