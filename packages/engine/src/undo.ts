@@ -1,4 +1,4 @@
-import { isLinkChange, type Change } from "./changes";
+import { isLinkChange, restoredRow, type Change } from "./changes";
 import { linkKey, type Link, type LinkKey } from "./links";
 import type { ProjectState, Row, RowId } from "./model";
 
@@ -27,7 +27,7 @@ function sameValue(a: unknown, b: unknown): boolean {
  * A field is only restored while it still holds the value this command left behind, so edits
  * made since by anyone are never overwritten (skip-on-conflict). Whole rows are
  * removed only if unchanged and nothing points to them, and re-created only if absent; the same
- * goes for links, and a link left joining a task that no longer exists is dropped.
+ * goes for links, and a link they leave joining a task that no longer exists is dropped.
  */
 export function revertChanges(state: ProjectState, changes: readonly Change[], direction: "undo" | "redo"): Reverted {
   const rows: Record<RowId, Row> = { ...state.rows };
@@ -65,7 +65,7 @@ export function revertChanges(state: ProjectState, changes: readonly Change[], d
         if (current && sameValue(current, expected)) removals.add(change.rowId);
         else skipped++;
       } else if (!current) {
-        rows[change.rowId] = target as Row;
+        rows[change.rowId] = restoredRow(target);
       } else {
         skipped++;
       }
@@ -79,8 +79,11 @@ export function revertChanges(state: ProjectState, changes: readonly Change[], d
     }
   }
   skipped += removeUnreferenced(rows, links, removals);
-  for (const [key, link] of Object.entries(links)) {
-    if (rows[link.predecessorId] && rows[link.followerId]) continue;
+  for (const change of changes) {
+    if (!isLinkChange(change)) continue;
+    const key = linkKey(change.link);
+    const link = links[key];
+    if (!link || (rows[link.predecessorId] && rows[link.followerId])) continue;
     delete links[key];
     skipped++;
   }

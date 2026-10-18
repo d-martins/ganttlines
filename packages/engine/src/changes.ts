@@ -27,6 +27,16 @@ export type Change = RowChange | LinkChange;
 
 export const isLinkChange = (change: Change): change is LinkChange => "link" in change;
 
+/** Task fields older history may still carry but rows no longer have; dependencies are links now. */
+const DROPPED_FIELDS = ["predecessorId", "offset"];
+
+/** A whole-row snapshot from a logged change, as a row of today's model. */
+export function restoredRow(snapshot: unknown): Row {
+  const row: Record<string, unknown> = { ...(snapshot as Record<string, unknown>) };
+  for (const field of DROPPED_FIELDS) delete row[field];
+  return row as unknown as Row;
+}
+
 const refOf = ({ predecessorId, followerId, kind }: LinkRef): LinkRef => ({ predecessorId, followerId, kind });
 
 /** Field-level diff between two states: rows by row id, then links by key, for determinism. */
@@ -89,7 +99,7 @@ export function applyChanges(
     }
     if (change.field === "*") {
       if (value === null) delete rows[change.rowId];
-      else rows[change.rowId] = value as Row;
+      else rows[change.rowId] = restoredRow(value);
       continue;
     }
     const row = rows[change.rowId];

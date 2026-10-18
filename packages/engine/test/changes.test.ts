@@ -78,6 +78,11 @@ describe("diffState / applyChanges", () => {
       expect(applyChanges({ rows: base.rows } as ProjectState, created)).toEqual(withLinks(link("A", "B")));
     });
 
+    it("replays an old logged create without fields rows no longer have", () => {
+      const created = applyChanges(base, [{ rowId: "D", field: "*", before: null, after: { ...task("D"), predecessorId: "A", offset: 2 } }]);
+      expect(created.rows.D).toEqual(task("D"));
+    });
+
     it("refuses to change the lag of a missing link", () => {
       expect(() => applyChanges(base, [{ link: { predecessorId: "A", followerId: "B", kind: "FS" }, field: "lag", before: 0, after: 1 }])).toThrow(RangeError);
     });

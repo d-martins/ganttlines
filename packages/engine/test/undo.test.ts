@@ -85,6 +85,19 @@ describe("revertChanges", () => {
       expect(revertChanges(now, created, "undo")).toEqual({ state: now, skipped: 1 });
     });
 
+    it("a row re-created from an old logged delete comes back without fields rows no longer have", () => {
+      const old: Change[] = [{ rowId: "D", field: "*", before: { ...task("D"), predecessorId: "A", offset: -1 }, after: null }];
+      const undone = revertChanges(rows, old, "undo");
+      expect(undone.state.rows.D).toEqual(task("D"));
+      expect(undone.skipped).toBe(0);
+    });
+
+    it("only drops dangling links the reverted changes touched", () => {
+      const dangling = withLinks(rows, link("gone", "A"));
+      const changes = diffState(rows, { ...rows, rows: { ...rows.rows, A: task("A", { title: "A2" }) } });
+      expect(revertChanges({ ...dangling, rows: { ...dangling.rows, A: task("A", { title: "A2" }) } }, changes, "undo")).toEqual({ state: dangling, skipped: 0 });
+    });
+
     it("old logged changes to fields rows no longer have are skipped", () => {
       const old: Change[] = [{ rowId: "B", field: "predecessorId", before: null, after: "A" }];
       const undone = revertChanges(rows, old, "undo");
