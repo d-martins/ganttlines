@@ -107,6 +107,8 @@ export function applyChanges(
       else rows[change.rowId] = restoredRow(value);
       continue;
     }
+    // Fields rows no longer have (from changes logged before they were dropped) are never written.
+    if (DROPPED_FIELDS.includes(change.field)) continue;
     const row = rows[change.rowId];
     if (!row) throw new RangeError(`Cannot change missing row ${change.rowId}`);
     rows[change.rowId] = { ...row, [change.field]: value } as Row;

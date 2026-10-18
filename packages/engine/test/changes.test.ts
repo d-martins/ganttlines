@@ -83,6 +83,15 @@ describe("diffState / applyChanges", () => {
       expect(created.rows.D).toEqual(task("D"));
     });
 
+    it("ignores an old logged change to a field rows no longer have", () => {
+      const replayed = applyChanges(base, [
+        { rowId: "B", field: "predecessorId", before: null, after: "A" },
+        { rowId: "B", field: "offset", before: 0, after: 2 },
+      ]);
+      expect(replayed).toEqual(base);
+      expect(applyChanges(base, [{ rowId: "B", field: "offset", before: 0, after: 2 }], "backward")).toEqual(base);
+    });
+
     it("refuses to change the lag of a missing link", () => {
       expect(() => applyChanges(base, [{ link: { predecessorId: "A", followerId: "B", kind: "FS" }, field: "lag", before: 0, after: 1 }])).toThrow(RangeError);
     });

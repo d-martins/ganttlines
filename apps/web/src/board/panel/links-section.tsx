@@ -51,21 +51,25 @@ function KindSelect({ value, label, onChange, selectRef }: { value: LinkKind; la
 function LinkLine({
   link,
   otherId,
+  direction,
   state,
   numbers,
   canEdit,
   run,
   focusKind,
   onKindChanged,
+  onRemoved,
 }: {
   link: Link;
   otherId: RowId;
+  direction: Direction;
   state: ProjectState;
   numbers: ReadonlyMap<RowId, number>;
   canEdit: boolean;
   run: (command: Command) => unknown;
   focusKind: boolean;
   onKindChanged: (key: LinkKey | null) => void;
+  onRemoved: () => void;
 }) {
   const select = useSelection((selection) => selection.select);
   const kindSelect = useRef<HTMLSelectElement>(null);
@@ -94,7 +98,8 @@ function LinkLine({
           />
           <CommitInput
             type="number"
-            aria-label={`Delay after ${other}`}
+            // On a "Needed by" line, the delay belongs to the other task's link to this one.
+            aria-label={direction === "into" ? `Delay after ${other}` : `Delay for ${other}`}
             title={link.kind === "FS" ? "Delay in working days (negative: overlap)" : "Delay in working days"}
             step={0.5}
             min={link.kind === "FS" ? undefined : 0}
@@ -102,7 +107,7 @@ function LinkLine({
             onCommit={(value) => run({ type: "updateLink", ...ref, lag: parseDays(value) ?? 0 })}
             className="w-16"
           />
-          <IconButton label={`Remove link with ${other}`} onClick={() => run({ type: "removeLink", ...ref })}>
+          <IconButton data-remove-link label={`Remove link with ${other}`} onClick={() => run({ type: "removeLink", ...ref }) !== null && onRemoved()}>
             <X size={14} />
           </IconButton>
         </div>
@@ -139,6 +144,9 @@ export function LinksSection({
   const [direction, setDirection] = useState<Direction>("into");
   const [kind, setKind] = useState<LinkKind>("FS");
   const [focusKind, setFocusKind] = useState<LinkKey | null>(null);
+  // After ×, the line that took the removed one's place (or Add link, when none is left) gets focus.
+  const [focusAfterRemove, setFocusAfterRemove] = useState<{ index: number; before: number } | null>(null);
+  const container = useRef<HTMLDivElement>(null);
   const groups = [
     { ...DIRECTIONS[0]!, links: linksInto(state, task.id), otherOf: (link: Link) => link.predecessorId },
     { ...DIRECTIONS[1]!, links: linksOutOf(state, task.id), otherOf: (link: Link) => link.followerId },
@@ -148,24 +156,36 @@ export function LinksSection({
   const exclude = (row: Row) =>
     row.kind !== "task" || row.id === task.id || isAncestor(state, row.id, task.id) || isAncestor(state, task.id, row.id) || state.links[linkKey({ ...between(row.id), kind })] !== undefined;
 
+  const total = groups[0]!.links.length + groups[1]!.links.length;
+  useEffect(() => {
+    // Once the removed line is gone.
+    if (focusAfterRemove === null || total >= focusAfterRemove.before || !container.current) return;
+    setFocusAfterRemove(null);
+    const removes = container.current.querySelectorAll<HTMLElement>("[data-remove-link]");
+    (removes[focusAfterRemove.index] ?? container.current.querySelector<HTMLElement>("[data-add-link]"))?.focus();
+  }, [focusAfterRemove, total]);
+  const flatIndex = (direction: Direction, index: number) => (direction === "outOf" ? groups[0]!.links.length : 0) + index;
+
   return (
-    <div className="flex flex-col gap-2">
+    <div ref={container} className="flex flex-col gap-2">
       {groups.map(({ id, label, links, otherOf }) =>
         links.length > 0 ? (
           <div key={id} role="group" aria-label={label} className="flex flex-col gap-1">
             <h4 className="text-xs font-medium text-muted">{label}</h4>
             <ul className="flex flex-col gap-1">
-              {links.map((link) => (
+              {links.map((link, index) => (
                 <LinkLine
                   key={linkKey(link)}
                   link={link}
                   otherId={otherOf(link)}
+                  direction={id}
                   state={state}
                   numbers={numbers}
                   canEdit={canEdit}
                   run={run}
                   focusKind={focusKind === linkKey(link)}
                   onKindChanged={setFocusKind}
+                  onRemoved={() => setFocusAfterRemove({ index: flatIndex(id, index), before: total })}
                 />
               ))}
             </ul>
@@ -191,7 +211,7 @@ export function LinksSection({
             numbers={numbers}
             searchLabel="Find a task to link"
             trigger={
-              <button type="button" className="flex items-center gap-1 rounded px-1 py-0.5 text-xs text-muted hover:bg-surface-2 hover:text-text">
+              <button type="button" data-add-link className="flex items-center gap-1 rounded px-1 py-0.5 text-xs text-muted hover:bg-surface-2 hover:text-text">
                 <Plus size={13} /> Add link
               </button>
             }

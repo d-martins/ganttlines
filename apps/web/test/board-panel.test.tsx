@@ -273,6 +273,8 @@ describe("details panel", () => {
     const [line] = within(neededBy).getAllByRole("listitem");
     expect(within(line!).getByRole("button", { name: "#4 qa" })).toBeInTheDocument();
     expect(within(line!).getByRole("combobox", { name: "Kind of link with #4 qa" })).toHaveDisplayValue("once it starts");
+    // The delay belongs to qa's link to this task.
+    expect(within(line!).getByRole("spinbutton", { name: "Delay for #4 qa" })).toHaveValue(0);
     expect(within(line!).getAllByRole("option").map((option) => option.textContent)).toEqual(["after it finishes", "once it starts", "can't finish before it"]);
     await user.click(within(first!).getByRole("button", { name: "#2 ui" })); // goes to the linked task
     expect(panel()).toHaveAccessibleName("Details of “ui”");
@@ -332,6 +334,17 @@ describe("details panel", () => {
     expect(sentCommands().at(-1)).toEqual({ type: "addLink", predecessorId: "build", followerId: "docs", kind: "FS" });
   });
 
+  it("after × the focus moves to the next line's ×, then to Add link when none is left", async () => {
+    const { user } = await panelBoard(LINK_ROWS, ADMIN, [], LINKS);
+    await selectRow(user, "hooks");
+    await user.click(within(panel()).getByRole("button", { name: "Remove link with #2 ui" }));
+    expect(sentCommands().at(-1)).toEqual({ type: "removeLink", predecessorId: "ui", followerId: "hooks", kind: "FS" });
+    await waitFor(() => expect(within(panel()).getByRole("button", { name: "Remove link with #4 qa" })).toHaveFocus());
+    await user.keyboard("{Enter}");
+    expect(sentCommands().at(-1)).toEqual({ type: "removeLink", predecessorId: "hooks", followerId: "qa", kind: "SS" });
+    await waitFor(() => expect(within(panel()).getByRole("button", { name: "Add link" })).toHaveFocus());
+  });
+
   it("× sends removeLink", async () => {
     const { user } = await panelBoard(LINK_ROWS, ADMIN, [], LINKS);
     await selectRow(user, "hooks");
@@ -349,7 +362,7 @@ describe("details panel", () => {
     expect(line).toHaveTextContent("after it finishes, 2 days later");
     expect(within(panel()).getByRole("group", { name: "Needed by" })).toHaveTextContent("once it starts");
     expect(within(panel()).queryByRole("combobox", { name: /link/i })).not.toBeInTheDocument();
-    expect(within(panel()).queryByRole("spinbutton", { name: /^Delay after/ })).not.toBeInTheDocument();
+    expect(within(panel()).queryByRole("spinbutton", { name: /^Delay (after|for)/ })).not.toBeInTheDocument();
     expect(within(panel()).queryByRole("button", { name: /^(Add link|Remove link with)/ })).not.toBeInTheDocument();
   });
 
