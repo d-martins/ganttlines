@@ -11,6 +11,7 @@ import {
   toDay,
   TASK_DEFAULTS,
   violatedLinks,
+  workedDays,
   type Calendar,
   type Link,
   type LinkKey,
@@ -40,6 +41,8 @@ export interface BoardRow extends ListRow {
   ghost: Ghost | null;
   /** working days it really took (a task's own; parents and sections add up their subtasks'); null when none recorded */
   actualDays: number | null;
+  /** parents and sections: the days their tasks are worked (null when switched to a baseline, or no dates) */
+  workedDays: number | null;
   /** single tasks with actual days: the span those days cover from its start, and how they compare with the plan */
   actual: { span: Span; versusPlan: "over" | "under" | "even" } | null;
   /** drawn from a baseline (switched to it): its dates, not today's plan */
@@ -110,7 +113,7 @@ export function boardModel(
     if (switched) {
       const ghost = saved.get(row.id);
       const span = row.kind === "section" ? (sectionSpans!.get(row.id) ?? null) : (ghost?.span ?? null);
-      return { ...entry, span, kind: ghost?.kind ?? liveKind, violation: false, ghost: null, actualDays, actual: null, fromBaseline: true };
+      return { ...entry, span, kind: ghost?.kind ?? liveKind, violation: false, ghost: null, actualDays, workedDays: null, actual: null, fromBaseline: true };
     }
     const span = computed?.span ?? null;
     const single = row.kind === "task" && liveKind === "task";
@@ -128,6 +131,7 @@ export function boardModel(
       violation: computed?.violation ?? false,
       ghost: saved.get(row.id) ?? null,
       actualDays,
+      workedDays: schedule && span && (liveKind === "parent" || liveKind === "section") ? workedDays(state, schedule, calendar, row.id, tree) : null,
       actual,
     };
   });
@@ -148,6 +152,7 @@ export function boardModel(
         violation: false,
         ghost: null,
         actualDays: null,
+        workedDays: null,
         actual: null,
         fromBaseline: true,
         deletedSince: true,

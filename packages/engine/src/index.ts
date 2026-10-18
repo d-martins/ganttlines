@@ -39,3 +39,4 @@ export { computeSchedule, CycleError, hasCycle, spanEnd, spanOfHalves, spanStart
 export { buildTree, childrenOf, findTreeProblem, isAncestor, isParentTask, type Tree } from "./tree";
 export { revertChanges, type Reverted } from "./undo";
 export { baselineTasks, type BaselineTask } from "./baseline";
+export { workedDays } from "./worked";

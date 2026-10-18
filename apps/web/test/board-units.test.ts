@@ -4,9 +4,10 @@ import { elbow } from "../src/board/chart/dependencies";
 import { describeChange } from "../src/board/panel/activity";
 import { chartRange, Timeline } from "../src/board/chart/timeline";
 import { dropMove } from "../src/board/list/list-actions";
+import { durations } from "../src/board/list/task-list";
 import { boardModel } from "../src/board/model";
 import { outline } from "../src/board/rows";
-import { CALENDAR, section, task } from "./board-fixtures";
+import { ANA, CALENDAR, section, task } from "./board-fixtures";
 
 const FRI = toDay("2026-10-09");
 const weekend = (day: number) => weekday(day) === 0 || weekday(day) === 6;
@@ -30,6 +31,36 @@ describe("history of links", () => {
     expect(describeChange(lag, names, "p")).toBeNull();
     const gone = { ...names, state: { rows: { f: names.state.rows.f }, links: {} } };
     expect(describeChange(removed, gone, "f")).toBe("no longer waits on a deleted task");
+  });
+});
+
+describe("durations", () => {
+  const calendar = new Calendar(CALENDAR);
+  // Ana works Tue 6, Thu 8, Fri 9 (Wed 7 off): the parent's and section's dates cover 4 team days.
+  const state = {
+    rows: {
+      s: section("s"),
+      p: task("p", { parentId: "s" }),
+      c: task("c", { parentId: "p", resourceId: ANA.id, userStart: "2026-10-06", duration: 3 }),
+    },
+    links: {},
+  };
+  const working = (model: ReturnType<typeof boardModel>, id: string) => durations(model.rows.find((entry) => entry.row.id === id)!, calendar).working;
+
+  it("parents and sections count only the days their tasks are worked", () => {
+    const model = boardModel(state, calendar, null);
+    expect(working(model, "p")).toBe("3");
+    expect(working(model, "s")).toBe("3");
+    expect(working(model, "c")).toBe("3");
+  });
+
+  it("a baseline's parent keeps counting across its saved dates", () => {
+    const tasks = [
+      { rowId: "p", kind: "parent" as const, title: "p", start: "2026-10-06", end: "2026-10-09" },
+      { rowId: "c", kind: "task" as const, title: "c", start: "2026-10-06", end: "2026-10-09" },
+    ];
+    const model = boardModel(state, calendar, { mode: "switch", tasks });
+    expect(working(model, "p")).toBe("4");
   });
 });
 
