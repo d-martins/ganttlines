@@ -167,6 +167,37 @@ describe("chart editing", () => {
     expect(sentCommands()).toEqual([]);
   });
 
+  /** Presses `dot` and moves the pointer to (x, y) without dropping. */
+  const hoverLink = (dot: HTMLElement, x: number, y: number) => {
+    fireEvent.pointerDown(dot, { button: 0, clientX: 500, clientY: 0 });
+    fireEvent.pointerMove(window, { clientX: x, clientY: y });
+  };
+  const targetMarker = () => document.querySelector('[data-testid="link-target-end"]');
+  const kindLabel = () => document.querySelector('[data-testid="link-kind"]');
+
+  it("while linking, marks the end of the target it would tie to and says the kind", async () => {
+    await chartBoard();
+    hoverLink(endDot(), HOOKS_LEFT_HALF, HOOKS_Y);
+    expect(targetMarker()).toHaveAttribute("data-end", "start");
+    expect(targetMarker()).toHaveAttribute("cx", "1344");
+    expect(kindLabel()).toHaveTextContent("after it finishes");
+    fireEvent.pointerMove(window, { clientX: HOOKS_RIGHT_HALF, clientY: HOOKS_Y });
+    expect(targetMarker()).toHaveAttribute("data-end", "end");
+    expect(targetMarker()).toHaveAttribute("cx", "1408");
+    expect(kindLabel()).toHaveTextContent("can't finish before it");
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(targetMarker()).toBeNull();
+    expect(kindLabel()).toBeNull();
+  });
+
+  it("while linking from the start dot onto a right half, shows neither marker nor kind", async () => {
+    await chartBoard();
+    hoverLink(startDot(), HOOKS_RIGHT_HALF, HOOKS_Y);
+    expect(targetMarker()).toBeNull();
+    expect(kindLabel()).toBeNull();
+    fireEvent.keyDown(window, { key: "Escape" });
+  });
+
   const WITH_API = [...ROWS, task("api", { parentId: "x", position: "a3", userStart: "2026-09-28", duration: 2 })];
   const fs = (predecessorId: string, followerId: string): Link => ({ predecessorId, followerId, kind: "FS", lag: 0 });
   const arrows = () => [...document.querySelectorAll('[data-testid="dependency"]')];
@@ -176,6 +207,20 @@ describe("chart editing", () => {
     await chartBoard(WITH_API, ADMIN, [fs("ui", "hooks"), fs("api", "hooks"), { ...fs("ui", "hooks"), kind: "SS" }]);
     expect(arrows()).toHaveLength(3);
     expect(new Set(arrows().map((arrow) => arrow.getAttribute("d"))).size).toBe(3);
+  });
+
+  it("SS arrows point right into the follower's start; FF arrows point left into its end", async () => {
+    await chartBoard(ROWS, ADMIN, [{ ...fs("ui", "hooks"), kind: "SS" }, { ...fs("ui", "hooks"), kind: "FF" }]);
+    // hooks spans chart x 1344 → 1408; the arrowhead follows the direction of the last segment.
+    const lastSegment = (d: string) => {
+      const xs = [...d.matchAll(/[MH](-?[\d.]+)/g)].map((match) => Number(match[1]));
+      return { from: xs.at(-2)!, to: xs.at(-1)! };
+    };
+    const [ss, ff] = arrows().map((arrow) => ({ ...lastSegment(arrow.getAttribute("d")!), marker: arrow.getAttribute("marker-end") }));
+    expect(ss).toMatchObject({ to: 1344, marker: "url(#dep-arrow)" });
+    expect(ss!.to).toBeGreaterThan(ss!.from);
+    expect(ff).toMatchObject({ to: 1408, marker: "url(#dep-arrow)" });
+    expect(ff!.to).toBeLessThan(ff!.from);
   });
 
   it("only the violated link's arrow is red", async () => {

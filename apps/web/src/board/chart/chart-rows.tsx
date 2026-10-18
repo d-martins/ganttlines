@@ -1,4 +1,4 @@
-import { fromDay, spanEnd, spanStart, type Command, type DayNum, type RowId } from "@ganttlines/engine";
+import { fromDay, LINK_KIND_WORDS, spanEnd, spanStart, type Command, type DayNum, type RowId } from "@ganttlines/engine";
 import { UserRound } from "lucide-react";
 import { useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { AssigneePicker } from "../assignee-picker";
@@ -336,11 +336,46 @@ export function ChartRows({
           ) : null}
         </div>
       ) : null}
-      {drag?.line ? (
-        <svg aria-hidden className="pointer-events-none absolute top-0 left-0 overflow-visible" width={1} height={1}>
-          <line x1={drag.line.x1} y1={drag.line.y1} x2={drag.line.x2} y2={drag.line.y2} stroke="var(--accent)" strokeWidth={2} strokeDasharray="4 3" />
-          <circle cx={drag.line.x2} cy={drag.line.y2} r={4} fill="var(--accent)" />
-        </svg>
+      {drag?.line ? <LinkDragPreview drag={drag} allRows={allRows} timeline={timeline} style={style} /> : null}
+    </>
+  );
+}
+
+/** A link being dragged: the line to the pointer, the end of the target it would tie to, and the kind in words. */
+function LinkDragPreview({ drag, allRows, timeline, style }: { drag: ChartDrag; allRows: readonly BoardRow[]; timeline: Timeline; style: BarStyle }) {
+  const line = drag.line!;
+  const rowHeight = ROW_HEIGHT[style];
+  const index = drag.targetId ? allRows.findIndex((entry) => entry.row.id === drag.targetId) : -1;
+  const target = index >= 0 ? allRows[index]! : null;
+  const end = target?.span && drag.targetEnd ? drag.targetEnd : null;
+  const box = end ? extent(target!.kind, target!.span!, timeline, style) : null;
+  const kind = end ? linkKindOf(drag.from ?? "end", end) : null;
+  return (
+    <>
+      <svg aria-hidden className="pointer-events-none absolute top-0 left-0 overflow-visible" width={1} height={1}>
+        <line x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} stroke="var(--accent)" strokeWidth={2} strokeDasharray="4 3" />
+        <circle cx={line.x2} cy={line.y2} r={4} fill="var(--accent)" />
+        {box ? (
+          <circle
+            data-testid="link-target-end"
+            data-end={end}
+            cx={end === "start" ? box.left : box.right}
+            cy={index * rowHeight + rowHeight / 2}
+            r={5}
+            fill="var(--bg)"
+            stroke="var(--accent)"
+            strokeWidth={2}
+          />
+        ) : null}
+      </svg>
+      {kind ? (
+        <span
+          data-testid="link-kind"
+          className="pointer-events-none absolute z-10 rounded bg-text px-1.5 py-0.5 text-[11px] whitespace-nowrap text-bg shadow"
+          style={{ left: line.x2 + 12, top: line.y2 + 12 }}
+        >
+          {LINK_KIND_WORDS[kind]}
+        </span>
       ) : null}
     </>
   );
