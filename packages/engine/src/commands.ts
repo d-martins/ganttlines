@@ -2,9 +2,24 @@ import { generateKeyBetween } from "fractional-indexing";
 import type { Calendar, ResourceId } from "./calendar";
 import { diffState, type Change } from "./changes";
 import { dayOf, fromDay, halfDay, isAfternoon, toDay, type DayNum, type HalfDay, type IsoDate } from "./date";
-import { linkKey, linksInto, MAX_LAG, type Link, type LinkKey } from "./links";
+import { LINK_KINDS, linkKey, MAX_LAG, MAX_LINKS_PER_TASK, type Link, type LinkKey, type LinkKind, type LinkRef } from "./links";
 import { TASK_COLORS, TASK_DEFAULTS, type ProjectState, type Row, type RowId, type TaskColor, type TaskRow } from "./model";
-import { computeSchedule, constraintsFor, CycleError, hasCycle, floorStart, naturalStart, requiredStart, spanEnd, spanStart, type Schedule, type Span } from "./schedule";
+import {
+  computeSchedule,
+  constraintsFor,
+  CycleError,
+  hasCycle,
+  floorStart,
+  indexByFollower,
+  linkFloor,
+  naturalStart,
+  requiredStart,
+  spanEnd,
+  spanStart,
+  type FollowerIndex,
+  type Schedule,
+  type Span,
+} from "./schedule";
 import { buildTree, childrenOf, descendantLeafTasks, isAncestor, isParentTask, subtreeIds, type Tree } from "./tree";
 
 export type DayHalf = "morning" | "afternoon";
@@ -23,9 +38,11 @@ export type Command =
   | { type: "setActualDuration"; id: RowId; days: number | null }
   | { type: "convertMilestone"; id: RowId; milestone: boolean }
   | { type: "setLocked"; id: RowId; locked: boolean }
-  | { type: "linkTasks"; fromId: RowId; toId: RowId }
-  | { type: "removePredecessor"; id: RowId }
-  | { type: "setOffset"; id: RowId; offset: number }
+  /** `followerId` waits for `predecessorId` as `kind` says; `lag` defaults to 0. */
+  | { type: "addLink"; predecessorId: RowId; followerId: RowId; kind: LinkKind; lag?: number }
+  /** Changes the lag, the kind (`newKind`), or both; the link keeps its lag when `lag` is left out. */
+  | { type: "updateLink"; predecessorId: RowId; followerId: RowId; kind: LinkKind; lag?: number; newKind?: LinkKind }
+  | { type: "removeLink"; predecessorId: RowId; followerId: RowId; kind: LinkKind }
   | { type: "indent"; id: RowId }
   | { type: "outdent"; id: RowId }
   | { type: "moveRow"; id: RowId; parentId: RowId | null; afterId: RowId | null }
@@ -71,6 +88,8 @@ class Execution {
   private readonly links: Record<LinkKey, Link>;
   private readonly tree: Tree;
   private cachedSchedule: Schedule | undefined;
+  /** Links by follower, for the links as they are now; dropped whenever a link changes. */
+  private cachedIndex: FollowerIndex | undefined;
 
   constructor(
     private readonly state: ProjectState,
@@ -112,12 +131,13 @@ class Execution {
         return this.convertMilestone(command.id, command.milestone);
       case "setLocked":
         return this.setLocked(command.id, command.locked);
-      case "linkTasks":
-        return this.linkTasks(command.fromId, command.toId);
-      case "removePredecessor":
-        return this.removePredecessor(command.id);
-      case "setOffset":
-        return this.setOffset(command.id, command.offset);
+      case "addLink":
+        return this.addLink(command, command.lag ?? 0);
+      case "updateLink":
+        return this.updateLink(command, command.lag, command.newKind);
+      case "removeLink":
+        this.detachLink(this.existingLink(command));
+        return this.result();
       case "indent":
         return this.indent(command.id);
       case "outdent":
@@ -155,14 +175,16 @@ class Execution {
     const previous = siblings[siblings.findIndex((sibling) => sibling.id === id) - 1];
     if (!previous) throw new Rejection("invalid", "Nothing to indent under");
     this.assertValidParent(row.kind, previous.id);
-    return this.patch(row, { parentId: previous.id, position: this.positionAfter(previous.id, this.lastChildId(previous.id)) });
+    this.patch(row, { parentId: previous.id, position: this.positionAfter(previous.id, this.lastChildId(previous.id)) });
+    return this.dropLinksWithinChains();
   }
 
   private outdent(id: RowId): ProjectState {
     const row = this.row(id);
     if (row.parentId === null) throw new Rejection("invalid", "Already at the top level");
     const parent = this.row(row.parentId);
-    return this.patch(row, { parentId: parent.parentId, position: this.positionAfter(parent.parentId, parent.id) });
+    this.patch(row, { parentId: parent.parentId, position: this.positionAfter(parent.parentId, parent.id) });
+    return this.dropLinksWithinChains();
   }
 
   private moveRow(id: RowId, parentId: RowId | null, afterId: RowId | null): ProjectState {
@@ -171,7 +193,8 @@ class Execution {
       throw new Rejection("invalid", "A row cannot be moved inside itself");
     }
     this.assertValidParent(row.kind, parentId);
-    return this.patch(row, { parentId, position: this.positionAfter(parentId, afterId, id) });
+    this.patch(row, { parentId, position: this.positionAfter(parentId, afterId, id) });
+    return this.dropLinksWithinChains();
   }
 
   private deleteRows(ids: RowId[]): ProjectState {
@@ -179,13 +202,11 @@ class Execution {
     // Ids that no longer exist are ignored: live sessions may send stale selections.
     for (const id of ids) if (this.rows[id]) for (const subId of subtreeIds(this.tree, id)) removed.add(subId);
     for (const id of removed) delete this.rows[id];
-    for (const [key, link] of Object.entries(this.links)) {
-      if (removed.has(link.followerId) || (removed.has(link.predecessorId) && link.kind !== "FS")) delete this.links[key];
-    }
-    for (const row of Object.values(this.rows)) {
-      if (row.kind !== "task") continue;
-      const detached = this.fsLinksInto(row.id).filter((link) => removed.has(link.predecessorId));
-      if (detached.length > 0) this.detachPredecessor(row, detached);
+    for (const key of Object.keys(this.links).sort()) {
+      const link = this.links[key]!;
+      // Surviving followers of deleted tasks stay where they are shown.
+      if (removed.has(link.followerId)) this.deleteLink(link);
+      else if (removed.has(link.predecessorId)) this.detachLink(link);
     }
     return this.result();
   }
@@ -197,7 +218,7 @@ class Execution {
     // A copy is new work: it hasn't taken any actual days yet.
     this.rows[newId] = { ...original, id: newId, actualDuration: null, position: this.positionAfter(original.parentId, original.id) };
     // The copy follows what the original follows.
-    for (const link of linksInto(this.result(), id)) this.putLink({ ...link, followerId: newId });
+    for (const link of this.linksInto(id)) this.putLink({ ...link, followerId: newId });
     return this.result();
   }
 
@@ -215,7 +236,7 @@ class Execution {
     // Measured from the moving subtasks, so locked subtasks never shift the others.
     const from = Math.min(...leaves.map((leaf) => spanStart(this.spanOf(leaf.id)!)));
     let half = this.calendar.addWorkingHalves(from, this.calendar.workingHalvesBetween(spanStart(span), this.calendar.snapHalf(target, null), null), null);
-    // The parent's own predecessors follow the leaf rule, measured on the unassigned calendar.
+    // The parent's own FS and SS links follow the leaf rule, measured on the unassigned calendar.
     half = this.anchor(task, half, null);
     const delta = this.calendar.workingHalvesBetween(from, half, null);
     const shifted = new Map<RowId, HalfDay>();
@@ -232,7 +253,7 @@ class Execution {
     const spanIn = (taskId: RowId) => shiftedSchedule.get(taskId)?.span ?? null;
     for (const leaf of leaves) {
       const current = this.rows[leaf.id] as TaskRow;
-      const outside = constraintsFor(this.result(), current).some(({ predecessorId }) => !moving.has(predecessorId));
+      const outside = this.constraintsOf(current).some(({ predecessorId }) => !moving.has(predecessorId));
       if (outside) this.patch(current, this.placeLeaf(current, shifted.get(leaf.id)!, moving, spanIn));
     }
     // Store exactly what the schedule will show, so the drag is never silently undone.
@@ -288,45 +309,77 @@ class Execution {
 
   // ── dependencies ────────────────────────────────────────────────────────
 
-  private linkTasks(fromId: RowId, toId: RowId): ProjectState {
-    if (fromId === toId) throw new Rejection("invalid", "A task cannot depend on itself");
-    this.task(fromId);
-    const successor = this.task(toId);
-    if (!this.spanOf(fromId) || !this.spanOf(toId)) throw new Rejection("unscheduled", "Both tasks need dates before they can be linked");
-    // `toId` follows `fromId` as asked; if it starts earlier, scheduling places it after its
-    // predecessor (its own start stays its "not before" date).
-    for (const link of this.fsLinksInto(successor.id)) delete this.links[linkKey(link)];
-    this.putLink({ predecessorId: fromId, followerId: successor.id, kind: "FS", lag: 0 });
-    return this.result();
-  }
-
-  private removePredecessor(id: RowId): ProjectState {
-    const task = this.task(id);
-    const links = this.fsLinksInto(id);
-    if (links.length === 0) throw new Rejection("invalid", "This task has no predecessor");
-    this.detachPredecessor(task, links);
-    return this.result();
-  }
-
-  private setOffset(id: RowId, offset: number): ProjectState {
-    if (!Number.isInteger(offset * 2) || Math.abs(offset) > MAX_LAG) {
-      throw new Rejection("invalid", `Offset must be in whole or half days, between -${MAX_LAG} and ${MAX_LAG}`);
+  private addLink(ref: LinkRef, lag: number): ProjectState {
+    const { predecessorId, followerId, kind } = ref;
+    this.row(predecessorId);
+    this.row(followerId);
+    this.task(predecessorId);
+    this.task(followerId);
+    if (!LINK_KINDS.includes(kind)) throw new Rejection("invalid", `Unknown link kind ${kind}`);
+    if (predecessorId === followerId) throw new Rejection("invalid", "A task cannot depend on itself");
+    if (isAncestor(this.state, predecessorId, followerId) || isAncestor(this.state, followerId, predecessorId)) {
+      throw new Rejection("invalid", "A task can't link to its own parent or subtask");
     }
-    const task = this.task(id);
-    const link = this.fsLinksInto(id)[0];
-    if (!link) throw new Rejection("invalid", "This task has no predecessor");
-    // A parent's locked flag has no effect on scheduling.
-    const isParent = isParentTask(this.tree, task);
-    if (task.locked && !isParent) throw new Rejection("locked", "This task's dates are locked");
-    const predecessor = this.spanOf(link.predecessorId);
-    if (isParent || !predecessor) return this.putLink({ ...link, lag: offset });
+    if (this.links[linkKey(ref)]) throw new Rejection("invalid", "These tasks are already linked that way");
+    if (this.linksInto(followerId).length >= MAX_LINKS_PER_TASK) {
+      throw new Rejection("invalid", `A task can wait for at most ${MAX_LINKS_PER_TASK} links`);
+    }
+    this.assertValidLag(kind, lag);
+    if (!this.spanOf(predecessorId) || !this.spanOf(followerId)) throw new Rejection("unscheduled", "Both tasks need dates before they can be linked");
+    // If the follower starts earlier, scheduling places it after the link (its own start stays
+    // its "not before" date).
+    return this.putLink({ predecessorId, followerId, kind, lag });
+  }
 
-    const resource = task.resourceId;
-    const natural = naturalStart(this.calendar, predecessor, resource);
-    const floor = floorStart(this.calendar, predecessor, resource);
-    const clamped = Math.max(offset * 2, this.calendar.workingHalvesBetween(natural, floor, resource));
-    this.putLink({ ...link, lag: clamped / 2 });
-    return this.patch(task, startAt(this.calendar.addWorkingHalves(natural, clamped, resource)));
+  /**
+   * A changed link re-places an unlocked leaf follower at the earliest start all its links allow;
+   * an FS lag is clamped so it never starts before the day after its predecessor starts.
+   */
+  private updateLink(ref: LinkRef, lag: number | undefined, newKind: LinkKind | undefined): ProjectState {
+    const link = this.existingLink(ref);
+    const kind = newKind ?? link.kind;
+    if (!LINK_KINDS.includes(kind)) throw new Rejection("invalid", `Unknown link kind ${kind}`);
+    if (kind !== link.kind && this.links[linkKey({ ...link, kind })]) throw new Rejection("invalid", "These tasks are already linked that way");
+    // A kind change without a lag keeps the lag, except an overlap only FS can have.
+    const nextLag = lag ?? (kind === "FS" ? link.lag : Math.max(0, link.lag));
+    this.assertValidLag(kind, nextLag);
+    const follower = this.task(link.followerId);
+    // A parent's locked flag has no effect on scheduling.
+    const isParent = isParentTask(this.tree, follower);
+    if (follower.locked && !isParent) throw new Rejection("locked", "This task's dates are locked");
+    this.deleteLink(link);
+    const updated: Link = { predecessorId: link.predecessorId, followerId: link.followerId, kind, lag: nextLag };
+    if (isParent || follower.userStart === null) return this.putLink(updated);
+
+    const resource = follower.resourceId;
+    const predecessor = this.spanOf(link.predecessorId);
+    if (kind === "FS" && predecessor) {
+      const natural = naturalStart(this.calendar, predecessor, resource);
+      const floor = floorStart(this.calendar, predecessor, resource);
+      updated.lag = Math.max(nextLag * 2, this.calendar.workingHalvesBetween(natural, floor, resource)) / 2;
+    }
+    this.putLink(updated);
+    const constraints = this.constraintsOf(follower).map((constraint) => ({ link: constraint, span: this.spanOf(constraint.predecessorId) }));
+    const required = requiredStart(this.calendar, follower, constraints);
+    if (required === -Infinity) return this.result();
+    return this.patch(follower, startAt(this.calendar.snapHalf(required, resource)));
+  }
+
+  /** The link `ref` names; both tasks must exist. */
+  private existingLink(ref: LinkRef): Link {
+    this.row(ref.predecessorId);
+    this.row(ref.followerId);
+    const link = this.links[linkKey(ref)];
+    if (!link) throw new Rejection("not_found", "These tasks aren't linked that way");
+    return link;
+  }
+
+  /** Whole or half working days within MAX_LAG; only FS links may overlap (negative lag). */
+  private assertValidLag(kind: LinkKind, lag: number): void {
+    if (typeof lag !== "number" || !Number.isInteger(lag * 2) || Math.abs(lag) > MAX_LAG) {
+      throw new Rejection("invalid", `Delays must be in whole or half days, between -${MAX_LAG} and ${MAX_LAG}`);
+    }
+    if (kind !== "FS" && lag < 0) throw new Rejection("invalid", "Only “after it finishes” links can overlap");
   }
 
   // ── helpers ─────────────────────────────────────────────────────────────
@@ -352,9 +405,8 @@ class Execution {
 
   /**
    * Stored inputs for putting a leaf task at `target`: never before the constraints inherited
-   * from ancestor tasks (whose lags stay as they are), and never on/before its own
-   * predecessors' starts; dropping it before a predecessor's natural start records the overlap as
-   * a negative lag on that link, dropping it at/after the natural start resets the lag to 0.
+   * from ancestor tasks (whose lags stay as they are), and never before the floor of any of its
+   * own links (see `anchor`), which then record where it was dropped.
    * Predecessors in `moving` move along with the task, so they neither clamp nor re-anchor it.
    */
   private placeLeaf(
@@ -364,7 +416,7 @@ class Execution {
     spanOf: (id: RowId) => Span | null = (id) => this.spanOf(id),
   ): { userStart: IsoDate; startsAfternoon: boolean } {
     const resource = task.resourceId;
-    const inherited = constraintsFor(this.result(), task, false);
+    const inherited = this.constraintsOf(task, false);
     const half = Math.max(
       this.calendar.snapHalf(target, resource),
       requiredStart(
@@ -377,8 +429,11 @@ class Execution {
   }
 
   /**
-   * Clamps `half` to after the start of each scheduled predecessor `task` follows (FS) and records,
-   * on each of those links, the overlap with that predecessor's natural start as its lag (in days).
+   * Clamps `half` to the floor of each of `task`'s own links with a scheduled predecessor (FS: the
+   * day after the predecessor starts; SS: its start; FF: the start that ends with it) and records
+   * the drop on those links: an FS lag becomes the overlap with the predecessor's natural start (in
+   * days, 0 when it starts at or after it); SS and FF lags go back to 0. FF links into a parent
+   * stretch it instead, so they are left alone.
    */
   private anchor(
     task: TaskRow,
@@ -387,16 +442,19 @@ class Execution {
     moving: ReadonlySet<RowId> = new Set(),
     spanOf: (id: RowId) => Span | null = (id) => this.spanOf(id),
   ): HalfDay {
+    const isParent = isParentTask(this.tree, task);
+    const follower = { resourceId: resource, duration: task.duration };
     const anchored: { link: Link; span: Span }[] = [];
-    for (const link of this.fsLinksInto(task.id)) {
+    for (const link of this.linksInto(task.id)) {
+      if (isParent && link.kind === "FF") continue;
       const span = moving.has(link.predecessorId) ? null : spanOf(link.predecessorId);
       if (span) anchored.push({ link, span });
     }
     let clamped = half;
-    for (const { span } of anchored) clamped = Math.max(clamped, floorStart(this.calendar, span, resource));
+    for (const { link, span } of anchored) clamped = Math.max(clamped, linkFloor(this.calendar, follower, link, span));
     for (const { link, span } of anchored) {
-      const natural = naturalStart(this.calendar, span, resource);
-      this.putLink({ ...link, lag: clamped < natural ? this.calendar.workingHalvesBetween(natural, clamped, resource) / 2 : 0 });
+      const overlap = this.calendar.workingHalvesBetween(naturalStart(this.calendar, span, resource), clamped, resource) / 2;
+      this.patchLink(link, { lag: link.kind === "FS" ? Math.min(0, overlap) : 0 });
     }
     return clamped;
   }
@@ -415,27 +473,42 @@ class Execution {
   }
 
   /**
-   * Removes `links` into the task while keeping it visually where it is. For a parent, the
-   * subtasks its constraints were pushing are pinned at their current start; the others keep
-   * following their own constraints.
+   * Removes `link` while keeping its follower visually where it is: a leaf keeps its current start;
+   * for a parent, the subtasks an FS or SS link was pushing are pinned at their current start (the
+   * others keep following their own constraints), while an FF link only stretched the parent, which
+   * snaps back to its subtasks.
    */
-  private detachPredecessor(task: TaskRow, links: readonly Link[]): void {
-    for (const link of links) delete this.links[linkKey(link)];
-    const isParent = isParentTask(this.tree, task);
-    const span = isParent ? null : this.spanOf(task.id);
-    if (span) this.patch(task, startAt(spanStart(span)));
-    if (!isParent) return;
+  private detachLink(link: Link): void {
+    this.deleteLink(link);
+    const task = this.rows[link.followerId];
+    if (task?.kind !== "task") return;
+    if (!isParentTask(this.tree, task)) {
+      const span = this.spanOf(task.id);
+      if (span) this.patch(task, startAt(spanStart(span)));
+      return;
+    }
+    if (link.kind === "FF") return;
     const remaining = (id: RowId) => (this.rows[id] ? this.spanOf(id) : null);
     for (const leaf of descendantLeafTasks(this.tree, task.id)) {
       const current = this.rows[leaf.id]; // deleted subtasks (deleteRows) must not come back
       const leafSpan = this.spanOf(leaf.id);
       if (current?.kind !== "task" || !leafSpan || current.locked || current.userStart === null) continue;
       const resource = current.resourceId;
-      const constraints = constraintsFor(this.result(), current).map((link) => ({ link, span: remaining(link.predecessorId) }));
+      const constraints = this.constraintsOf(current).map((constraint) => ({ link: constraint, span: remaining(constraint.predecessorId) }));
       const required = requiredStart(this.calendar, current, constraints);
       const withoutParent = this.calendar.snapHalf(Math.max(halfDay(toDay(current.userStart), current.startsAfternoon), required), resource);
       if (withoutParent !== spanStart(leafSpan)) this.patch(current, startAt(spanStart(leafSpan)));
     }
+  }
+
+  /** Removes the links a move left between a task and one of its ancestors, as removeLink does. */
+  private dropLinksWithinChains(): ProjectState {
+    const state = this.result();
+    for (const key of Object.keys(this.links).sort()) {
+      const link = this.links[key]!;
+      if (isAncestor(state, link.predecessorId, link.followerId) || isAncestor(state, link.followerId, link.predecessorId)) this.detachLink(link);
+    }
+    return this.result();
   }
 
   /** Whole or half working days, from half a day up to MAX_DURATION. */
@@ -513,14 +586,30 @@ class Execution {
     return this.result();
   }
 
-  /** The FS links into `id`, by key. */
-  private fsLinksInto(id: RowId): Link[] {
-    return linksInto(this.result(), id).filter((link) => link.kind === "FS");
+  /** The links `id` follows, by key. */
+  private linksInto(id: RowId): readonly Link[] {
+    this.cachedIndex ??= indexByFollower(this.result());
+    return this.cachedIndex.get(id) ?? [];
+  }
+
+  private constraintsOf(task: TaskRow, own = true): Link[] {
+    this.cachedIndex ??= indexByFollower(this.result());
+    return constraintsFor(this.result(), task, own, this.cachedIndex);
   }
 
   private putLink(link: Link): ProjectState {
     this.links[linkKey(link)] = link;
+    this.cachedIndex = undefined;
     return this.result();
+  }
+
+  private patchLink(ref: LinkRef, fields: Partial<Pick<Link, "lag">>): ProjectState {
+    return this.putLink({ ...this.links[linkKey(ref)]!, ...fields });
+  }
+
+  private deleteLink(ref: LinkRef): void {
+    delete this.links[linkKey(ref)];
+    this.cachedIndex = undefined;
   }
 
   private result(): ProjectState {

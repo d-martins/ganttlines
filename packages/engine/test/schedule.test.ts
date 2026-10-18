@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { linkKey } from "../src/links";
-import { computeSchedule, constraintsFor, CycleError, hasCycle, violatedLinks } from "../src/schedule";
+import { halfDay, toDay } from "../src/date";
+import { computeSchedule, constraintsFor, CycleError, hasCycle, linkFloor, violatedLinks } from "../src/schedule";
 import type { TaskRow } from "../src/model";
 import { isAncestor } from "../src/tree";
 import { calendar, datesOf, halvesOf, link, project, section, task } from "./fixtures";
@@ -381,6 +382,19 @@ describe("constraintsFor", () => {
     expect(constraints.length).toBeGreaterThan(0);
     expect(constraints.length).toBeLessThanOrEqual(Object.keys(state.rows).length);
     expect(hasCycle(state, cal)).toBe(true);
+  });
+});
+
+describe("linkFloor", () => {
+  // June 2026: a runs Mon 1 – Fri 5.
+  const span = computeSchedule(project(task("a", { userStart: "2026-06-01", duration: 5 })), calendar()).get("a")!.span!;
+  const follower = task("b", { duration: 2 });
+  const morningOf = (date: string) => halfDay(toDay(date), false);
+
+  it("is the day after the predecessor starts for FS, its start for SS, and the start that ends with it for FF", () => {
+    expect(linkFloor(calendar(), follower, link("a", "b", 3), span)).toBe(morningOf("2026-06-02"));
+    expect(linkFloor(calendar(), follower, link("a", "b", 3, "SS"), span)).toBe(morningOf("2026-06-01"));
+    expect(linkFloor(calendar(), follower, link("a", "b", 3, "FF"), span)).toBe(morningOf("2026-06-04"));
   });
 });
 

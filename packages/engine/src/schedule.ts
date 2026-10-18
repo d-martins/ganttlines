@@ -41,10 +41,10 @@ export class CycleError extends Error {
   }
 }
 
-type FollowerIndex = ReadonlyMap<RowId, readonly Link[]>;
+export type FollowerIndex = ReadonlyMap<RowId, readonly Link[]>;
 
 /** Every task's incoming links, each list ordered by key. */
-function indexByFollower(state: ProjectState): FollowerIndex {
+export function indexByFollower(state: ProjectState): FollowerIndex {
   const keyed = Object.values(state.links ?? {})
     .map((link) => [linkKey(link), link] as const)
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
@@ -179,10 +179,11 @@ export function requiredStart(
 
 /**
  * A leaf's own links plus its ancestors' FS and SS links (FF onto a parent stretches it instead);
- * `own: false` leaves out the task's own links.
+ * `own: false` leaves out the task's own links. Pass `into` (from `indexByFollower(state)`) when
+ * asking for many tasks of one state.
  */
-export function constraintsFor(state: ProjectState, task: TaskRow, own = true): Link[] {
-  return collectConstraints(state, task, own, indexByFollower(state));
+export function constraintsFor(state: ProjectState, task: TaskRow, own = true, into: FollowerIndex = indexByFollower(state)): Link[] {
+  return collectConstraints(state, task, own, into);
 }
 
 function collectConstraints(state: ProjectState, task: TaskRow, own: boolean, into: FollowerIndex): Link[] {

@@ -4,9 +4,9 @@ import { Calendar } from "../src/calendar";
 import { applyChanges } from "../src/changes";
 import { applyCommand, type Command } from "../src/commands";
 import { dayOf, fromDay, halfDay, toDay } from "../src/date";
-import type { Link } from "../src/links";
+import { findLinkProblem, type Link, type LinkKind } from "../src/links";
 import type { ProjectState, Row } from "../src/model";
-import { computeSchedule, constraintsFor, floorStart, hasCycle, naturalStart, spanEnd, spanStart } from "../src/schedule";
+import { computeSchedule, constraintsFor, floorStart, hasCycle, linkRequirement, naturalStart, spanEnd, spanStart } from "../src/schedule";
 import { buildTree, isParentTask } from "../src/tree";
 import { link, project, section, task } from "./fixtures";
 
@@ -40,9 +40,17 @@ const calendarArb = fc
       }),
   );
 
+const linkSpecArb = fc.record({
+  predecessor: fc.nat(),
+  kind: fc.constantFrom<LinkKind>("FS", "SS", "FF"),
+  lag: fc.integer({ min: 0, max: 6 }).map((halves) => halves / 2),
+  overlap: fc.integer({ min: 0, max: 4 }).map((halves) => halves / 2),
+});
+
 /**
  * Random tasks and sections; predecessors and parents only point to earlier rows. Sections
- * only sit under sections (or the root); only tasks have predecessors.
+ * only sit under sections (or the root); only tasks are linked, 0–3 links into each, never to
+ * one of their ancestors.
  */
 const projectArb = fc
   .array(
@@ -53,20 +61,25 @@ const projectArb = fc
       duration: fc.integer({ min: 0, max: 10 }).map((halves) => halves / 2),
       resource: fc.constantFrom(...RESOURCES),
       locked: fc.integer({ min: 0, max: 99 }).map((n) => n < 15),
-      predecessor: fc.option(fc.nat(), { freq: 2 }),
+      links: fc.array(linkSpecArb, { maxLength: 3 }),
       parent: fc.option(fc.nat(), { freq: 4 }),
-      offset: fc.integer({ min: -6, max: 6 }).map((halves) => halves / 2),
     }),
     { minLength: 1, maxLength: 12 },
   )
   .map((specs) => {
     const isSection = (i: number) => specs[i]!.section;
+    const parents: (number | null)[] = [];
+    const isAncestorOf = (ancestor: number, i: number) => {
+      for (let current = parents[i] ?? null; current !== null; current = parents[current] ?? null) if (current === ancestor) return true;
+      return false;
+    };
     return project(
       ...specs.flatMap((spec, i): (Row | Link)[] => {
-        const parent = i > 0 && spec.parent !== null ? spec.parent % i : null;
-        const parentId = parent === null || (spec.section && !isSection(parent)) ? null : `t${parent}`;
+        const candidate = i > 0 && spec.parent !== null ? spec.parent % i : null;
+        const parent = candidate === null || (spec.section && !isSection(candidate)) ? null : candidate;
+        parents.push(parent);
+        const parentId = parent === null ? null : `t${parent}`;
         if (spec.section) return [section(`t${i}`, { parentId })];
-        const predecessor = i > 0 && spec.predecessor !== null ? spec.predecessor % i : null;
         const row = task(`t${i}`, {
           userStart: spec.userStart,
           startsAfternoon: spec.afternoon,
@@ -75,7 +88,13 @@ const projectArb = fc
           locked: spec.locked,
           parentId,
         });
-        return predecessor === null || isSection(predecessor) ? [row] : [row, link(`t${predecessor}`, `t${i}`, spec.offset)];
+        if (i === 0) return [row];
+        // FS lags from -2 to 3 days, SS and FF from 0 to 3.
+        const links = spec.links
+          .map(({ predecessor, kind, lag, overlap }) => ({ predecessor: predecessor % i, kind, lag: kind === "FS" ? lag - overlap : lag }))
+          .filter(({ predecessor }) => !isSection(predecessor) && !isAncestorOf(predecessor, i))
+          .map(({ predecessor, kind, lag }) => link(`t${predecessor}`, `t${i}`, lag, kind));
+        return [row, ...links];
       }),
     );
   });
@@ -85,6 +104,8 @@ const FRESH_IDS = ["n0", "n1", "n2", "n3"];
 const UNKNOWN_ID = "gone";
 
 const halfArb = fc.constantFrom("morning" as const, "afternoon" as const);
+const kindArb = fc.constantFrom<LinkKind>("FS", "SS", "FF");
+const lagArb = fc.integer({ min: -6, max: 6 }).map((halves) => halves / 2);
 
 const commandArb = (existing: string[]): fc.Arbitrary<Command> => {
   // Mostly existing rows; sometimes rows created during the run, or one that never exists.
@@ -103,10 +124,15 @@ const commandArb = (existing: string[]): fc.Arbitrary<Command> => {
     fc.record({ type: fc.constant("convertMilestone" as const), id, milestone: fc.boolean() }),
     fc.record({ type: fc.constant("moveTask" as const), id, start: dayArb, half: halfArb }),
     fc.record({ type: fc.constant("resizeTask" as const), id, edge: fc.constantFrom("start" as const, "end" as const), date: dayArb, half: halfArb }),
-    fc.record({ type: fc.constant("linkTasks" as const), fromId: id, toId: id }),
-    // Weighted up: offsets only apply to tasks with a predecessor (parents included).
-    { weight: 3, arbitrary: fc.record({ type: fc.constant("setOffset" as const), id, offset: fc.integer({ min: -10, max: 10 }).map((halves) => halves / 2) }) },
-    fc.record({ type: fc.constant("removePredecessor" as const), id }),
+    fc.record({ type: fc.constant("addLink" as const), predecessorId: id, followerId: id, kind: kindArb, lag: lagArb }),
+    // Weighted up: most pairs aren't linked, so most updates and removals are refused.
+    {
+      weight: 3,
+      arbitrary: fc
+        .record({ type: fc.constant("updateLink" as const), predecessorId: id, followerId: id, kind: kindArb, lag: lagArb, newKind: fc.option(kindArb, { nil: undefined }) })
+        .map(({ newKind, ...fields }): Command => ({ ...fields, ...(newKind === undefined ? {} : { newKind }) })),
+    },
+    { weight: 2, arbitrary: fc.record({ type: fc.constant("removeLink" as const), predecessorId: id, followerId: id, kind: kindArb }) },
     fc.record({ type: fc.constant("setLocked" as const), id, locked: fc.boolean() }),
     fc.record({ type: fc.constant("setAssignee" as const), id, resourceId: fc.constantFrom(...RESOURCES) }),
     fc.record({ type: fc.constant("indent" as const), id }),
@@ -132,10 +158,7 @@ function assertStructure(state: ProjectState): void {
       current = state.rows[current]?.parentId ?? null;
     }
   }
-  for (const link of Object.values(state.links)) {
-    expect(state.rows[link.predecessorId]).toBeDefined();
-    expect(state.rows[link.followerId]).toBeDefined();
-  }
+  expect(findLinkProblem(rows, Object.values(state.links))).toBeNull();
 }
 
 function assertScheduleInvariants(state: ProjectState, calendar: Calendar): void {
@@ -157,9 +180,12 @@ function assertScheduleInvariants(state: ProjectState, calendar: Calendar): void
     else expect(calendar.workingHalvesBetween(start, spanEnd(span), resource) + 1).toBe(row.duration * 2);
     if (row.locked) continue;
     expect(start).toBeGreaterThanOrEqual(calendar.snapHalf(halfDay(toDay(row.userStart), row.startsAfternoon), resource));
-    for (const { predecessorId, lag } of constraintsFor(state, row)) {
-      const predecessor = schedule.get(predecessorId)?.span;
+    for (const link of constraintsFor(state, row)) {
+      const predecessor = schedule.get(link.predecessorId)?.span;
       if (!predecessor) continue;
+      expect(start).toBeGreaterThanOrEqual(linkRequirement(calendar, row, link, predecessor));
+      if (link.kind !== "FS") continue;
+      const { lag } = link;
       expect(start).toBeGreaterThan(spanStart(predecessor));
       expect(start).toBeGreaterThanOrEqual(floorStart(calendar, predecessor, resource));
       expect(start).toBeGreaterThanOrEqual(calendar.addWorkingHalves(naturalStart(calendar, predecessor, resource), lag * 2, resource));
@@ -207,6 +233,12 @@ describe("scheduling properties", () => {
             expect(applyChanges(state, result.changes)).toEqual(result.state);
             expect(applyChanges(result.state, result.changes, "backward")).toEqual(state);
             assertStructure(result.state);
+            // A dropped bar stays exactly where it was dropped.
+            const moved = command.type === "moveTask" ? result.state.rows[command.id] : undefined;
+            if (moved?.kind === "task" && moved.userStart !== null && !isParentTask(buildTree(result.state), moved)) {
+              const span = computeSchedule(result.state, calendar).get(moved.id)?.span;
+              expect(span && spanStart(span)).toBe(halfDay(toDay(moved.userStart), moved.startsAfternoon));
+            }
             state = result.state;
           }
           assertScheduleInvariants(state, calendar);
