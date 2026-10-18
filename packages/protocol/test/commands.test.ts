@@ -23,10 +23,10 @@ describe("CommandSchema", () => {
       { type: "setActualDuration", id: A, days: null },
       { type: "convertMilestone", id: A, milestone: true },
       { type: "setLocked", id: A, locked: false },
-      { type: "linkTasks", fromId: A, toId: B },
-      { type: "removePredecessor", id: A },
-      { type: "setOffset", id: A, offset: -2 },
-      { type: "setOffset", id: A, offset: -1.5 },
+      { type: "addLink", predecessorId: A, followerId: B, kind: "FS" },
+      { type: "addLink", predecessorId: A, followerId: B, kind: "SS", lag: 1.5 },
+      { type: "updateLink", predecessorId: A, followerId: B, kind: "FS", lag: -2, newKind: "FF" },
+      { type: "removeLink", predecessorId: A, followerId: B, kind: "FF" },
       { type: "moveTask", id: A, start: "2026-10-09", half: "afternoon" },
       { type: "resizeTask", id: A, edge: "end", date: "2026-10-09", half: "morning" },
       { type: "indent", id: A },
@@ -66,5 +66,20 @@ describe("CommandSchema", () => {
   it("wraps commands with an idempotency id", () => {
     expect(ProjectCommandBody.safeParse({ commandId: A, command: { type: "indent", id: B } }).success).toBe(true);
     expect(ProjectCommandBody.safeParse({ commandId: "1", command: { type: "indent", id: B } }).success).toBe(false);
+  });
+
+  it("parses addLink; linkTasks no longer does", () => {
+    expect(CommandSchema.safeParse({ type: "addLink", predecessorId: A, followerId: B, kind: "FF", lag: 2 }).success).toBe(true);
+    expect(CommandSchema.safeParse({ type: "addLink", predecessorId: A, followerId: B, kind: "SF" }).success).toBe(false);
+    expect(CommandSchema.safeParse({ type: "linkTasks", fromId: A, toId: B }).success).toBe(false);
+    expect(CommandSchema.safeParse({ type: "removePredecessor", id: A }).success).toBe(false);
+    expect(CommandSchema.safeParse({ type: "setOffset", id: A, offset: 1 }).success).toBe(false);
+  });
+
+  it("refuses a lag of 0.25 or beyond the limit", () => {
+    for (const lag of [0.25, 3660.5, -3661]) {
+      expect(CommandSchema.safeParse({ type: "addLink", predecessorId: A, followerId: B, kind: "FS", lag }).success, String(lag)).toBe(false);
+    }
+    expect(CommandSchema.safeParse({ type: "updateLink", predecessorId: A, followerId: B, kind: "FS", lag: -3660 }).success).toBe(true);
   });
 });

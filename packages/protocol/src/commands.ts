@@ -1,4 +1,4 @@
-import { MAX_DATE, MAX_DURATION, MAX_OFFSET, MIN_DATE, TASK_COLORS, type Command } from "@ganttlines/engine";
+import { MAX_DATE, MAX_DURATION, MAX_LAG, MIN_DATE, TASK_COLORS, type Command } from "@ganttlines/engine";
 import { z } from "zod";
 import { COMMAND_LIMITS } from "./constants";
 
@@ -13,6 +13,13 @@ const halfDays = z
   .number()
   .min(0.5)
   .max(MAX_DURATION)
+  .refine((days) => Number.isInteger(days * 2), "Use whole or half days");
+const linkKind = z.enum(["FS", "SS", "FF"]);
+/** Working days in half steps; the engine checks which kinds may be negative. */
+const lag = z
+  .number()
+  .min(-MAX_LAG)
+  .max(MAX_LAG)
   .refine((days) => Number.isInteger(days * 2), "Use whole or half days");
 /** Which half of a day: moves and resizes snap to half days at day zoom. */
 const half = z.enum(["morning", "afternoon"]).optional();
@@ -38,16 +45,9 @@ export const CommandSchema = z.discriminatedUnion("type", [
   cmd("setActualDuration", { id, days: halfDays.nullable() }),
   cmd("convertMilestone", { id, milestone: z.boolean() }),
   cmd("setLocked", { id, locked: z.boolean() }),
-  cmd("linkTasks", { fromId: id, toId: id }),
-  cmd("removePredecessor", { id }),
-  cmd("setOffset", {
-    id,
-    offset: z
-      .number()
-      .min(-MAX_OFFSET)
-      .max(MAX_OFFSET)
-      .refine((days) => Number.isInteger(days * 2), "Use whole or half days"),
-  }),
+  cmd("addLink", { predecessorId: id, followerId: id, kind: linkKind, lag: lag.optional() }),
+  cmd("updateLink", { predecessorId: id, followerId: id, kind: linkKind, lag: lag.optional(), newKind: linkKind.optional() }),
+  cmd("removeLink", { predecessorId: id, followerId: id, kind: linkKind }),
   cmd("indent", { id }),
   cmd("outdent", { id }),
   cmd("moveRow", { id, parentId: id.nullable(), afterId: id.nullable() }),
