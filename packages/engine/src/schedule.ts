@@ -1,5 +1,6 @@
 import type { Calendar, ResourceId } from "./calendar";
 import { dayOf, halfDay, isAfternoon, toDay, type DayNum, type HalfDay } from "./date";
+import { linksInto } from "./links";
 import type { ProjectState, Row, RowId, TaskRow } from "./model";
 import { buildTree, childrenOf, isParentTask } from "./tree";
 
@@ -124,14 +125,18 @@ export function requiredStart(
   return required;
 }
 
-/** The task's own predecessor plus those of every ancestor task (parents push their children). */
-export function constraintsFor(state: ProjectState, task: TaskRow): Constraint[] {
+/**
+ * The task's own FS links plus those of every ancestor task (parents push their children);
+ * `own: false` leaves out the task's own links.
+ */
+export function constraintsFor(state: ProjectState, task: TaskRow, own = true): Constraint[] {
   const constraints: Constraint[] = [];
   // Bounded by the row count so corrupted parent links can never loop forever.
   let steps = Object.keys(state.rows).length + 1;
   for (let row: Row | undefined = task; row && steps > 0; row = row.parentId === null ? undefined : state.rows[row.parentId], steps--) {
-    if (row.kind === "task" && row.predecessorId !== null) {
-      constraints.push({ predecessorId: row.predecessorId, offset: row.offset });
+    if (row.kind !== "task" || (!own && row === task)) continue;
+    for (const link of linksInto(state, row.id)) {
+      if (link.kind === "FS") constraints.push({ predecessorId: link.predecessorId, offset: link.lag });
     }
   }
   return constraints;

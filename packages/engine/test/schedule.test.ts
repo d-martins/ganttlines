@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { computeSchedule, constraintsFor, CycleError, hasCycle } from "../src/schedule";
 import type { TaskRow } from "../src/model";
 import { isAncestor } from "../src/tree";
-import { calendar, datesOf, project, section, task } from "./fixtures";
+import { calendar, datesOf, link, project, section, task } from "./fixtures";
 
 // October 2026: Mon 5, Tue 6, Wed 7, Thu 8, Fri 9, Sat 10, Sun 11, Mon 12 …
 const cal = calendar({
@@ -43,42 +43,44 @@ describe("computeSchedule — predecessors", () => {
   const a = task("a", { userStart: "2026-10-05", duration: 3 }); // Mon 5 – Wed 7
 
   it("pushes a successor to the working day after its predecessor ends", () => {
-    const schedule = computeSchedule(project(a, task("b", { userStart: "2026-10-05", predecessorId: "a" })), cal);
+    const schedule = computeSchedule(project(a, task("b", { userStart: "2026-10-05" }), link("a", "b")), cal);
     expect(datesOf(schedule, "b")?.start).toBe("2026-10-08");
   });
 
   it("keeps the user's later start", () => {
-    const schedule = computeSchedule(project(a, task("b", { userStart: "2026-10-13", predecessorId: "a" })), cal);
+    const schedule = computeSchedule(project(a, task("b", { userStart: "2026-10-13" }), link("a", "b")), cal);
     expect(datesOf(schedule, "b")?.start).toBe("2026-10-13");
   });
 
   it("allows overlap through a negative offset", () => {
-    const b = task("b", { userStart: "2026-10-05", predecessorId: "a", offset: -2 });
-    expect(datesOf(computeSchedule(project(a, b), cal), "b")?.start).toBe("2026-10-06");
+    const b = [task("b", { userStart: "2026-10-05" }), link("a", "b", -2)];
+    expect(datesOf(computeSchedule(project(a, ...b), cal), "b")?.start).toBe("2026-10-06");
   });
 
   it("never starts on or before the predecessor's start", () => {
-    const b = task("b", { userStart: "2026-10-01", predecessorId: "a", offset: -10 });
-    expect(datesOf(computeSchedule(project(a, b), cal), "b")?.start).toBe("2026-10-06");
+    const b = [task("b", { userStart: "2026-10-01" }), link("a", "b", -10)];
+    expect(datesOf(computeSchedule(project(a, ...b), cal), "b")?.start).toBe("2026-10-06");
   });
 
   it("adds a positive offset as a gap in working days", () => {
-    const b = task("b", { userStart: "2026-10-05", predecessorId: "a", offset: 2 });
-    expect(datesOf(computeSchedule(project(a, b), cal), "b")?.start).toBe("2026-10-12");
+    const b = [task("b", { userStart: "2026-10-05" }), link("a", "b", 2)];
+    expect(datesOf(computeSchedule(project(a, ...b), cal), "b")?.start).toBe("2026-10-12");
   });
 
   it("measures the successor's rules on the successor's own calendar", () => {
-    const b = task("b", { userStart: "2026-10-05", predecessorId: "a", resourceId: "ana" });
+    const b = [task("b", { userStart: "2026-10-05", resourceId: "ana" }), link("a", "b")];
     // natural day after Wed 7 is Thu 8, but Ana is off Thu 8 → Fri 9
-    expect(datesOf(computeSchedule(project(a, b), cal), "b")?.start).toBe("2026-10-09");
+    expect(datesOf(computeSchedule(project(a, ...b), cal), "b")?.start).toBe("2026-10-09");
   });
 
   it("chains pushes through several tasks", () => {
     const schedule = computeSchedule(
       project(
         a,
-        task("b", { userStart: "2026-10-05", predecessorId: "a", duration: 2 }),
-        task("c", { userStart: "2026-10-05", predecessorId: "b" }),
+        task("b", { userStart: "2026-10-05", duration: 2 }),
+        link("a", "b"),
+        task("c", { userStart: "2026-10-05" }),
+        link("b", "c"),
       ),
       cal,
     );
@@ -86,25 +88,25 @@ describe("computeSchedule — predecessors", () => {
   });
 
   it("ignores unscheduled predecessors", () => {
-    const schedule = computeSchedule(project(task("x"), task("b", { userStart: "2026-10-05", predecessorId: "x" })), cal);
+    const schedule = computeSchedule(project(task("x"), task("b", { userStart: "2026-10-05" }), link("x", "b")), cal);
     expect(datesOf(schedule, "b")?.start).toBe("2026-10-05");
   });
 
   it("ignores a predecessor that no longer exists", () => {
-    const schedule = computeSchedule(project(task("b", { userStart: "2026-10-05", predecessorId: "gone" })), cal);
+    const schedule = computeSchedule(project(task("b", { userStart: "2026-10-05" }), link("gone", "b")), cal);
     expect(datesOf(schedule, "b")?.start).toBe("2026-10-05");
   });
 
   it("leaves locked tasks in place and flags the violation", () => {
-    const b = task("b", { userStart: "2026-10-06", predecessorId: "a", locked: true });
-    const schedule = computeSchedule(project(a, b), cal);
+    const b = [task("b", { userStart: "2026-10-06", locked: true }), link("a", "b")];
+    const schedule = computeSchedule(project(a, ...b), cal);
     expect(datesOf(schedule, "b")?.start).toBe("2026-10-06");
     expect(schedule.get("b")?.violation).toBe(true);
   });
 
   it("does not flag a locked task that satisfies its rules", () => {
-    const b = task("b", { userStart: "2026-10-09", predecessorId: "a", locked: true });
-    expect(computeSchedule(project(a, b), cal).get("b")?.violation).toBe(false);
+    const b = [task("b", { userStart: "2026-10-09", locked: true }), link("a", "b")];
+    expect(computeSchedule(project(a, ...b), cal).get("b")?.violation).toBe(false);
   });
 });
 
@@ -132,7 +134,8 @@ describe("computeSchedule — parents and sections", () => {
     const schedule = computeSchedule(
       project(
         task("a", { userStart: "2026-10-05", duration: 3 }),
-        task("p", { predecessorId: "a" }),
+        task("p"),
+        link("a", "p"),
         task("c1", { parentId: "p", userStart: "2026-10-05" }),
         task("c2", { parentId: "p", userStart: "2026-10-12" }),
       ),
@@ -148,7 +151,8 @@ describe("computeSchedule — parents and sections", () => {
       project(
         task("p"),
         task("c1", { parentId: "p", userStart: "2026-10-05", duration: 4 }),
-        task("b", { userStart: "2026-10-05", predecessorId: "p" }),
+        task("b", { userStart: "2026-10-05" }),
+        link("p", "b"),
       ),
       cal,
     );
@@ -159,57 +163,68 @@ describe("computeSchedule — parents and sections", () => {
 describe("cycles", () => {
   it("detects a direct cycle", () => {
     const state = project(
-      task("a", { userStart: "2026-10-05", predecessorId: "b" }),
-      task("b", { userStart: "2026-10-05", predecessorId: "a" }),
+      task("a", { userStart: "2026-10-05" }),
+      link("b", "a"),
+      task("b", { userStart: "2026-10-05" }),
+      link("a", "b"),
     );
     expect(() => computeSchedule(state, cal)).toThrow(CycleError);
     expect(hasCycle(state, cal)).toBe(true);
   });
 
   it("detects a child depending on its own parent", () => {
-    const state = project(task("p"), task("c", { parentId: "p", userStart: "2026-10-05", predecessorId: "p" }));
+    const state = project(task("p"), task("c", { parentId: "p", userStart: "2026-10-05" }), link("p", "c"));
     expect(hasCycle(state, cal)).toBe(true);
   });
 
   it("detects a parent depending on its own child", () => {
-    const state = project(task("p", { predecessorId: "c" }), task("c", { parentId: "p", userStart: "2026-10-05" }));
+    const state = project(task("p"), link("c", "p"), task("c", { parentId: "p", userStart: "2026-10-05" }));
     expect(hasCycle(state, cal)).toBe(true);
   });
 
   it("accepts a valid forest", () => {
     const state = project(
       task("a", { userStart: "2026-10-05" }),
-      task("b", { userStart: "2026-10-05", predecessorId: "a" }),
-      task("c", { userStart: "2026-10-05", predecessorId: "a" }),
+      task("b", { userStart: "2026-10-05" }),
+      link("a", "b"),
+      task("c", { userStart: "2026-10-05" }),
+      link("a", "c"),
     );
     expect(hasCycle(state, cal)).toBe(false);
   });
 
   it("detects cycles of three tasks", () => {
     const state = project(
-      task("a", { userStart: "2026-10-05", predecessorId: "c" }),
-      task("b", { userStart: "2026-10-05", predecessorId: "a" }),
-      task("c", { userStart: "2026-10-05", predecessorId: "b" }),
+      task("a", { userStart: "2026-10-05" }),
+      link("c", "a"),
+      task("b", { userStart: "2026-10-05" }),
+      link("a", "b"),
+      task("c", { userStart: "2026-10-05" }),
+      link("b", "c"),
     );
     expect(hasCycle(state, cal)).toBe(true);
   });
 
   it("detects cycles through a parent's inherited constraint", () => {
     const state = project(
-      task("x", { userStart: "2026-10-05", predecessorId: "c" }),
-      task("p", { predecessorId: "x" }),
+      task("x", { userStart: "2026-10-05" }),
+      link("c", "x"),
+      task("p"),
+      link("x", "p"),
       task("c", { parentId: "p", userStart: "2026-10-05" }),
     );
     expect(hasCycle(state, cal)).toBe(true);
   });
 
   it("detects cycles through unscheduled tasks", () => {
-    const bothUnscheduled = project(task("a", { predecessorId: "b" }), task("b", { predecessorId: "a" }));
+    const bothUnscheduled = project(task("a"), link("b", "a"), task("b"), link("a", "b"));
     const oneUnscheduled = project(
-      task("a", { userStart: "2026-10-05", predecessorId: "b" }),
-      task("b", { predecessorId: "a" }),
+      task("a", { userStart: "2026-10-05" }),
+      link("b", "a"),
+      task("b"),
+      link("a", "b"),
     );
-    const unscheduledChildOfOwnPredecessor = project(task("p"), task("c", { parentId: "p", predecessorId: "p" }));
+    const unscheduledChildOfOwnPredecessor = project(task("p"), task("c", { parentId: "p" }), link("p", "c"));
     expect(hasCycle(bothUnscheduled, cal)).toBe(true);
     expect(hasCycle(oneUnscheduled, cal)).toBe(true);
     expect(hasCycle(unscheduledChildOfOwnPredecessor, cal)).toBe(true);
@@ -220,7 +235,8 @@ describe("constraintsFor", () => {
   it("terminates even if parent links are corrupted into a loop", () => {
     const state = project(
       task("c", { parentId: "a", userStart: "2026-10-05" }),
-      task("a", { parentId: "b", predecessorId: "x" }),
+      task("a", { parentId: "b" }),
+      link("x", "a"),
       task("b", { parentId: "a" }),
       task("x", { userStart: "2026-10-05" }),
     );

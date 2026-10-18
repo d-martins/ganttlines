@@ -4,10 +4,11 @@ import { Calendar } from "../src/calendar";
 import { applyChanges } from "../src/changes";
 import { applyCommand, type Command } from "../src/commands";
 import { dayOf, fromDay, halfDay, toDay } from "../src/date";
+import type { Link } from "../src/links";
 import type { ProjectState, Row } from "../src/model";
 import { computeSchedule, constraintsFor, floorStart, hasCycle, naturalStart, spanEnd, spanStart } from "../src/schedule";
 import { buildTree, isParentTask } from "../src/tree";
-import { project, section, task } from "./fixtures";
+import { link, project, section, task } from "./fixtures";
 
 const BASE = toDay("2026-10-01");
 const RESOURCES = [null, "ana", "rudy"] as const;
@@ -61,21 +62,20 @@ const projectArb = fc
   .map((specs) => {
     const isSection = (i: number) => specs[i]!.section;
     return project(
-      ...specs.map((spec, i) => {
+      ...specs.flatMap((spec, i): (Row | Link)[] => {
         const parent = i > 0 && spec.parent !== null ? spec.parent % i : null;
         const parentId = parent === null || (spec.section && !isSection(parent)) ? null : `t${parent}`;
-        if (spec.section) return section(`t${i}`, { parentId });
+        if (spec.section) return [section(`t${i}`, { parentId })];
         const predecessor = i > 0 && spec.predecessor !== null ? spec.predecessor % i : null;
-        return task(`t${i}`, {
+        const row = task(`t${i}`, {
           userStart: spec.userStart,
           startsAfternoon: spec.afternoon,
           duration: spec.duration,
           resourceId: spec.resource,
           locked: spec.locked,
-          predecessorId: predecessor === null || isSection(predecessor) ? null : `t${predecessor}`,
           parentId,
-          offset: spec.offset,
         });
+        return predecessor === null || isSection(predecessor) ? [row] : [row, link(`t${predecessor}`, `t${i}`, spec.offset)];
       }),
     );
   });
@@ -123,7 +123,6 @@ function assertStructure(state: ProjectState): void {
       expect(parent).toBeDefined();
       if (row.kind === "section") expect(parent!.kind).toBe("section");
     }
-    if (row.kind === "task" && row.predecessorId !== null) expect(state.rows[row.predecessorId]).toBeDefined();
     const key = `${row.parentId ?? ""}\u0000${row.position}`;
     expect(positions.has(key)).toBe(false);
     positions.add(key);
@@ -132,6 +131,10 @@ function assertStructure(state: ProjectState): void {
       expect(steps).toBeGreaterThan(0);
       current = state.rows[current]?.parentId ?? null;
     }
+  }
+  for (const link of Object.values(state.links)) {
+    expect(state.rows[link.predecessorId]).toBeDefined();
+    expect(state.rows[link.followerId]).toBeDefined();
   }
 }
 
@@ -182,7 +185,7 @@ describe("scheduling properties", () => {
         const reversed: Record<string, Row> = {};
         for (const id of Object.keys(state.rows).reverse()) reversed[id] = state.rows[id]!;
         const a = computeSchedule(state, calendar);
-        const b = computeSchedule({ rows: reversed }, calendar);
+        const b = computeSchedule({ ...state, rows: reversed }, calendar);
         for (const id of Object.keys(state.rows)) expect(b.get(id)).toEqual(a.get(id));
       }),
       { numRuns: 200 },

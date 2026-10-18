@@ -1,5 +1,6 @@
 import type { ResourceId } from "./calendar";
 import type { IsoDate } from "./date";
+import type { Link, LinkKey } from "./links";
 
 export type RowId = string;
 
@@ -34,9 +35,6 @@ export interface TaskRow extends RowBase {
   resourceId: ResourceId | null;
   color: TaskColor;
   locked: boolean;
-  predecessorId: RowId | null;
-  /** Working days (half-day steps) relative to the half day after the predecessor ends (negative = overlap). */
-  offset: number;
   description: string;
 }
 
@@ -44,6 +42,7 @@ export type Row = SectionRow | TaskRow;
 
 export interface ProjectState {
   readonly rows: Readonly<Record<RowId, Readonly<Row>>>;
+  readonly links: Readonly<Record<LinkKey, Readonly<Link>>>;
 }
 
 export const TASK_DEFAULTS = {
@@ -53,8 +52,6 @@ export const TASK_DEFAULTS = {
   resourceId: null,
   color: "blue",
   locked: false,
-  predecessorId: null,
-  offset: 0,
   description: "",
   actualDuration: null,
 } as const satisfies Partial<TaskRow>;

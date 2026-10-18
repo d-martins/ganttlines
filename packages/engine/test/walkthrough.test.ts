@@ -1,16 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type { Calendar } from "../src/calendar";
-import type { ProjectState, TaskRow } from "../src/model";
+import type { ProjectState } from "../src/model";
 import { computeSchedule } from "../src/schedule";
-import { calendar, datesOf, EVERY_DAY, MON_FRI, project, task } from "./fixtures";
+import { calendar, datesOf, EVERY_DAY, fsLinkInto, link, MON_FRI, project, task } from "./fixtures";
 import { run } from "./helpers";
 
 function startOf(state: ProjectState, cal: Calendar, id: string): string | undefined {
   return datesOf(computeSchedule(state, cal), id)?.start;
 }
 
-function offsetOf(state: ProjectState, id: string): number {
-  return (state.rows[id] as TaskRow).offset;
+function offsetOf(state: ProjectState, id: string): number | undefined {
+  return fsLinkInto(state, id)?.lag;
 }
 
 /** The dependency rules, step by step (every day is a working day). */
@@ -22,7 +22,8 @@ describe("dependency walkthrough", () => {
   it("follows the eight steps", () => {
     let state = project(
       task("a", { userStart: "2026-10-04", duration: 7 }),
-      task("b", { userStart: "2026-10-11", duration: 2, predecessorId: "a" }),
+      task("b", { userStart: "2026-10-11", duration: 2 }),
+      link("a", "b"),
     );
     const steps: [ReturnType<typeof endA> | ReturnType<typeof moveB>, string, number][] = [
       [moveB(15), "2026-10-15", 0],
@@ -48,7 +49,8 @@ describe("dependency walkthrough", () => {
     const weekdays = calendar({ workingWeekdays: MON_FRI });
     let state = project(
       task("a", { userStart: "2026-10-05", duration: 3 }), // Mon 5 – Wed 7
-      task("b", { userStart: "2026-10-08", predecessorId: "a" }),
+      task("b", { userStart: "2026-10-08" }),
+      link("a", "b"),
     );
     state = run(state, weekdays, { type: "moveTask", id: "b", start: "2026-10-06" });
     expect(offsetOf(state, "b")).toBe(-2);

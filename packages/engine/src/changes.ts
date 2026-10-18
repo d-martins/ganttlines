@@ -1,3 +1,4 @@
+import { linkKey, type Link, type LinkKey, type LinkRef } from "./links";
 import type { ProjectState, Row, RowId } from "./model";
 
 /**
@@ -11,10 +12,27 @@ export interface RowChange {
   after: unknown;
 }
 
-/** Field-level diff between two states, ordered by row id for determinism. */
-export function diffRows(before: ProjectState, after: ProjectState): RowChange[] {
+/**
+ * One link change. `field: "*"` means the whole link (`before: null` = created, `after: null` =
+ * deleted); `"lag"` is its only other field, since the rest identify it.
+ */
+export interface LinkChange {
+  link: LinkRef;
+  field: "*" | "lag";
+  before: Link | number | null;
+  after: Link | number | null;
+}
+
+export type Change = RowChange | LinkChange;
+
+export const isLinkChange = (change: Change): change is LinkChange => "link" in change;
+
+const refOf = ({ predecessorId, followerId, kind }: LinkRef): LinkRef => ({ predecessorId, followerId, kind });
+
+/** Field-level diff between two states: rows by row id, then links by key, for determinism. */
+export function diffState(before: ProjectState, after: ProjectState): Change[] {
   const ids = [...new Set([...Object.keys(before.rows), ...Object.keys(after.rows)])].sort();
-  const changes: RowChange[] = [];
+  const changes: Change[] = [];
   for (const rowId of ids) {
     const old = before.rows[rowId];
     const next = after.rows[rowId];
@@ -31,19 +49,44 @@ export function diffRows(before: ProjectState, after: ProjectState): RowChange[]
       }
     }
   }
+  const oldLinks = before.links ?? {};
+  const newLinks = after.links ?? {};
+  for (const key of [...new Set([...Object.keys(oldLinks), ...Object.keys(newLinks)])].sort()) {
+    const old = oldLinks[key];
+    const next = newLinks[key];
+    if (old === next) continue;
+    if (!old || !next) {
+      changes.push({ link: refOf((old ?? next)!), field: "*", before: old ?? null, after: next ?? null });
+    } else if (!Object.is(old.lag, next.lag)) {
+      changes.push({ link: refOf(old), field: "lag", before: old.lag, after: next.lag });
+    }
+  }
   return changes;
 }
 
 /** Applies changes forward (after values) or backward (before values, in reverse order). */
 export function applyChanges(
   state: ProjectState,
-  changes: readonly RowChange[],
+  changes: readonly Change[],
   direction: "forward" | "backward" = "forward",
 ): ProjectState {
   const rows: Record<RowId, Row> = { ...state.rows };
+  const links: Record<LinkKey, Link> = { ...state.links };
   const ordered = direction === "forward" ? changes : [...changes].reverse();
   for (const change of ordered) {
     const value = direction === "forward" ? change.after : change.before;
+    if (isLinkChange(change)) {
+      const key = linkKey(change.link);
+      if (change.field === "*") {
+        if (value === null) delete links[key];
+        else links[key] = value as Link;
+        continue;
+      }
+      const link = links[key];
+      if (!link) throw new RangeError(`Cannot change missing link ${key}`);
+      links[key] = { ...link, lag: value as number };
+      continue;
+    }
     if (change.field === "*") {
       if (value === null) delete rows[change.rowId];
       else rows[change.rowId] = value as Row;
@@ -53,5 +96,5 @@ export function applyChanges(
     if (!row) throw new RangeError(`Cannot change missing row ${change.rowId}`);
     rows[change.rowId] = { ...row, [change.field]: value } as Row;
   }
-  return { rows };
+  return { rows, links };
 }

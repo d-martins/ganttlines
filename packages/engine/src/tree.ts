@@ -56,14 +56,11 @@ export function isAncestor(state: ProjectState, ancestorId: RowId, id: RowId): b
 
 /**
  * Parent links must point to rows of the same project and never loop; sections never sit inside
- * tasks; predecessors must be tasks of the same project.
+ * tasks.
  */
 export function findTreeProblem(rows: readonly Row[]): string | null {
   const byId = new Map(rows.map((row) => [row.id, row]));
   for (const row of rows) {
-    if (row.kind === "task" && row.predecessorId !== null && byId.get(row.predecessorId)?.kind !== "task") {
-      return `task ${row.id} has a missing predecessor ${row.predecessorId}`;
-    }
     if (row.parentId === null) continue;
     const parent = byId.get(row.parentId);
     if (!parent) return `row ${row.id} has a missing parent ${row.parentId}`;

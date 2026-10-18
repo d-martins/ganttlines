@@ -1,7 +1,8 @@
 import { generateNKeysBetween } from "fractional-indexing";
 import { Calendar, type CalendarData } from "../src/calendar";
 import { fromDay } from "../src/date";
-import { TASK_DEFAULTS, type ProjectState, type Row, type SectionRow, type TaskRow } from "../src/model";
+import { linkKey, linksInto, type Link, type LinkKind } from "../src/links";
+import { TASK_DEFAULTS, type ProjectState, type Row, type RowId, type SectionRow, type TaskRow } from "../src/model";
 import type { Schedule } from "../src/schedule";
 
 export const MON_FRI = [1, 2, 3, 4, 5];
@@ -19,8 +20,19 @@ export function section(id: string, fields: Partial<SectionRow> = {}): SectionRo
   return { id, kind: "section", title: id, parentId: null, position: "", ...fields };
 }
 
-/** Builds a project; rows without a position are ordered among their siblings as listed. */
-export function project(...rows: Row[]): ProjectState {
+export function link(predecessorId: RowId, followerId: RowId, lag = 0, kind: LinkKind = "FS"): Link {
+  return { predecessorId, followerId, kind, lag };
+}
+
+/** The FS link into `followerId`, if any. */
+export function fsLinkInto(state: ProjectState, followerId: RowId): Link | undefined {
+  return linksInto(state, followerId).find((candidate) => candidate.kind === "FS");
+}
+
+/** Builds a project from rows and links; rows without a position are ordered among their siblings as listed. */
+export function project(...items: (Row | Link)[]): ProjectState {
+  const rows = items.filter((item): item is Row => !("followerId" in item));
+  const links = Object.fromEntries(items.filter((item): item is Link => "followerId" in item).map((item) => [linkKey(item), item]));
   const byParent = new Map<string | null, Row[]>();
   for (const row of rows) byParent.set(row.parentId, [...(byParent.get(row.parentId) ?? []), row]);
   const positioned: Record<string, Row> = {};
@@ -28,7 +40,7 @@ export function project(...rows: Row[]): ProjectState {
     const keys = generateNKeysBetween(null, null, siblings.length);
     siblings.forEach((row, i) => (positioned[row.id] = row.position ? row : { ...row, position: keys[i]! }));
   }
-  return { rows: positioned };
+  return { rows: positioned, links };
 }
 
 export function datesOf(schedule: Schedule, id: string): { start: string; end: string } | null {

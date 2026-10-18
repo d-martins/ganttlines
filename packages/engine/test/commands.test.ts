@@ -1,15 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { applyChanges } from "../src/changes";
-import { applyCommand, MAX_DATE, MAX_DURATION, MAX_OFFSET, MIN_DATE } from "../src/commands";
+import { applyCommand, MAX_DATE, MAX_DURATION, MIN_DATE } from "../src/commands";
+import { MAX_LAG } from "../src/links";
 import type { ProjectState, TaskRow } from "../src/model";
 import { computeSchedule } from "../src/schedule";
 import { buildTree, childrenOf } from "../src/tree";
-import { calendar, datesOf, halvesOf, project, section, task } from "./fixtures";
+import { calendar, datesOf, fsLinkInto, halvesOf, link, project, section, task } from "./fixtures";
 import { run } from "./helpers";
 
 // October 2026: Mon 5 … Fri 9, Mon 12 … Fri 16
 const cal = calendar();
 const taskIn = (state: ProjectState, id: string) => state.rows[id] as TaskRow;
+const lagOf = (state: ProjectState, id: string) => fsLinkInto(state, id)?.lag;
+const predecessorOf = (state: ProjectState, id: string) => fsLinkInto(state, id)?.predecessorId ?? null;
 const orderOf = (state: ProjectState, parentId: string | null) =>
   childrenOf(buildTree(state), parentId).map((row) => row.id);
 const datesIn = (state: ProjectState, id: string) => datesOf(computeSchedule(state, cal), id);
@@ -60,7 +63,8 @@ describe("assignees with a stretch of time off longer than the scan limit", () =
   const leftCal = calendar({ timeOff: [{ id: "t", resourceId: "ana", startDate: "2020-01-01", endDate: "2045-12-31" }] });
   const linked = project(
     task("a", { userStart: "2026-10-05", duration: 3, resourceId: "ana" }), // Mon 5 – Wed 7
-    task("b", { userStart: "2026-10-05", resourceId: "ana", predecessorId: "a" }), // Thu 8
+    task("b", { userStart: "2026-10-05", resourceId: "ana" }), // Thu 8
+    link("a", "b"),
   );
 
   it("schedules long tasks quickly", () => {
@@ -74,7 +78,8 @@ describe("assignees with a stretch of time off longer than the scan limit", () =
 
   it("records an overlap drag as a negative offset", () => {
     const state = run(linked, leftCal, { type: "moveTask", id: "b", start: "2026-10-06" });
-    expect(taskIn(state, "b")).toMatchObject({ userStart: "2026-10-06", offset: -2 });
+    expect(taskIn(state, "b")).toMatchObject({ userStart: "2026-10-06" });
+    expect(lagOf(state, "b")).toBe(-2);
     expect(datesOf(computeSchedule(state, leftCal), "b")?.start).toBe("2026-10-06");
   });
 
@@ -103,18 +108,18 @@ describe("field edits", () => {
 });
 
 describe("input bounds", () => {
-  const base = project(task("a", { userStart: "2026-10-05" }), task("b", { userStart: "2026-10-06", predecessorId: "a" }));
+  const base = project(task("a", { userStart: "2026-10-05" }), task("b", { userStart: "2026-10-06" }), link("a", "b"));
 
   it("exposes the limits", () => {
-    expect({ MAX_DURATION, MAX_OFFSET, MIN_DATE, MAX_DATE }).toEqual({ MAX_DURATION: 3660, MAX_OFFSET: 3660, MIN_DATE: "1970-01-01", MAX_DATE: "2199-12-31" });
+    expect({ MAX_DURATION, MAX_LAG, MIN_DATE, MAX_DATE }).toEqual({ MAX_DURATION: 3660, MAX_LAG: 3660, MIN_DATE: "1970-01-01", MAX_DATE: "2199-12-31" });
   });
 
   it("rejects huge offsets quickly", () => {
     const started = Date.now();
     expect(applyCommand(base, cal, { type: "setOffset", id: "b", offset: 1e300 })).toMatchObject({ ok: false, reason: "invalid" });
-    expect(applyCommand(base, cal, { type: "setOffset", id: "b", offset: -(MAX_OFFSET + 1) })).toMatchObject({ ok: false, reason: "invalid" });
+    expect(applyCommand(base, cal, { type: "setOffset", id: "b", offset: -(MAX_LAG + 1) })).toMatchObject({ ok: false, reason: "invalid" });
     expect(Date.now() - started).toBeLessThan(1000);
-    expect(applyCommand(base, cal, { type: "setOffset", id: "b", offset: MAX_OFFSET })).toMatchObject({ ok: true });
+    expect(applyCommand(base, cal, { type: "setOffset", id: "b", offset: MAX_LAG })).toMatchObject({ ok: true });
   });
 
   it("rejects durations above the limit, directly or by resizing", () => {
@@ -144,11 +149,12 @@ describe("moveTask", () => {
 
   it("clamps a successor to the day after its predecessor's start", () => {
     const state = run(
-      project(task("a", { userStart: "2026-10-06", duration: 3 }), task("b", { userStart: "2026-10-09", predecessorId: "a" })),
+      project(task("a", { userStart: "2026-10-06", duration: 3 }), task("b", { userStart: "2026-10-09" }), link("a", "b")),
       cal,
       { type: "moveTask", id: "b", start: "2026-10-01" },
     );
-    expect(taskIn(state, "b")).toMatchObject({ userStart: "2026-10-07", offset: -2 });
+    expect(taskIn(state, "b")).toMatchObject({ userStart: "2026-10-07" });
+    expect(lagOf(state, "b")).toBe(-2);
   });
 
   it("shifts a parent's subtasks by the same number of working days", () => {
@@ -170,14 +176,15 @@ describe("moveTask", () => {
       project(
         task("p"),
         task("c1", { parentId: "p", userStart: "2026-10-05", duration: 3 }),
-        task("c2", { parentId: "p", userStart: "2026-10-07", predecessorId: "c1", offset: -1 }),
+        task("c2", { parentId: "p", userStart: "2026-10-07" }),
+        link("c1", "c2", -1),
       ),
       cal,
       { type: "moveTask", id: "p", start: "2026-10-07" },
     );
     expect(datesIn(state, "c1")?.start).toBe("2026-10-07");
     expect(datesIn(state, "c2")?.start).toBe("2026-10-09");
-    expect(taskIn(state, "c2").offset).toBe(-1);
+    expect(lagOf(state, "c2")).toBe(-1);
   });
 
   it("moves successors of nested sub-parents with the group", () => {
@@ -186,14 +193,16 @@ describe("moveTask", () => {
         task("p"),
         task("q", { parentId: "p" }),
         task("q1", { parentId: "q", userStart: "2026-10-12", duration: 2 }), // Mon 12 – Tue 13
-        task("r", { parentId: "p", userStart: "2026-10-14", predecessorId: "q" }),
+        task("r", { parentId: "p", userStart: "2026-10-14" }),
+        link("q", "r"),
       ),
       cal,
       { type: "moveTask", id: "p", start: "2026-10-05" },
     );
     expect(datesIn(state, "q1")?.start).toBe("2026-10-05");
     expect(datesIn(state, "r")?.start).toBe("2026-10-07");
-    expect(taskIn(state, "r")).toMatchObject({ userStart: "2026-10-07", offset: 0 });
+    expect(taskIn(state, "r")).toMatchObject({ userStart: "2026-10-07" });
+    expect(lagOf(state, "r")).toBe(0);
   });
 
   it("places successors of a locked inside predecessor like a normal leaf move", () => {
@@ -202,13 +211,15 @@ describe("moveTask", () => {
         task("p"),
         task("q", { parentId: "p" }),
         task("q1", { parentId: "q", userStart: "2026-10-12", duration: 2, locked: true }), // Mon 12 – Tue 13
-        task("r", { parentId: "p", userStart: "2026-10-14", predecessorId: "q" }),
+        task("r", { parentId: "p", userStart: "2026-10-14" }),
+        link("q", "r"),
       ),
       cal,
       { type: "moveTask", id: "p", start: "2026-10-05" },
     );
     expect(datesIn(state, "q1")?.start).toBe("2026-10-12");
-    expect(taskIn(state, "r")).toMatchObject({ userStart: "2026-10-13", offset: -1 });
+    expect(taskIn(state, "r")).toMatchObject({ userStart: "2026-10-13" });
+    expect(lagOf(state, "r")).toBe(-1);
     expect(datesIn(state, "r")?.start).toBe(taskIn(state, "r").userStart);
   });
 
@@ -218,8 +229,10 @@ describe("moveTask", () => {
       project(
         task("p"),
         task("l2", { parentId: "p", userStart: l2Start }),
-        task("l1", { parentId: "p", userStart: "2026-10-05", predecessorId: "x", offset: -1 }),
-        task("x", { userStart: "2026-10-05", duration: 2, predecessorId: "l2" }), // pushed by l2
+        task("l1", { parentId: "p", userStart: "2026-10-05" }),
+        link("x", "l1", -1),
+        task("x", { userStart: "2026-10-05", duration: 2 }), // pushed by l2
+        link("l2", "x"),
       );
 
     it("moves the whole group rigidly when dragged later", () => {
@@ -229,7 +242,8 @@ describe("moveTask", () => {
       expect(datesIn(state, "l2")?.start).toBe("2026-10-06");
       expect(datesIn(state, "x")?.start).toBe("2026-10-07");
       expect(datesIn(state, "l1")?.start).toBe("2026-10-08");
-      expect(taskIn(state, "l1")).toMatchObject({ userStart: "2026-10-08", offset: -1 });
+      expect(taskIn(state, "l1")).toMatchObject({ userStart: "2026-10-08" });
+      expect(lagOf(state, "l1")).toBe(-1);
     });
 
     it("moves the whole group rigidly when dragged earlier", () => {
@@ -239,20 +253,22 @@ describe("moveTask", () => {
       expect(datesIn(state, "l2")?.start).toBe("2026-10-05");
       expect(datesIn(state, "x")?.start).toBe("2026-10-06");
       expect(datesIn(state, "l1")?.start).toBe("2026-10-07");
-      expect(taskIn(state, "l1")).toMatchObject({ userStart: "2026-10-07", offset: -1 });
+      expect(taskIn(state, "l1")).toMatchObject({ userStart: "2026-10-07" });
+      expect(lagOf(state, "l1")).toBe(-1);
     });
   });
 
   describe("under a parent with a predecessor", () => {
     const nested = project(
       task("a", { userStart: "2026-10-05", duration: 3 }), // Mon 5 – Wed 7
-      task("p", { predecessorId: "a" }),
+      task("p"),
+      link("a", "p"),
       task("c", { parentId: "p", userStart: "2026-10-08", duration: 2 }), // Thu 8 – Fri 9
     );
 
     it("records dragging the parent as an overlap with its predecessor", () => {
       const state = run(nested, cal, { type: "moveTask", id: "p", start: "2026-10-06" });
-      expect(taskIn(state, "p").offset).toBe(-2);
+      expect(lagOf(state, "p")).toBe(-2);
       expect(datesIn(state, "c")?.start).toBe("2026-10-06");
       expect(taskIn(state, "c").userStart).toBe("2026-10-06");
     });
@@ -260,7 +276,8 @@ describe("moveTask", () => {
     it("changes nothing when dragged to its current start past a violating locked subtask", () => {
       const state = project(
         task("a", { userStart: "2026-10-05", duration: 3 }), // Mon 5 – Wed 7
-        task("p", { predecessorId: "a" }),
+        task("p"),
+        link("a", "p"),
         task("l", { parentId: "p", userStart: "2026-10-05", locked: true }), // violates p's constraint
         task("c", { parentId: "p", userStart: "2026-10-08" }),
       );
@@ -272,7 +289,8 @@ describe("moveTask", () => {
     it("rejects dragging a parent whose scheduled subtasks are all locked", () => {
       const state = project(
         task("a", { userStart: "2026-10-05", duration: 3 }),
-        task("p", { predecessorId: "a" }),
+        task("p"),
+        link("a", "p"),
         task("l", { parentId: "p", userStart: "2026-10-08", locked: true }),
         task("u", { parentId: "p" }), // unscheduled
       );
@@ -283,12 +301,12 @@ describe("moveTask", () => {
       const state = run(nested, cal, { type: "moveTask", id: "c", start: "2026-10-06" });
       expect(datesIn(state, "c")?.start).toBe("2026-10-08");
       expect(taskIn(state, "c").userStart).toBe("2026-10-08");
-      expect(taskIn(state, "p").offset).toBe(0);
+      expect(lagOf(state, "p")).toBe(0);
     });
   });
 
   it("rejects instead of throwing when the stored state has a cycle", () => {
-    const cyclic = project(task("a", { userStart: "2026-10-05", predecessorId: "b" }), task("b", { userStart: "2026-10-06", predecessorId: "a" }));
+    const cyclic = project(task("a", { userStart: "2026-10-05" }), link("b", "a"), task("b", { userStart: "2026-10-06" }), link("a", "b"));
     expect(applyCommand(cyclic, cal, { type: "moveTask", id: "a", start: "2026-10-07" })).toMatchObject({ ok: false, reason: "cycle" });
   });
 
@@ -335,7 +353,7 @@ describe("resizeTask, setDuration, convertMilestone", () => {
 });
 
 describe("half days", () => {
-  const base = project(task("a", { userStart: "2026-10-06", duration: 2 }), task("b", { userStart: "2026-10-06", predecessorId: "a" }));
+  const base = project(task("a", { userStart: "2026-10-06", duration: 2 }), task("b", { userStart: "2026-10-06" }), link("a", "b"));
 
   it("takes durations in half days: a task ends at midday and its successor starts that afternoon", () => {
     const state = run(base, cal, { type: "setDuration", id: "a", duration: 2.5 });
@@ -369,13 +387,14 @@ describe("half days", () => {
   it("overlaps a successor by half days, but never before the day after its predecessor starts", () => {
     // b is dropped on Wed morning, half a day into a (Tue – Thu midday): a -1.5 day overlap
     let state = run(base, cal, { type: "setDuration", id: "a", duration: 2.5 }, { type: "moveTask", id: "b", start: "2026-10-07" });
-    expect(taskIn(state, "b")).toMatchObject({ userStart: "2026-10-07", startsAfternoon: false, offset: -1.5 });
+    expect(taskIn(state, "b")).toMatchObject({ userStart: "2026-10-07", startsAfternoon: false });
+    expect(lagOf(state, "b")).toBe(-1.5);
     state = run(state, cal, { type: "moveTask", id: "b", start: "2026-10-06", half: "afternoon" });
     expect(halvesIn(state, "b")?.start).toBe("2026-10-07 am");
   });
 
   it("puts milestones on the morning and starts their successors the next working day", () => {
-    const state = run(project(task("m", { userStart: "2026-10-06", startsAfternoon: true, duration: 1 }), task("n", { predecessorId: "m", userStart: "2026-10-06" })), cal, {
+    const state = run(project(task("m", { userStart: "2026-10-06", startsAfternoon: true, duration: 1 }), task("n", { userStart: "2026-10-06" }), link("m", "n")), cal, {
       type: "convertMilestone",
       id: "m",
       milestone: true,
@@ -394,7 +413,8 @@ describe("half days", () => {
 describe("setActualDuration", () => {
   const base = project(
     task("a", { userStart: "2026-10-06", duration: 3 }),
-    task("b", { userStart: "2026-10-06", predecessorId: "a" }),
+    task("b", { userStart: "2026-10-06" }),
+    link("a", "b"),
     task("p"),
     task("c", { parentId: "p", userStart: "2026-10-05" }),
   );
@@ -429,7 +449,7 @@ describe("setActualDuration", () => {
 describe("setLocked", () => {
   it("pins the currently displayed start when locking", () => {
     const state = run(
-      project(task("a", { userStart: "2026-10-05", duration: 3 }), task("b", { userStart: "2026-10-05", predecessorId: "a" })),
+      project(task("a", { userStart: "2026-10-05", duration: 3 }), task("b", { userStart: "2026-10-05" }), link("a", "b")),
       cal,
       { type: "setLocked", id: "b", locked: true },
     );
@@ -454,26 +474,29 @@ describe("linkTasks", () => {
 
   it("makes the linked-to task follow the linked-from one, moving it after if it starts earlier", () => {
     const forward = run(base, cal, { type: "linkTasks", fromId: "a", toId: "b" });
-    expect(taskIn(forward, "b")).toMatchObject({ predecessorId: "a", offset: 0 });
+    expect(predecessorOf(forward, "b")).toBe("a");
+    expect(lagOf(forward, "b")).toBe(0);
     expect(datesIn(forward, "b")?.start).toBe("2026-10-08");
     // Linked the other way: a (which starts first) now follows b, so it moves after b ends.
     const backward = run(base, cal, { type: "linkTasks", fromId: "b", toId: "a" });
-    expect(taskIn(backward, "a")).toMatchObject({ predecessorId: "b", offset: 0, userStart: "2026-10-05" });
-    expect(taskIn(backward, "b").predecessorId).toBeNull();
+    expect(taskIn(backward, "a")).toMatchObject({ userStart: "2026-10-05" });
+    expect(predecessorOf(backward, "a")).toBe("b");
+    expect(lagOf(backward, "a")).toBe(0);
+    expect(predecessorOf(backward, "b")).toBeNull();
     expect(datesIn(backward, "a")?.start).toBe("2026-10-07");
   });
 
   it("replaces an existing predecessor", () => {
     const state = run(
-      project(task("x", { userStart: "2026-10-01" }), task("a", { userStart: "2026-10-02" }), task("b", { userStart: "2026-10-06", predecessorId: "x" })),
+      project(task("x", { userStart: "2026-10-01" }), task("a", { userStart: "2026-10-02" }), task("b", { userStart: "2026-10-06" }), link("x", "b")),
       cal,
       { type: "linkTasks", fromId: "a", toId: "b" },
     );
-    expect(taskIn(state, "b").predecessorId).toBe("a");
+    expect(predecessorOf(state, "b")).toBe("a");
   });
 
   it("rejects cycles, self links and unscheduled tasks", () => {
-    const chain = project(task("a", { userStart: "2026-10-05" }), task("b", { userStart: "2026-10-06", predecessorId: "a" }));
+    const chain = project(task("a", { userStart: "2026-10-05" }), task("b", { userStart: "2026-10-06" }), link("a", "b"));
     const parentChild = project(task("p"), task("c", { parentId: "p", userStart: "2026-10-06" }), task("d", { userStart: "2026-10-05" }));
     expect(applyCommand(chain, cal, { type: "linkTasks", fromId: "a", toId: "a" })).toMatchObject({ ok: false, reason: "invalid" });
     expect(applyCommand(project(task("a"), task("b", { userStart: "2026-10-06" })), cal, { type: "linkTasks", fromId: "a", toId: "b" })).toMatchObject({ ok: false, reason: "unscheduled" });
@@ -485,40 +508,44 @@ describe("linkTasks", () => {
 describe("removePredecessor and setOffset", () => {
   const linked = project(
     task("a", { userStart: "2026-10-05", duration: 3 }), // Mon 5 – Wed 7
-    task("b", { userStart: "2026-10-05", predecessorId: "a" }), // shown Thu 8
+    task("b", { userStart: "2026-10-05" }), // shown Thu 8
+    link("a", "b"),
   );
 
   it("keeps the task in place when its predecessor is removed", () => {
     const state = run(linked, cal, { type: "removePredecessor", id: "b" });
-    expect(taskIn(state, "b")).toMatchObject({ predecessorId: null, offset: 0, userStart: "2026-10-08" });
+    expect(taskIn(state, "b")).toMatchObject({ userStart: "2026-10-08" });
+    expect(predecessorOf(state, "b")).toBeNull();
   });
 
   it("places the task exactly at the new offset", () => {
     const state = run(linked, cal, { type: "setOffset", id: "b", offset: 2 });
-    expect(taskIn(state, "b")).toMatchObject({ offset: 2, userStart: "2026-10-12" });
+    expect(taskIn(state, "b")).toMatchObject({ userStart: "2026-10-12" });
+    expect(lagOf(state, "b")).toBe(2);
     const overlapped = run(linked, cal, { type: "setOffset", id: "b", offset: -1 });
     expect(datesIn(overlapped, "b")?.start).toBe("2026-10-07");
   });
 
   it("sets the offset of a locked parent task", () => {
     const state = run(
-      project(task("a", { userStart: "2026-10-05", duration: 3 }), task("p", { predecessorId: "a", locked: true }), task("c", { parentId: "p", userStart: "2026-10-05" })),
+      project(task("a", { userStart: "2026-10-05", duration: 3 }), task("p", { locked: true }), link("a", "p"), task("c", { parentId: "p", userStart: "2026-10-05" })),
       cal,
       { type: "setOffset", id: "p", offset: 1 },
     );
-    expect(taskIn(state, "p").offset).toBe(1);
+    expect(lagOf(state, "p")).toBe(1);
   });
 
   describe("on a parent task", () => {
     const parentLinked = project(
       task("a", { userStart: "2026-10-05", duration: 3 }), // Mon 5 – Wed 7
-      task("p", { predecessorId: "a" }),
+      task("p"),
+      link("a", "p"),
       task("c", { parentId: "p", userStart: "2026-10-05" }), // shown Thu 8
     );
 
     it("keeps the subtasks in place when the predecessor is removed", () => {
       const state = run(parentLinked, cal, { type: "removePredecessor", id: "p" });
-      expect(taskIn(state, "p")).toMatchObject({ predecessorId: null, offset: 0 });
+      expect(predecessorOf(state, "p")).toBeNull();
       expect(datesIn(state, "c")?.start).toBe("2026-10-08");
     });
 
@@ -526,9 +553,11 @@ describe("removePredecessor and setOffset", () => {
       const state = run(
         project(
           task("a", { userStart: "2026-10-05", duration: 3 }), // Mon 5 – Wed 7
-          task("p", { predecessorId: "a" }),
+          task("p"),
+          link("a", "p"),
           task("c1", { parentId: "p", userStart: "2026-10-05" }), // shown Thu 8
-          task("c2", { parentId: "p", userStart: "2026-10-05", predecessorId: "c1" }), // shown Fri 9, follows c1
+          task("c2", { parentId: "p", userStart: "2026-10-05" }), // shown Fri 9, follows c1
+          link("c1", "c2"),
         ),
         cal,
         { type: "removePredecessor", id: "p" },
@@ -542,14 +571,15 @@ describe("removePredecessor and setOffset", () => {
 
     it("keeps the subtasks in place when the predecessor is deleted", () => {
       const state = run(parentLinked, cal, { type: "deleteRows", ids: ["a"] });
-      expect(taskIn(state, "p").predecessorId).toBeNull();
+      expect(predecessorOf(state, "p")).toBeNull();
       expect(datesIn(state, "c")?.start).toBe("2026-10-08");
     });
   });
 
   it("clamps the offset so the task starts after its predecessor's start", () => {
     const state = run(linked, cal, { type: "setOffset", id: "b", offset: -10 });
-    expect(taskIn(state, "b")).toMatchObject({ offset: -2, userStart: "2026-10-06" });
+    expect(taskIn(state, "b")).toMatchObject({ userStart: "2026-10-06" });
+    expect(lagOf(state, "b")).toBe(-2);
   });
 });
 
@@ -577,12 +607,28 @@ describe("tree commands", () => {
 
   it("deletes subtrees and detaches their successors in place", () => {
     const state = run(
-      project(task("p"), task("c", { parentId: "p", userStart: "2026-10-05", duration: 3 }), task("d", { userStart: "2026-10-05", predecessorId: "c" })),
+      project(task("p"), task("c", { parentId: "p", userStart: "2026-10-05", duration: 3 }), task("d", { userStart: "2026-10-05" }), link("c", "d")),
       cal,
       { type: "deleteRows", ids: ["p"] },
     );
     expect(Object.keys(state.rows)).toEqual(["d"]);
-    expect(taskIn(state, "d")).toMatchObject({ predecessorId: null, userStart: "2026-10-08" });
+    expect(taskIn(state, "d")).toMatchObject({ userStart: "2026-10-08" });
+    expect(predecessorOf(state, "d")).toBeNull();
+  });
+
+  it("deletes every link into or out of deleted rows", () => {
+    const state = run(
+      project(
+        task("a", { userStart: "2026-10-05" }),
+        task("b", { userStart: "2026-10-06" }),
+        task("c", { userStart: "2026-10-07" }),
+        link("a", "b", 0, "SS"),
+        link("b", "c", 0, "FF"),
+      ),
+      cal,
+      { type: "deleteRows", ids: ["b"] },
+    );
+    expect(state.links).toEqual({});
   });
 
   it("ignores ids that no longer exist when deleting", () => {
@@ -620,6 +666,15 @@ describe("tree commands", () => {
   it("duplicates a task right after the original", () => {
     const state = run(base, cal, { type: "duplicateTask", id: "a", newId: "a2" });
     expect(orderOf(state, "s")).toEqual(["a", "a2", "b", "c"]);
+  });
+
+  it("makes the copy follow what the original follows", () => {
+    const state = run(project(task("x", { userStart: "2026-10-05" }), task("a", { userStart: "2026-10-06" }), link("x", "a", -0.5), link("x", "a", 1, "SS")), cal, {
+      type: "duplicateTask",
+      id: "a",
+      newId: "a2",
+    });
+    expect(Object.values(state.links).filter((l) => l.followerId === "a2")).toEqual([link("x", "a2", -0.5), link("x", "a2", 1, "SS")]);
   });
 });
 
