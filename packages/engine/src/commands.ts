@@ -254,7 +254,7 @@ class Execution {
     for (const leaf of leaves) {
       const current = this.rows[leaf.id] as TaskRow;
       const outside = this.constraintsOf(current).some(({ predecessorId }) => !moving.has(predecessorId));
-      if (outside) this.patch(current, this.placeLeaf(current, shifted.get(leaf.id)!, moving, spanIn));
+      if (outside) this.patch(current, this.placeLeaf(current, shifted.get(leaf.id)!, { moving, spanOf: spanIn }));
     }
     // Store exactly what the schedule will show, so the drag is never silently undone.
     const schedule = computeSchedule(this.result(), this.calendar);
@@ -275,7 +275,8 @@ class Execution {
       const end = this.calendar.snapHalfBack(at, resource);
       return this.patch(task, { duration: this.validDuration(this.durationBetween(spanStart(span), end, resource)) });
     }
-    const placement = this.placeLeaf(task, Math.min(at, spanEnd(span)));
+    // The end stays put, so FF links neither clamp the new start nor change their lag.
+    const placement = this.placeLeaf(task, Math.min(at, spanEnd(span)), { keepFinish: true });
     const start = halfDay(toDay(placement.userStart), placement.startsAfternoon);
     return this.patch(task, { ...placement, duration: this.validDuration(this.durationBetween(start, spanEnd(span), resource)) });
   }
@@ -322,7 +323,7 @@ class Execution {
     }
     if (this.links[linkKey(ref)]) throw new Rejection("invalid", "These tasks are already linked that way");
     if (this.linksInto(followerId).length >= MAX_LINKS_PER_TASK) {
-      throw new Rejection("invalid", `A task can wait for at most ${MAX_LINKS_PER_TASK} links`);
+      throw new Rejection("invalid", `A task can wait on at most ${MAX_LINKS_PER_TASK} links`);
     }
     this.assertValidLag(kind, lag);
     if (!this.spanOf(predecessorId) || !this.spanOf(followerId)) throw new Rejection("unscheduled", "Both tasks need dates before they can be linked");
@@ -407,13 +408,17 @@ class Execution {
    * Stored inputs for putting a leaf task at `target`: never before the constraints inherited
    * from ancestor tasks (whose lags stay as they are), and never before the floor of any of its
    * own links (see `anchor`), which then record where it was dropped.
-   * Predecessors in `moving` move along with the task, so they neither clamp nor re-anchor it.
+   * Predecessors in `moving` move along with the task, so they neither clamp nor re-anchor it;
+   * `keepFinish` (the end stays where it is) leaves its FF links alone.
    */
   private placeLeaf(
     task: TaskRow,
     target: HalfDay,
-    moving: ReadonlySet<RowId> = new Set(),
-    spanOf: (id: RowId) => Span | null = (id) => this.spanOf(id),
+    {
+      moving = new Set<RowId>(),
+      spanOf = (id: RowId) => this.spanOf(id),
+      keepFinish = false,
+    }: { moving?: ReadonlySet<RowId>; spanOf?: (id: RowId) => Span | null; keepFinish?: boolean } = {},
   ): { userStart: IsoDate; startsAfternoon: boolean } {
     const resource = task.resourceId;
     const inherited = this.constraintsOf(task, false);
@@ -425,7 +430,7 @@ class Execution {
         inherited.filter(({ predecessorId }) => !moving.has(predecessorId)).map((link) => ({ link, span: spanOf(link.predecessorId) })),
       ),
     );
-    return startAt(this.anchor(task, half, resource, moving, spanOf));
+    return startAt(this.anchor(task, half, resource, moving, spanOf, keepFinish));
   }
 
   /**
@@ -433,7 +438,7 @@ class Execution {
    * day after the predecessor starts; SS: its start; FF: the start that ends with it) and records
    * the drop on those links: an FS lag becomes the overlap with the predecessor's natural start (in
    * days, 0 when it starts at or after it); SS and FF lags go back to 0. FF links into a parent
-   * stretch it instead, so they are left alone.
+   * stretch it instead, so they are left alone, as they are with `keepFinish`.
    */
   private anchor(
     task: TaskRow,
@@ -441,12 +446,13 @@ class Execution {
     resource: ResourceId | null,
     moving: ReadonlySet<RowId> = new Set(),
     spanOf: (id: RowId) => Span | null = (id) => this.spanOf(id),
+    keepFinish = false,
   ): HalfDay {
-    const isParent = isParentTask(this.tree, task);
+    const skipFinish = keepFinish || isParentTask(this.tree, task);
     const follower = { resourceId: resource, duration: task.duration };
     const anchored: { link: Link; span: Span }[] = [];
     for (const link of this.linksInto(task.id)) {
-      if (isParent && link.kind === "FF") continue;
+      if (skipFinish && link.kind === "FF") continue;
       const span = moving.has(link.predecessorId) ? null : spanOf(link.predecessorId);
       if (span) anchored.push({ link, span });
     }

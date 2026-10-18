@@ -541,7 +541,7 @@ describe("addLink", () => {
       task("f", { userStart: "2026-10-06" }),
       ...predecessors.slice(0, MAX_LINKS_PER_TASK).map((predecessor) => link(predecessor.id, "f")),
     );
-    expect(add(state, `p${MAX_LINKS_PER_TASK}`, "f")).toMatchObject({ ok: false, reason: "invalid" });
+    expect(add(state, `p${MAX_LINKS_PER_TASK}`, "f")).toMatchObject({ ok: false, reason: "invalid", message: "A task can wait on at most 50 links" });
     expect(add(state, `p${MAX_LINKS_PER_TASK}`, "p0")).toMatchObject({ ok: true });
   });
 
@@ -770,6 +770,24 @@ describe("moveTask with links of every kind", () => {
     expect(lagOf(resized, "b")).toBe(-2);
     expect(taskIn(moved, "b").userStart).toBe(taskIn(resized, "b").userStart);
     expect(lagOf(run(moved, cal, { type: "moveTask", id: "b", start: "2026-10-12" }), "b")).toBe(0);
+  });
+
+  it("a start-edge resize lengthens an FF follower, keeping the link's lag", () => {
+    const a = task("a", { userStart: "2026-10-05", duration: 5 }); // Mon 5 – Fri 9
+    const state = run(project(a, task("b", { userStart: "2026-10-09" }), link("a", "b", 0, "FF")), cal, { type: "resizeTask", id: "b", edge: "start", date: "2026-10-05" });
+    expect(taskIn(state, "b")).toMatchObject({ userStart: "2026-10-05", duration: 5 });
+    expect(datesIn(state, "b")).toEqual({ start: "2026-10-05", end: "2026-10-09" });
+    expect(state.links["b|a|FF"]?.lag).toBe(0);
+  });
+
+  it("a start-edge resize keeps a user-set FF lag", () => {
+    const a = task("a", { userStart: "2026-10-05", duration: 5 }); // Mon 5 – Fri 9
+    const linked = project(a, task("b", { userStart: "2026-10-05" }), link("a", "b", 2, "FF")); // b ends Tue 13
+    expect(datesIn(linked, "b")?.start).toBe("2026-10-13");
+    const state = run(linked, cal, { type: "resizeTask", id: "b", edge: "start", date: "2026-10-12" });
+    expect(state.links["b|a|FF"]?.lag).toBe(2);
+    expect(taskIn(state, "b")).toMatchObject({ userStart: "2026-10-12", duration: 2 });
+    expect(datesIn(state, "b")).toEqual({ start: "2026-10-12", end: "2026-10-13" });
   });
 
   it("drags a parent by its FS and SS links, leaving FF links into it alone", () => {
