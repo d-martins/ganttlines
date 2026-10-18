@@ -369,8 +369,8 @@ class Execution {
       this.calendar.snapHalf(target, resource),
       requiredStart(
         this.calendar,
-        resource,
-        inherited.filter(({ predecessorId }) => !moving.has(predecessorId)).map(({ predecessorId, offset }) => ({ span: spanOf(predecessorId), offset })),
+        task,
+        inherited.filter(({ predecessorId }) => !moving.has(predecessorId)).map((link) => ({ link, span: spanOf(link.predecessorId) })),
       ),
     );
     return startAt(this.anchor(task, half, resource, moving, spanOf));
@@ -431,8 +431,8 @@ class Execution {
       const leafSpan = this.spanOf(leaf.id);
       if (current?.kind !== "task" || !leafSpan || current.locked || current.userStart === null) continue;
       const resource = current.resourceId;
-      const constraints = constraintsFor(this.result(), current).map(({ predecessorId, offset }) => ({ span: remaining(predecessorId), offset }));
-      const required = requiredStart(this.calendar, resource, constraints);
+      const constraints = constraintsFor(this.result(), current).map((link) => ({ link, span: remaining(link.predecessorId) }));
+      const required = requiredStart(this.calendar, current, constraints);
       const withoutParent = this.calendar.snapHalf(Math.max(halfDay(toDay(current.userStart), current.startsAfternoon), required), resource);
       if (withoutParent !== spanStart(leafSpan)) this.patch(current, startAt(spanStart(leafSpan)));
     }

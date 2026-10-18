@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { computeSchedule, constraintsFor, CycleError, hasCycle } from "../src/schedule";
+import { linkKey } from "../src/links";
+import { computeSchedule, constraintsFor, CycleError, hasCycle, violatedLinks } from "../src/schedule";
 import type { TaskRow } from "../src/model";
 import { isAncestor } from "../src/tree";
-import { calendar, datesOf, link, project, section, task } from "./fixtures";
+import { calendar, datesOf, halvesOf, link, project, section, task } from "./fixtures";
 
 // October 2026: Mon 5, Tue 6, Wed 7, Thu 8, Fri 9, Sat 10, Sun 11, Mon 12 …
 const cal = calendar({
@@ -160,6 +161,126 @@ describe("computeSchedule — parents and sections", () => {
   });
 });
 
+describe("computeSchedule — link kinds", () => {
+  // June 2026: Mon 1, Tue 2, Wed 3, Thu 4, Fri 5, Sat 6, Sun 7, Mon 8 … Fri 12 … Tue 16
+  const june = calendar({ timeOff: [{ id: "t1", resourceId: "bo", startDate: "2026-06-05", endDate: "2026-06-05" }] });
+  const a = task("a", { userStart: "2026-06-01", duration: 5 }); // Mon 1 – Fri 5
+
+  it("SS waits for the predecessor's start plus lag", () => {
+    const schedule = computeSchedule(project(a, task("b", { userStart: "2026-06-01" }), link("a", "b", 2, "SS")), june);
+    expect(datesOf(schedule, "b")?.start).toBe("2026-06-03");
+  });
+
+  it("FF ends the follower when the predecessor ends", () => {
+    const schedule = computeSchedule(project(a, task("b", { userStart: "2026-06-01", duration: 2 }), link("a", "b", 0, "FF")), june);
+    expect(datesOf(schedule, "b")).toEqual({ start: "2026-06-04", end: "2026-06-05" });
+  });
+
+  it("FF on the follower's own calendar", () => {
+    const b = task("b", { userStart: "2026-06-01", duration: 2, resourceId: "bo" });
+    const schedule = computeSchedule(project(a, b, link("a", "b", 0, "FF")), june);
+    expect(datesOf(schedule, "b")?.end).toBe("2026-06-08");
+  });
+
+  it("FF adds its lag to the end", () => {
+    const schedule = computeSchedule(project(a, task("b", { userStart: "2026-06-01", duration: 2 }), link("a", "b", 1, "FF")), june);
+    expect(datesOf(schedule, "b")).toEqual({ start: "2026-06-05", end: "2026-06-08" });
+  });
+
+  it("the strictest of several links wins", () => {
+    const schedule = computeSchedule(
+      project(
+        task("a1", { userStart: "2026-06-01", duration: 2 }), // ends Tue 2
+        task("a2", { userStart: "2026-06-04", duration: 1 }), // starts Thu 4
+        task("b", { userStart: "2026-06-01" }),
+        link("a1", "b"),
+        link("a2", "b", 0, "SS"),
+      ),
+      june,
+    );
+    expect(datesOf(schedule, "b")?.start).toBe("2026-06-04");
+  });
+
+  it("half days", () => {
+    const halfA = task("a", { userStart: "2026-06-01", duration: 2.5 }); // ends at midday Wed 3
+    const twoDays = computeSchedule(project(halfA, task("b", { userStart: "2026-06-01", duration: 2 }), link("a", "b", 0, "FF")), june);
+    expect(halvesOf(twoDays, "b")).toEqual({ start: "2026-06-01 pm", end: "2026-06-03 am" });
+    const oneAndHalf = computeSchedule(project(halfA, task("b", { userStart: "2026-06-01", duration: 1.5 }), link("a", "b", 0, "FF")), june);
+    expect(halvesOf(oneAndHalf, "b")).toEqual({ start: "2026-06-02 am", end: "2026-06-03 am" });
+  });
+
+  it("FF into a milestone", () => {
+    const schedule = computeSchedule(project(a, task("m", { userStart: "2026-06-01", duration: 0 }), link("a", "m", 0, "FF")), june);
+    expect(datesOf(schedule, "m")).toEqual({ start: "2026-06-05", end: "2026-06-05" });
+  });
+
+  const parent = [
+    task("p"),
+    task("c1", { parentId: "p", userStart: "2026-06-01", duration: 3 }), // Mon 1 – Wed 3
+    task("c2", { parentId: "p", userStart: "2026-06-02", duration: 2 }), // Tue 2 – Wed 3
+    task("x", { userStart: "2026-06-08", duration: 5 }), // Mon 8 – Fri 12
+    link("x", "p", 0, "FF"),
+  ];
+
+  it("FF onto a parent stretches it, not its subtasks", () => {
+    const schedule = computeSchedule(project(section("s"), ...parent), june);
+    expect(datesOf(schedule, "p")).toEqual({ start: "2026-06-01", end: "2026-06-12" });
+    expect(datesOf(schedule, "c1")).toEqual({ start: "2026-06-01", end: "2026-06-03" });
+    expect(datesOf(schedule, "c2")).toEqual({ start: "2026-06-02", end: "2026-06-03" });
+  });
+
+  it("the stretch goes away when a subtask ends later", () => {
+    const later = task("c3", { parentId: "p", userStart: "2026-06-15", duration: 2 }); // Mon 15 – Tue 16
+    expect(datesOf(computeSchedule(project(...parent, later), june), "p")).toEqual({ start: "2026-06-01", end: "2026-06-16" });
+  });
+
+  it("FF onto a parent without scheduled subtasks leaves it unscheduled", () => {
+    const state = project(task("p"), task("c", { parentId: "p" }), task("x", { userStart: "2026-06-08" }), link("x", "p", 0, "FF"));
+    expect(datesOf(computeSchedule(state, june), "p")).toBeNull();
+  });
+
+  it("SS onto a parent pushes its subtasks", () => {
+    const schedule = computeSchedule(
+      project(
+        task("x", { userStart: "2026-06-03", duration: 5 }),
+        task("p"),
+        link("x", "p", 1, "SS"),
+        task("c1", { parentId: "p", userStart: "2026-06-01" }),
+        task("c2", { parentId: "p", userStart: "2026-06-08" }),
+      ),
+      june,
+    );
+    expect(datesOf(schedule, "c1")?.start).toBe("2026-06-04");
+    expect(datesOf(schedule, "c2")?.start).toBe("2026-06-08");
+  });
+
+  it("FF onto a parent does not push its subtasks", () => {
+    const state = project(...parent);
+    const c1 = state.rows.c1 as TaskRow;
+    expect(constraintsFor(state, c1)).toEqual([]);
+  });
+
+  it("violatedLinks", () => {
+    const state = project(
+      task("a", { userStart: "2026-06-01", duration: 2 }), // Mon 1 – Tue 2
+      task("c", { userStart: "2026-06-01", duration: 5 }), // Mon 1 – Fri 5
+      task("b", { userStart: "2026-06-03", duration: 2, locked: true }), // Wed 3 – Thu 4
+      link("a", "b"),
+      link("c", "b", 0, "FF"),
+    );
+    const schedule = computeSchedule(state, june);
+    expect(schedule.get("b")?.violation).toBe(true);
+    expect(violatedLinks(state, june, schedule)).toEqual(new Set([linkKey(link("c", "b", 0, "FF"))]));
+  });
+
+  it("violatedLinks is empty when every locked task keeps its links", () => {
+    const state = project(a, task("b", { userStart: "2026-06-01", locked: true }), link("a", "b", 0, "SS"));
+    const schedule = computeSchedule(state, june);
+    expect(schedule.get("b")?.violation).toBe(false);
+    expect(violatedLinks(state, june, schedule).size).toBe(0);
+  });
+});
+
 describe("cycles", () => {
   it("detects a direct cycle", () => {
     const state = project(
@@ -191,6 +312,22 @@ describe("cycles", () => {
       link("a", "c"),
     );
     expect(hasCycle(state, cal)).toBe(false);
+  });
+
+  it("detects cycles across kinds", () => {
+    const state = project(task("a", { userStart: "2026-10-05" }), task("b", { userStart: "2026-10-05" }), link("a", "b"), link("b", "a", 0, "SS"));
+    expect(() => computeSchedule(state, cal)).toThrow(CycleError);
+  });
+
+  it("detects cycles through an FF link into a parent", () => {
+    const state = project(
+      task("p"),
+      task("c", { parentId: "p", userStart: "2026-10-05" }),
+      task("x", { userStart: "2026-10-05" }),
+      link("x", "p", 0, "FF"),
+      link("p", "x"),
+    );
+    expect(() => computeSchedule(state, cal)).toThrow(CycleError);
   });
 
   it("detects cycles of three tasks", () => {

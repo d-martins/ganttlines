@@ -157,12 +157,12 @@ function assertScheduleInvariants(state: ProjectState, calendar: Calendar): void
     else expect(calendar.workingHalvesBetween(start, spanEnd(span), resource) + 1).toBe(row.duration * 2);
     if (row.locked) continue;
     expect(start).toBeGreaterThanOrEqual(calendar.snapHalf(halfDay(toDay(row.userStart), row.startsAfternoon), resource));
-    for (const { predecessorId, offset } of constraintsFor(state, row)) {
+    for (const { predecessorId, lag } of constraintsFor(state, row)) {
       const predecessor = schedule.get(predecessorId)?.span;
       if (!predecessor) continue;
       expect(start).toBeGreaterThan(spanStart(predecessor));
       expect(start).toBeGreaterThanOrEqual(floorStart(calendar, predecessor, resource));
-      expect(start).toBeGreaterThanOrEqual(calendar.addWorkingHalves(naturalStart(calendar, predecessor, resource), offset * 2, resource));
+      expect(start).toBeGreaterThanOrEqual(calendar.addWorkingHalves(naturalStart(calendar, predecessor, resource), lag * 2, resource));
     }
   }
 }
