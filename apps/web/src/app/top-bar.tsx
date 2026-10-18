@@ -11,10 +11,13 @@ import { useTheme, type ThemePreference } from "../theme";
 import { Avatar } from "../ui/avatar";
 import { Menu, MenuItem, MenuLabel, MenuRadio, MenuSeparator } from "../ui/menu";
 import { ThemeToggle } from "./theme-toggle";
-import { signInElsewhere } from "../workspace";
+import { localOnly, signInElsewhere } from "../workspace";
 import { LOCAL_PERSON } from "../workspace/local";
 
 /** Stand-in store while no board is open (hooks can't be skipped). */
+/** Where the code lives (linked from the local-only build, e.g. the public demo). */
+const SOURCE_URL = "https://github.com/d-martins/ganttlines";
+
 const EMPTY = createStore<{ project?: { name: string } } | null>(() => null);
 
 const THEMES: { value: ThemePreference; label: string }[] = [
@@ -52,6 +55,17 @@ export function TopBar({ user, signIn, signOutTo }: { user: UserDto; signIn: boo
       <h1 className="max-w-64 min-w-12 shrink-0 truncate text-sm font-semibold">{title}</h1>
       {shownBoard ? <BoardTools sync={shownBoard} /> : null}
       <div className="ml-auto flex shrink-0 items-center gap-2">
+        {localOnly() ? (
+          <a
+            href={SOURCE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="GanttLines on GitHub"
+            className="rounded-md px-2 py-1 text-sm font-medium hover:bg-surface-2"
+          >
+            GitHub
+          </a>
+        ) : null}
         <ThemeToggle />
         {user.id === LOCAL_PERSON.id ? (
           signIn ? (

@@ -4,6 +4,9 @@ A self-hostable Gantt planner in the spirit of Instagantt: a task list and a tim
 live collaboration, dependencies that push dates, working-day calendars with holidays and time off,
 baselines and share links. One app container plus PostgreSQL.
 
+**Try it at [ganttlines.com](https://ganttlines.com)**: the full planner running in your browser,
+no account needed (your work is saved in that browser only).
+
 ## Run it
 
 You need Docker with Compose v2.20 or newer. Only `docker-compose.yml` and `.env` are needed on
