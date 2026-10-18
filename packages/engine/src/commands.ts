@@ -12,6 +12,7 @@ import {
   floorStart,
   indexByFollower,
   linkFloor,
+  linkRequirement,
   naturalStart,
   requiredStart,
   spanEnd,
@@ -436,9 +437,11 @@ class Execution {
   /**
    * Clamps `half` to the floor of each of `task`'s own links with a scheduled predecessor (FS: the
    * day after the predecessor starts; SS: its start; FF: the start that ends with it) and records
-   * the drop on those links: an FS lag becomes the overlap with the predecessor's natural start (in
-   * days, 0 when it starts at or after it); SS and FF lags go back to 0. FF links into a parent
-   * stretch it instead, so they are left alone, as they are with `keepFinish`.
+   * the drop on the links that hold it back: their lag becomes the one that starts it exactly there
+   * (FS: the overlap with the predecessor's natural start, in days; SS and FF: never below 0). Links
+   * that don't hold it back keep their lag, except an FS overlap, which shrinks back toward 0 (it
+   * never overlaps more than the drop). FF links into a parent stretch it instead, so they are left
+   * alone, as they are with `keepFinish`.
    */
   private anchor(
     task: TaskRow,
@@ -459,8 +462,16 @@ class Execution {
     let clamped = half;
     for (const { link, span } of anchored) clamped = Math.max(clamped, linkFloor(this.calendar, follower, link, span));
     for (const { link, span } of anchored) {
-      const overlap = this.calendar.workingHalvesBetween(naturalStart(this.calendar, span, resource), clamped, resource) / 2;
-      this.patchLink(link, { lag: link.kind === "FS" ? Math.min(0, overlap) : 0 });
+      const required = linkRequirement(this.calendar, follower, link, span);
+      const holdsBack = required > clamped;
+      if (link.kind === "FS") {
+        if (!holdsBack && link.lag > 0) continue;
+        const overlap = this.calendar.workingHalvesBetween(naturalStart(this.calendar, span, resource), clamped, resource) / 2;
+        this.patchLink(link, { lag: holdsBack ? overlap : Math.min(0, overlap) });
+      } else if (holdsBack) {
+        const excess = this.calendar.workingHalvesBetween(clamped, required, resource) / 2;
+        this.patchLink(link, { lag: Math.max(0, link.lag - excess) });
+      }
     }
     return clamped;
   }

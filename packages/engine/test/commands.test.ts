@@ -742,7 +742,7 @@ describe("moveTask with links of every kind", () => {
     expect(state.links["b|a|SS"]?.lag).toBe(0);
   });
 
-  it("dragging a follower later resets SS/FF lags to 0 and FS lags to 0", () => {
+  it("dragging a follower later keeps the delays of links that don't hold it back", () => {
     const state = run(
       project(
         task("a1", { userStart: "2026-10-05" }),
@@ -756,9 +756,40 @@ describe("moveTask with links of every kind", () => {
       cal,
       { type: "moveTask", id: "b", start: "2026-10-12" },
     );
-    expect(Object.values(state.links).map((l) => l.lag)).toEqual([0, 0, 0]);
+    expect(state.links).toMatchObject({ "b|a1|FS": { lag: 1 }, "b|a2|SS": { lag: 2 }, "b|a3|FF": { lag: 1 } });
     expect(taskIn(state, "b").userStart).toBe("2026-10-12");
     expect(datesIn(state, "b")?.start).toBe("2026-10-12");
+  });
+
+  it("an SS delay that holds the task back shrinks so it lands where it was dropped", () => {
+    const linked = project(task("a", { userStart: "2026-10-05" }), task("b", { userStart: "2026-10-05" }), link("a", "b", 2, "SS")); // b shown Wed 7
+    const later = run(linked, cal, { type: "moveTask", id: "b", start: "2026-10-09" });
+    expect(later.links["b|a|SS"]?.lag).toBe(2);
+    expect(datesIn(later, "b")?.start).toBe("2026-10-09");
+    const earlier = run(linked, cal, { type: "moveTask", id: "b", start: "2026-10-06" });
+    expect(earlier.links["b|a|SS"]?.lag).toBe(1);
+    expect(datesIn(earlier, "b")?.start).toBe("2026-10-06");
+  });
+
+  it("an FF delay that holds the task back shrinks so it lands where it was dropped", () => {
+    const a = task("a", { userStart: "2026-10-05", duration: 5 }); // Mon 5 – Fri 9
+    const linked = project(a, task("b", { userStart: "2026-10-05" }), link("a", "b", 2, "FF")); // b shown Tue 13
+    const later = run(linked, cal, { type: "moveTask", id: "b", start: "2026-10-15" });
+    expect(later.links["b|a|FF"]?.lag).toBe(2);
+    expect(datesIn(later, "b")?.start).toBe("2026-10-15");
+    const earlier = run(linked, cal, { type: "moveTask", id: "b", start: "2026-10-12" });
+    expect(earlier.links["b|a|FF"]?.lag).toBe(1);
+    expect(datesIn(earlier, "b")?.start).toBe("2026-10-12");
+  });
+
+  it("a positive FS delay survives a drag later, and shrinks when it holds the task back", () => {
+    const linked = project(task("a", { userStart: "2026-10-05" }), task("b", { userStart: "2026-10-05" }), link("a", "b", 2)); // b shown Thu 8
+    const later = run(linked, cal, { type: "moveTask", id: "b", start: "2026-10-12" });
+    expect(lagOf(later, "b")).toBe(2);
+    expect(datesIn(later, "b")?.start).toBe("2026-10-12");
+    const earlier = run(linked, cal, { type: "moveTask", id: "b", start: "2026-10-07" });
+    expect(lagOf(earlier, "b")).toBe(1);
+    expect(datesIn(earlier, "b")?.start).toBe("2026-10-07");
   });
 
   it("a drag keeps the walkthrough's single-FS behaviour", () => {
