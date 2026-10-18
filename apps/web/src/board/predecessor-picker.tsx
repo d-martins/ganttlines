@@ -1,9 +1,7 @@
 import type { ProjectState, RowId, Schedule, TaskRow } from "@ganttlines/engine";
 import type { ReactNode } from "react";
 import { SearchSelect, type SearchOption } from "../ui/search-select";
-import { useBoard } from "./board-context";
 import { formatDay } from "./format";
-import { setPredecessor } from "./list/list-actions";
 
 /** "Oct 5" or "Oct 5 – Oct 9", for telling tasks apart in the list. */
 function datesOf(schedule: Schedule | null, id: RowId): string | undefined {
@@ -18,6 +16,8 @@ function datesOf(schedule: Schedule | null, id: RowId): string | undefined {
  */
 export function PredecessorPicker({
   task,
+  current,
+  onPick,
   state,
   schedule,
   numbers,
@@ -26,6 +26,9 @@ export function PredecessorPicker({
   onOpenChange,
 }: {
   task: TaskRow;
+  /** the predecessor shown as chosen */
+  current: RowId | null;
+  onPick: (id: RowId | null) => void;
   state: ProjectState;
   schedule: Schedule | null;
   numbers: ReadonlyMap<RowId, number>;
@@ -33,9 +36,7 @@ export function PredecessorPicker({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
-  const board = useBoard();
   const numberOf = (id: RowId) => numbers.get(id) ?? 0;
-  const pick = (id: RowId | null) => setPredecessor(board, task, id);
   const options = (query: string): SearchOption[] => {
     const needle = query.replace(/^#/, "").toLocaleLowerCase();
     const tasks = Object.values(state.rows)
@@ -43,13 +44,13 @@ export function PredecessorPicker({
       .filter((row) => !needle || String(numberOf(row.id)).startsWith(needle) || row.title.toLocaleLowerCase().includes(needle))
       .sort((a, b) => numberOf(a.id) - numberOf(b.id));
     return [
-      ...(needle ? [] : [{ key: "none", label: "No predecessor", current: task.predecessorId === null, onChoose: () => pick(null) }]),
+      ...(needle ? [] : [{ key: "none", label: "No predecessor", current: current === null, onChoose: () => onPick(null) }]),
       ...tasks.map((row) => ({
         key: row.id,
         label: `#${numberOf(row.id)} ${row.title || "Untitled"}`,
         ...(datesOf(schedule, row.id) ? { detail: datesOf(schedule, row.id)! } : {}),
-        current: row.id === task.predecessorId,
-        onChoose: () => pick(row.id),
+        current: row.id === current,
+        onChoose: () => onPick(row.id),
       })),
     ];
   };

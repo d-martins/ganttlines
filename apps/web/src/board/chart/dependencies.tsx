@@ -1,4 +1,5 @@
-import type { BoardRow } from "../model";
+import { linkKey } from "@ganttlines/engine";
+import type { BoardModel, BoardRow } from "../model";
 import type { BarStyle } from "../view-store";
 import { extent, halfHeight, shapeOf, ROW_HEIGHT } from "./bars";
 import type { Timeline } from "./timeline";
@@ -25,12 +26,14 @@ export function elbow(from: { left: number; right: number; y: number; half: numb
 /** Dependency arrows between shown rows that touch the rendered window [firstRow, lastRow). */
 export function Dependencies({
   rows,
+  links,
   firstRow,
   lastRow,
   timeline,
   style,
 }: {
   rows: readonly BoardRow[];
+  links: BoardModel["links"];
   firstRow: number;
   lastRow: number;
   timeline: Timeline;
@@ -39,18 +42,19 @@ export function Dependencies({
   const rowHeight = ROW_HEIGHT[style];
   const index = new Map(rows.map((entry, i) => [entry.row.id, i]));
   const paths: { key: string; d: string; violation: boolean }[] = [];
-  rows.forEach((entry, to) => {
-    const { row } = entry;
-    if (row.kind !== "task" || !row.predecessorId || !entry.span) return;
-    const from = index.get(row.predecessorId);
-    const predecessor = from === undefined ? undefined : rows[from];
-    if (!predecessor?.span || Math.max(from!, to) < firstRow || Math.min(from!, to) >= lastRow) return;
+  for (const { link, violation } of links) {
+    const from = index.get(link.predecessorId);
+    const to = index.get(link.followerId);
+    if (from === undefined || to === undefined) continue;
+    const predecessor = rows[from]!;
+    const entry = rows[to]!;
+    if (!predecessor.span || !entry.span || Math.max(from, to) < firstRow || Math.min(from, to) >= lastRow) continue;
     const start = extent(predecessor.kind, predecessor.span, timeline, style);
     const end = extent(entry.kind, entry.span, timeline, style);
     const y = (i: number) => i * rowHeight + rowHeight / 2;
-    const d = elbow({ ...start, y: y(from!), half: halfHeight(shapeOf(predecessor), style) }, { left: end.left, y: y(to) }, rowHeight);
-    paths.push({ key: row.id, d, violation: entry.violation });
-  });
+    const d = elbow({ ...start, y: y(from), half: halfHeight(shapeOf(predecessor), style) }, { left: end.left, y: y(to) }, rowHeight);
+    paths.push({ key: linkKey(link), d, violation });
+  }
   return (
     <svg aria-hidden className="pointer-events-none absolute top-0 left-0 overflow-visible" width={timeline.width} height={rows.length * rowHeight}>
       <defs>

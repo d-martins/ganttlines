@@ -10,7 +10,7 @@ export function task(id: string, fields: Partial<TaskRow> = {}): TaskRow {
 }
 
 function stateDto(version: number, rows = [task("a")]): ProjectStateDto {
-  return { project: { id: PROJECT, name: "Launch", version, archived: false }, rows };
+  return { project: { id: PROJECT, name: "Launch", version, archived: false }, rows, links: [] };
 }
 
 class FakeSocket implements SocketLike {
@@ -76,9 +76,14 @@ describe("BoardSync", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
+  it("board-sync joins with protocol 2", async () => {
+    const { sockets } = await started();
+    expect(sockets[0]!.sent[0]).toMatchObject({ type: "join", protocol: 2 });
+  });
+
   it("loads the state, then joins with its version", async () => {
     const { sync, sockets } = await started(3);
-    expect(sockets[0]!.sent).toEqual([{ type: "join", projectId: PROJECT, version: 3 }]);
+    expect(sockets[0]!.sent).toEqual([{ type: "join", projectId: PROJECT, version: 3, protocol: 2 }]);
     expect(sync.state.status).toBe("loading");
     sockets[0]!.deliver(joined(3));
     expect(sync.state.status).toBe("live");
@@ -112,7 +117,7 @@ describe("BoardSync", () => {
     socket.deliver(joined(3));
     socket.deliver(retitle(5, "five"));
     expect(sync.state.version).toBe(3);
-    expect(socket.sent.at(-1)).toEqual({ type: "join", projectId: PROJECT, version: 3 });
+    expect(socket.sent.at(-1)).toEqual({ type: "join", projectId: PROJECT, version: 3, protocol: 2 });
   });
 
   it("refetches the state on reload and keeps newer held patches", async () => {
@@ -137,7 +142,7 @@ describe("BoardSync", () => {
     expect(sockets).toHaveLength(1);
     vi.advanceTimersByTime(1);
     sockets[1]!.open();
-    expect(sockets[1]!.sent).toEqual([{ type: "join", projectId: PROJECT, version: 4 }]);
+    expect(sockets[1]!.sent).toEqual([{ type: "join", projectId: PROJECT, version: 4, protocol: 2 }]);
     sockets[1]!.drop(); // it had opened, so the delay starts over
     vi.advanceTimersByTime(100);
     expect(sockets).toHaveLength(3);
@@ -260,7 +265,7 @@ describe("BoardSync", () => {
       sockets[1]!.open();
       sockets[1]!.deliver(joined(3));
       expect(sockets[1]!.sent).toEqual([
-        { type: "join", projectId: PROJECT, version: 3 },
+        { type: "join", projectId: PROJECT, version: 3, protocol: 2 },
         command("id1"),
         { type: "command", commandId: "id3", command: { ...rename, title: "offline" } },
       ]);

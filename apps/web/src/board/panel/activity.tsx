@@ -1,4 +1,4 @@
-import { toDay, type ProjectState, type RowChange } from "@ganttlines/engine";
+import { isLinkChange, toDay, type ProjectState, type RowChange } from "@ganttlines/engine";
 import type { ActivityEntryDto, ResourceDto } from "@ganttlines/protocol";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { errorMessage } from "../../api/client";
@@ -53,7 +53,7 @@ export function describeChange(change: RowChange, names: Names): string | null {
 
 /** What an entry did to this row, e.g. "moved it in the list, renamed it to “Hooks”". */
 export function describeEntry(entry: ActivityEntryDto, names: Names): string {
-  const phrases = [...new Set(entry.changes.map((change) => describeChange(change, names)).filter((phrase): phrase is string => phrase !== null))];
+  const phrases = [...new Set(entry.changes.map((change) => (isLinkChange(change) ? null : describeChange(change, names))).filter((phrase): phrase is string => phrase !== null))];
   const what = phrases.join(", ") || "changed it";
   return entry.name === "undo" ? `undid a change (${what})` : entry.name === "redo" ? `redid a change (${what})` : what;
 }

@@ -58,4 +58,10 @@ describe("upgrading local records", () => {
     expect(upgradeWorkspaceRecord(workspace)).toEqual(workspace);
     expect(upgradeWorkspaceRecord({ ...workspace, version: 1 })).toEqual(workspace);
   });
+
+  it("it leaves a malformed record unchanged instead of throwing", () => {
+    const noRows = { id: "p", name: "Launch" };
+    expect(upgradeProjectRecord(noRows)).toBe(noRows);
+    expect(upgradeProjectRecord(null)).toBeNull();
+  });
 });

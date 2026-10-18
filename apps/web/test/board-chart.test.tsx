@@ -129,7 +129,7 @@ describe("chart editing", () => {
     const bullet = within(bar(/^ui,/).parentElement!).getByTitle("Drag onto another task to link them");
     // rows are 30 px tall: hooks is the third row (index 2)
     drag(bullet, 500, 600, 2 * 30 + 15);
-    expect(sentCommands()).toEqual([{ type: "linkTasks", fromId: "ui", toId: "hooks" }]);
+    expect(sentCommands()).toEqual([{ type: "addLink", predecessorId: "ui", followerId: "hooks", kind: "FS" }]);
   });
 
   it("works from the keyboard: arrows move or resize, Enter opens the options", async () => {

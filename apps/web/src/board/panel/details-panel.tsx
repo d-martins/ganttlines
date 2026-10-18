@@ -9,7 +9,6 @@ import { RichTextEditor } from "../../ui/rich-text";
 import { toast } from "../../ui/toast";
 import { IconButton } from "../../ui/button";
 import { AssigneePicker } from "../assignee-picker";
-import { PredecessorPicker } from "../predecessor-picker";
 import { useBoard, useRun } from "../board-context";
 import { formatDay, taskColors } from "../format";
 import { formatDays } from "../chart/bars";
@@ -298,8 +297,6 @@ function TaskFields({ task, isParent, schedule, numbers }: { task: TaskRow; isPa
   const actualSum = isParent ? actualDaysOf(state, buildTree(state), task.id) : null;
   const milestone = leaf && task.duration === 0;
   const datesLocked = leaf && task.locked;
-  const predecessor = task.predecessorId ? state.rows[task.predecessorId] : undefined;
-  const predecessorLabel = predecessor ? `#${numbers.get(predecessor.id)} ${predecessor.title || "Untitled"}` : "None";
 
   return (
     <div className="flex flex-col gap-2">
@@ -400,23 +397,6 @@ function TaskFields({ task, isParent, schedule, numbers }: { task: TaskRow; isPa
           <span className="text-muted">{formatDays(actualSum)} (from its subtasks)</span>
         </Field>
       ) : null}
-      <Field label="Predecessor">
-        {canEdit ? (
-          <PredecessorPicker
-            task={task}
-            state={state}
-            schedule={schedule}
-            numbers={numbers}
-            trigger={
-              <button type="button" aria-label={`Predecessor: ${predecessorLabel}`} className={`${INPUT} truncate text-left`}>
-                {predecessorLabel}
-              </button>
-            }
-          />
-        ) : (
-          <span>{predecessorLabel}</span>
-        )}
-      </Field>
       <Field label="Color">
         <div role="radiogroup" aria-label="Color" className="flex flex-wrap gap-1">
           {TASK_COLORS.map((color) => (

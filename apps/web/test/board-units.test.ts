@@ -1,10 +1,11 @@
-import { toDay, weekday } from "@ganttlines/engine";
+import { Calendar, linkKey, toDay, weekday, type Link } from "@ganttlines/engine";
 import { describe, expect, it } from "vitest";
 import { elbow } from "../src/board/chart/dependencies";
 import { chartRange, Timeline } from "../src/board/chart/timeline";
 import { dropMove } from "../src/board/list/list-actions";
+import { boardModel } from "../src/board/model";
 import { outline } from "../src/board/rows";
-import { section, task } from "./board-fixtures";
+import { CALENDAR, section, task } from "./board-fixtures";
 
 const FRI = toDay("2026-10-09");
 const weekend = (day: number) => weekday(day) === 0 || weekday(day) === 6;
@@ -51,6 +52,7 @@ describe("outline", () => {
           b: task("b", { position: "b0" }),
           c: task("c", { parentId: "b", position: "a0" }),
         },
+        links: {},
       },
       undefined,
       new Set(["s"]),
@@ -63,6 +65,33 @@ describe("outline", () => {
     expect(numbers.get("a")).toBe(2);
     expect(visible[0]!.collapsed).toBe(true);
     expect(visible[1]!.isParent).toBe(true);
+  });
+});
+
+describe("board model", () => {
+  it("boardModel lists links between shown rows and marks the violated one", () => {
+    const fs: Link = { predecessorId: "a", followerId: "b", kind: "FS", lag: 0 };
+    // Locked to start the day after "a" starts, before it finishes: the FS link is broken, the SS one holds.
+    const ss: Link = { predecessorId: "a", followerId: "b", kind: "SS", lag: 0 };
+    const hidden: Link = { predecessorId: "a", followerId: "c", kind: "FS", lag: 0 };
+    const state = {
+      rows: {
+        a: task("a", { position: "a0", userStart: "2026-10-12", duration: 3 }),
+        b: task("b", { position: "a1", userStart: "2026-10-13", duration: 1, locked: true }),
+        s: section("s", { position: "a2" }),
+        c: task("c", { parentId: "s", position: "a0", userStart: "2026-10-20" }),
+      },
+      links: Object.fromEntries([fs, ss, hidden].map((link) => [linkKey(link), link])),
+    };
+    const model = boardModel(state, new Calendar(CALENDAR), null, "", new Set(["s"]));
+    expect(model.rows.map((entry) => entry.row.id)).toEqual(["a", "b", "s"]);
+    expect(model.links).toEqual(
+      expect.arrayContaining([
+        { link: fs, violation: true },
+        { link: ss, violation: false },
+      ]),
+    );
+    expect(model.links).toHaveLength(2); // "c" is collapsed away: its link isn't drawn
   });
 });
 
@@ -98,6 +127,7 @@ describe("list edits", () => {
         b: task("b", { parentId: "s", position: "a1" }),
         c: task("c", { position: "b0" }),
       },
+      links: {},
     };
     expect(dropMove(state, "c", state.rows.b, "before")).toEqual({ parentId: "s", afterId: "a" });
     expect(dropMove(state, "c", state.rows.a, "before")).toEqual({ parentId: "s", afterId: null });
@@ -105,7 +135,7 @@ describe("list edits", () => {
     expect(dropMove(state, "a", state.rows.c, "after")).toEqual({ parentId: null, afterId: "c" });
     expect(dropMove(state, "s", state.rows.a, "inside")).toBeNull(); // into itself
     expect(dropMove(state, "b", state.rows.a, "after")).toBeNull(); // already there
-    const withSection = { rows: { ...state.rows, t: section("t", { position: "c0" }) } };
+    const withSection = { rows: { ...state.rows, t: section("t", { position: "c0" }) }, links: {} };
     expect(dropMove(withSection, "t", withSection.rows.a, "inside")).toEqual({ parentId: "s", afterId: "a" }); // sections never go inside tasks: lands after it
   });
 });

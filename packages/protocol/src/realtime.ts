@@ -3,11 +3,11 @@ import { z } from "zod";
 import type { ProjectDto } from "./api";
 import type { BaselineDto, CommentDto, HighlightDto } from "./board";
 import { CommandSchema } from "./commands";
+import { PROTOCOL_VERSION } from "./constants";
+
+export { PROTOCOL_VERSION };
 
 const id = z.uuid();
-
-/** Version of the wire protocol; a client built for another version is asked to reload. */
-export const PROTOCOL_VERSION = 2;
 
 /**
  * Messages a browser sends over the WebSocket (`/ws`). A connection shows one project at a time:

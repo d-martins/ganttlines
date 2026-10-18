@@ -21,18 +21,22 @@ const d = (iso: string) => formatDay(toDay(iso));
 const ROWS = [
   section("design", { position: "a0" }),
   task("ui", { parentId: "design", position: "a0", userStart: "2026-09-30", duration: 5, resourceId: ANA.id }),
-  task("hooks", { parentId: "design", position: "a1", userStart: "2026-10-01", duration: 2, predecessorId: "ui", color: "pink" }),
-  task("review", { parentId: "design", position: "a2", userStart: "2026-10-01", duration: 1, predecessorId: "ui", locked: true }),
+  task("hooks", { parentId: "design", position: "a1", userStart: "2026-10-01", duration: 2, color: "pink" }),
+  task("review", { parentId: "design", position: "a2", userStart: "2026-10-01", duration: 1, locked: true }),
   task("ms", { position: "b0", userStart: "2026-10-14", duration: 0 }),
   task("parent", { position: "c0" }),
   task("child", { parentId: "parent", position: "a0", userStart: "2026-10-12", duration: 3 }),
+];
+const LINKS: ProjectStateDto["links"] = [
+  { predecessorId: "ui", followerId: "hooks", kind: "FS", lag: 0 },
+  { predecessorId: "ui", followerId: "review", kind: "FS", lag: 0 },
 ];
 
 function openBoard(rows: ProjectStateDto["rows"] = ROWS, path = `/p/${PROJECT_ID}`) {
   FakeWebSocket.instances = [];
   vi.stubGlobal("WebSocket", FakeWebSocket);
   const api = signedIn(ADMIN, [project(PROJECT_ID, "Launch")]);
-  api.on(`GET /api/projects/${PROJECT_ID}/state`, () => ({ body: projectState(rows) }));
+  api.on(`GET /api/projects/${PROJECT_ID}/state`, () => ({ body: projectState(rows, 5, rows === ROWS ? LINKS : []) }));
   api.on("GET /api/calendar", () => ({ body: CALENDAR }));
   api.on("GET /api/resources", () => ({ body: { resources: [ANA] } }));
   api.on(`GET /api/projects/${PROJECT_ID}/highlights`, () => ({ body: { highlights: [] } }));
@@ -54,7 +58,7 @@ function openBoard(rows: ProjectStateDto["rows"] = ROWS, path = `/p/${PROJECT_ID
 async function joinedBoard(rows?: ProjectStateDto["rows"], path?: string) {
   const opened = openBoard(rows, path);
   await screen.findByRole("treegrid", { name: "Tasks" });
-  await waitFor(() => expect(FakeWebSocket.last.sent).toEqual([{ type: "join", projectId: PROJECT_ID, version: 5 }]));
+  await waitFor(() => expect(FakeWebSocket.last.sent).toEqual([{ type: "join", projectId: PROJECT_ID, version: 5, protocol: 2 }]));
   FakeWebSocket.last.deliver({ type: "joined", projectId: PROJECT_ID, version: 5, instanceVersion: 1, viewers: [] });
   return opened;
 }
@@ -146,7 +150,7 @@ describe("board", () => {
     });
     await waitFor(() => expect(listRow("Hooks v2")).toBeDefined());
     socket.deliver({ type: "patch", projectId: PROJECT_ID, version: 8, commandId: "c8", actor: { userId: null, label: "Ana" }, changes: [] });
-    expect(socket.sent.at(-1)).toEqual({ type: "join", projectId: PROJECT_ID, version: 6 });
+    expect(socket.sent.at(-1)).toEqual({ type: "join", projectId: PROJECT_ID, version: 6, protocol: 2 });
   });
 
   it("switches to roomy bars with the title inside and the full title in a tooltip", async () => {

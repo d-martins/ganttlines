@@ -3,6 +3,9 @@
  * (`@ganttlines/protocol/constants`) without bundling the request schemas.
  */
 
+/** Version of the wire protocol; a client built for another version is asked to reload. */
+export const PROTOCOL_VERSION = 2;
+
 export const ROLES = ["admin", "editor", "viewer", "guest"] as const;
 export type Role = (typeof ROLES)[number];
 

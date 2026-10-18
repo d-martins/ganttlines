@@ -1,7 +1,9 @@
-import type { LocalStore, ProjectRecord, StoredWorkspace, WorkspaceRecord } from "@ganttlines/client";
+import { upgradeProjectRecord, upgradeWorkspaceRecord, type LocalStore, type ProjectRecord, type StoredWorkspace, type WorkspaceRecord } from "@ganttlines/client";
 
 const WORKSPACE = "workspace";
 const PROJECTS = "projects";
+/** 2: projects keep their links as records of their own (version 1 kept one predecessor on each task). */
+const VERSION = 2;
 
 /** This browser's workspace in IndexedDB: one workspace record, one record per project. */
 export class IndexedDbStore implements LocalStore {
@@ -48,10 +50,36 @@ export class IndexedDbStore implements LocalStore {
     if (!this.db) {
       const opening = new Promise<IDBDatabase>((resolve, reject) => {
         if (!this.factory) throw new Error("This browser can't store data");
-        const request = this.factory.open(this.name, 1);
-        request.onupgradeneeded = () => {
-          request.result.createObjectStore(WORKSPACE);
-          request.result.createObjectStore(PROJECTS, { keyPath: "id" });
+        const request = this.factory.open(this.name, VERSION);
+        let failure: unknown = null;
+        request.onupgradeneeded = (event) => {
+          if (event.oldVersion < 1) {
+            request.result.createObjectStore(WORKSPACE);
+            request.result.createObjectStore(PROJECTS, { keyPath: "id" });
+            return;
+          }
+          // Older tabs were told to close (`onversionchange`). Every record is rewritten in this one
+          // transaction: if any of it fails, all of it is undone and the version 1 data stays as it was.
+          const tx = request.transaction!;
+          const fail = (error: unknown) => {
+            failure = error;
+            tx.abort();
+          };
+          const cursor = tx.objectStore(PROJECTS).openCursor();
+          cursor.onsuccess = () => {
+            const at = cursor.result;
+            if (!at) return;
+            try {
+              at.update(upgradeProjectRecord(at.value));
+            } catch (error) {
+              return fail(error);
+            }
+            at.continue();
+          };
+          const workspace = tx.objectStore(WORKSPACE).get(WORKSPACE);
+          workspace.onsuccess = () => {
+            if (workspace.result) tx.objectStore(WORKSPACE).put(upgradeWorkspaceRecord(workspace.result as WorkspaceRecord), WORKSPACE);
+          };
         };
         request.onsuccess = () => {
           const db = request.result;
@@ -65,7 +93,7 @@ export class IndexedDbStore implements LocalStore {
           };
           resolve(db);
         };
-        request.onerror = () => reject(request.error);
+        request.onerror = () => reject(failure ?? request.error);
       });
       // A failed open is tried again next time (e.g. storage was blocked for a moment).
       opening.catch(() => {

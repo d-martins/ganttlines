@@ -100,7 +100,7 @@ export function ChartRows({
         current = {
           rowId,
           kind,
-          command: targetId ? { type: "linkTasks", fromId: rowId, toId: targetId } : null,
+          command: targetId ? { type: "addLink", predecessorId: rowId, followerId: targetId, kind: "FS" } : null,
           line: { x1: from.right + 8, y1: absoluteIndex * rowHeight + rowHeight / 2, x2: x, y2: y },
           targetId,
         };

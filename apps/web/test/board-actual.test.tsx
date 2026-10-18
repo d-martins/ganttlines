@@ -131,7 +131,7 @@ describe("half days and actual work days", () => {
   });
 
   it("describes actual days in the history", () => {
-    const names = { state: { rows: {} }, resources: new Map() };
+    const names = { state: { rows: {}, links: {} }, resources: new Map() };
     expect(describeChange({ rowId: "t", field: "actualDuration", before: null, after: 5 }, names)).toBe("recorded 5 actual work days");
     expect(describeChange({ rowId: "t", field: "actualDuration", before: 5, after: null }, names)).toBe("cleared its actual work days");
     expect(describeChange({ rowId: "t", field: "duration", before: 2, after: 2.5 }, names)).toBe("set it to 2.5 working days");

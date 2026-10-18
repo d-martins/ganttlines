@@ -285,7 +285,7 @@ describe("rich text (comments and descriptions)", () => {
 });
 
 describe("history wording", () => {
-  const names = { state: { rows: { p: task("p", { title: "Design" }) } }, resources: new Map([[ANA.id, ANA]]) };
+  const names = { state: { rows: { p: task("p", { title: "Design" }) }, links: {} }, resources: new Map([[ANA.id, ANA]]) };
   const entry = (name: string, changes: { field: string; before: unknown; after: unknown }[]) => ({
     version: 1,
     commandId: "c",
