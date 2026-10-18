@@ -1,4 +1,4 @@
-import { isLinkChange, toDay, type ProjectState, type RowChange } from "@ganttlines/engine";
+import { isLinkChange, LINK_KIND_WORDS, toDay, type Change, type LinkChange, type ProjectState, type RowId } from "@ganttlines/engine";
 import type { ActivityEntryDto, ResourceDto } from "@ganttlines/protocol";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { errorMessage } from "../../api/client";
@@ -12,9 +12,33 @@ interface Names {
 }
 
 const quote = (text: unknown) => `“${typeof text === "string" && text ? text : "Untitled"}”`;
+const days = (n: number) => `${n} ${n === 1 ? "day" : "days"}`;
 
-/** One stored-field change of a row, as a phrase ("renamed it to “Hooks”"); null to leave out. */
-export function describeChange(change: RowChange, names: Names): string | null {
+/** A link's delay after its kind: ", 2 days later", ", overlapping 1 day", or nothing. */
+export function delayWords(lag: number): string {
+  return lag > 0 ? `, ${days(lag)} later` : lag < 0 ? `, overlapping ${days(-lag)}` : "";
+}
+
+/** A link change as seen from one of its two tasks (`rowId`); null to leave out. */
+function describeLinkChange({ link, field, after }: LinkChange, names: Names, rowId: RowId): string | null {
+  const asFollower = link.followerId === rowId;
+  if (!asFollower && link.predecessorId !== rowId) return null;
+  const otherRow = names.state.rows[asFollower ? link.predecessorId : link.followerId];
+  const other = otherRow ? quote(otherRow.title) : "a deleted task";
+  if (field === "lag") return asFollower && typeof after === "number" ? `changed the delay after ${other} to ${days(after)}` : null;
+  if (after === null) return asFollower ? `no longer waits on ${other}` : `${other} no longer waits on it`;
+  const phrase = LINK_KIND_WORDS[link.kind];
+  if (!asFollower) return `${other} now waits on it, ${phrase}`;
+  const lag = typeof after === "object" ? after.lag : 0;
+  return `now waits on ${other}, ${phrase}${delayWords(lag)}`;
+}
+
+/**
+ * One stored change, as a phrase seen from the row `rowId` ("renamed it to “Hooks”", "now waits on
+ * “Design”, after it finishes"); null to leave out.
+ */
+export function describeChange(change: Change, names: Names, rowId: RowId): string | null {
+  if (isLinkChange(change)) return describeLinkChange(change, names, rowId);
   const { field, before, after } = change;
   switch (field) {
     case "*":
@@ -33,10 +57,10 @@ export function describeChange(change: RowChange, names: Names): string | null {
       return `colored it ${String(after)}`;
     case "locked":
       return after ? "locked its dates" : "unlocked its dates";
-    case "predecessorId":
+    case "predecessorId": // (older history: a task used to have one predecessor)
       return typeof after === "string" ? `made it follow ${names.state.rows[after] ? quote(names.state.rows[after]!.title) : "a deleted task"}` : "removed its predecessor";
     case "offset":
-      return null; // offsets aren't shown anywhere (dragging a linked task records them)
+      return null; // (older history) offsets weren't shown anywhere (dragging a linked task recorded them)
     case "description":
       return "edited the description";
     case "actualDuration":
@@ -52,8 +76,8 @@ export function describeChange(change: RowChange, names: Names): string | null {
 }
 
 /** What an entry did to this row, e.g. "moved it in the list, renamed it to “Hooks”". */
-export function describeEntry(entry: ActivityEntryDto, names: Names): string {
-  const phrases = [...new Set(entry.changes.map((change) => (isLinkChange(change) ? null : describeChange(change, names))).filter((phrase): phrase is string => phrase !== null))];
+export function describeEntry(entry: ActivityEntryDto, names: Names, rowId: RowId): string {
+  const phrases = [...new Set(entry.changes.map((change) => describeChange(change, names, rowId)).filter((phrase): phrase is string => phrase !== null))];
   const what = phrases.join(", ") || "changed it";
   return entry.name === "undo" ? `undid a change (${what})` : entry.name === "redo" ? `redid a change (${what})` : what;
 }
@@ -71,7 +95,7 @@ export function Activity({ projectId, rowId, names }: { projectId: string; rowId
         {entries.map((entry) => (
           <li key={entry.version}>
             <span className="font-medium">{entry.actor.label}</span>
-            {entry.actor.linkId ? <span className="text-muted"> via share link</span> : null} {describeEntry(entry, names)}{" "}
+            {entry.actor.linkId ? <span className="text-muted"> via share link</span> : null} {describeEntry(entry, names, rowId)}{" "}
             <time dateTime={entry.createdAt} title={fullTime(entry.createdAt)} className="text-xs text-muted">
               · {timeAgo(entry.createdAt)}
             </time>

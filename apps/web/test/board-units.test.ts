@@ -1,6 +1,7 @@
 import { Calendar, linkKey, toDay, weekday, type Link } from "@ganttlines/engine";
 import { describe, expect, it } from "vitest";
 import { elbow } from "../src/board/chart/dependencies";
+import { describeChange } from "../src/board/panel/activity";
 import { chartRange, Timeline } from "../src/board/chart/timeline";
 import { dropMove } from "../src/board/list/list-actions";
 import { boardModel } from "../src/board/model";
@@ -9,6 +10,28 @@ import { CALENDAR, section, task } from "./board-fixtures";
 
 const FRI = toDay("2026-10-09");
 const weekend = (day: number) => weekday(day) === 0 || weekday(day) === 6;
+
+describe("history of links", () => {
+  const names = { state: { rows: { p: task("p", { title: "Design" }), f: task("f", { title: "Build" }) }, links: {} }, resources: new Map() };
+  const ref = { predecessorId: "p", followerId: "f", kind: "FS" as const };
+  const created = (lag: number, kind: Link["kind"] = "FS") => ({ link: { ...ref, kind }, field: "*" as const, before: null, after: { ...ref, kind, lag } });
+  const removed = { link: ref, field: "*" as const, before: { ...ref, lag: 0 }, after: null };
+  const lag = { link: ref, field: "lag" as const, before: 0, after: 3 };
+
+  it("describeChange phrases for follower and predecessor", () => {
+    expect(describeChange(created(0), names, "f")).toBe("now waits on “Design”, after it finishes");
+    expect(describeChange(created(2), names, "f")).toBe("now waits on “Design”, after it finishes, 2 days later");
+    expect(describeChange(created(-1.5), names, "f")).toBe("now waits on “Design”, after it finishes, overlapping 1.5 days");
+    expect(describeChange(created(0, "SS"), names, "f")).toBe("now waits on “Design”, once it starts");
+    expect(describeChange(removed, names, "f")).toBe("no longer waits on “Design”");
+    expect(describeChange(lag, names, "f")).toBe("changed the delay after “Design” to 3 days");
+    expect(describeChange(created(2, "FF"), names, "p")).toBe("“Build” now waits on it, can't finish before it");
+    expect(describeChange(removed, names, "p")).toBe("“Build” no longer waits on it");
+    expect(describeChange(lag, names, "p")).toBeNull();
+    const gone = { ...names, state: { rows: { f: names.state.rows.f }, links: {} } };
+    expect(describeChange(removed, gone, "f")).toBe("no longer waits on a deleted task");
+  });
+});
 
 describe("Timeline", () => {
   it("maps days to pixels, inclusive of the end day", () => {

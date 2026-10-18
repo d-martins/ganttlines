@@ -13,6 +13,12 @@ const ROWS = [
   task("hooks", { parentId: "x", position: "a1", userStart: "2026-10-12", duration: 2, resourceId: ANA.id }),
 ];
 
+const LINK_ROWS = [...ROWS, task("qa", { parentId: "x", position: "a2", userStart: "2026-10-20", duration: 1 })];
+const LINKS: ProjectStateDto["links"] = [
+  { predecessorId: "ui", followerId: "hooks", kind: "FS", lag: 2 },
+  { predecessorId: "hooks", followerId: "qa", kind: "SS", lag: 0 },
+];
+
 const comment = (id: string, fields: Partial<CommentDto> = {}): CommentDto => ({
   id,
   taskId: "hooks",
@@ -25,11 +31,11 @@ const comment = (id: string, fields: Partial<CommentDto> = {}): CommentDto => ({
   ...fields,
 });
 
-async function panelBoard(rows: ProjectStateDto["rows"] = ROWS, user = ADMIN, comments: CommentDto[] = []) {
+async function panelBoard(rows: ProjectStateDto["rows"] = ROWS, user = ADMIN, comments: CommentDto[] = [], links: ProjectStateDto["links"] = []) {
   FakeWebSocket.instances = [];
   vi.stubGlobal("WebSocket", FakeWebSocket);
   const api = signedIn(user, [project(PROJECT_ID, "Launch")]);
-  api.on(`GET /api/projects/${PROJECT_ID}/state`, () => ({ body: projectState(rows) }));
+  api.on(`GET /api/projects/${PROJECT_ID}/state`, () => ({ body: projectState(rows, 5, links) }));
   api.on("GET /api/calendar", () => ({ body: CALENDAR }));
   api.on("GET /api/resources", () => ({ body: { resources: [ANA] } }));
   api.on(`GET /api/projects/${PROJECT_ID}/highlights`, () => ({ body: { highlights: [] } }));
@@ -65,6 +71,7 @@ const rowOf = (title: string) => screen.getAllByRole("row").find((candidate) => 
 /** Opens a row: a double-click on its number in the list (selects it, reveals its bar and opens the panel). */
 const selectRow = async (user: ReturnType<typeof import("@testing-library/user-event").default.setup>, title: string) => {
   await user.dblClick(rowOf(title).querySelector('[aria-label^="Row "]')!);
+  await screen.findByRole("complementary", { name: /^Details of/ }); // (the panel is a separate download)
 };
 
 describe("details panel", () => {
@@ -88,10 +95,9 @@ describe("details panel", () => {
     await user.clear(days);
     await user.type(days, "4{Enter}");
     expect(sentCommands().at(-1)).toEqual({ type: "setDuration", id: "hooks", duration: 4 });
-    await user.click(within(panel()).getByRole("button", { name: "Predecessor: None" }));
-    await user.type(screen.getByRole("combobox", { name: "Find a predecessor" }), "ui{Enter}");
-    expect(sentCommands().at(-1)).toEqual({ type: "linkTasks", fromId: "ui", toId: "hooks" });
-    expect(within(panel()).queryByRole("spinbutton", { name: /offset/i })).not.toBeInTheDocument();
+    await user.click(within(panel()).getByRole("button", { name: "Add link" }));
+    await user.type(screen.getByRole("combobox", { name: "Find a task to link" }), "ui{Enter}");
+    expect(sentCommands().at(-1)).toEqual({ type: "addLink", predecessorId: "ui", followerId: "hooks", kind: "FS" });
     await user.type(within(panel()).getByRole("textbox", { name: "Description" }), "Billing events");
     await user.click(title); // leaving the description saves it
     expect(sentCommands().at(-1)).toEqual({ type: "setDescription", id: "hooks", description: "Billing events" });
@@ -255,11 +261,85 @@ describe("details panel", () => {
     expect(within(panel()).getByText("via share link")).toBeInTheDocument();
   });
 
+  it("the Links section lists waits-on and needed-by with kinds in words", async () => {
+    const { user } = await panelBoard(LINK_ROWS, ADMIN, [], LINKS);
+    await selectRow(user, "hooks");
+    const waitsOn = within(panel()).getByRole("group", { name: "Waits on" });
+    const [first] = within(waitsOn).getAllByRole("listitem");
+    expect(within(first!).getByRole("button", { name: "#2 ui" })).toBeInTheDocument();
+    expect(within(first!).getByRole("combobox", { name: "Link kind" })).toHaveDisplayValue("after it finishes");
+    expect(within(first!).getByRole("spinbutton", { name: "Delay in days" })).toHaveValue(2);
+    const neededBy = within(panel()).getByRole("group", { name: "Needed by" });
+    const [line] = within(neededBy).getAllByRole("listitem");
+    expect(within(line!).getByRole("button", { name: "#4 qa" })).toBeInTheDocument();
+    expect(within(line!).getByRole("combobox", { name: "Link kind" })).toHaveDisplayValue("once it starts");
+    expect(within(line!).getAllByRole("option").map((option) => option.textContent)).toEqual(["after it finishes", "once it starts", "can't finish before it"]);
+    await user.click(within(first!).getByRole("button", { name: "#2 ui" })); // goes to the linked task
+    expect(panel()).toHaveAccessibleName("Details of “ui”");
+    expect(within(within(panel()).getByRole("group", { name: "Needed by" })).getByRole("button", { name: "#3 hooks" })).toBeInTheDocument();
+  });
+
+  it("changing the kind sends updateLink with newKind", async () => {
+    const { user } = await panelBoard(LINK_ROWS, ADMIN, [], LINKS);
+    await selectRow(user, "hooks");
+    const [line] = within(within(panel()).getByRole("group", { name: "Waits on" })).getAllByRole("listitem");
+    await user.selectOptions(within(line!).getByRole("combobox", { name: "Link kind" }), "can't finish before it");
+    expect(sentCommands().at(-1)).toEqual({ type: "updateLink", predecessorId: "ui", followerId: "hooks", kind: "FS", newKind: "FF" });
+    const [changed] = within(within(panel()).getByRole("group", { name: "Waits on" })).getAllByRole("listitem");
+    const delay = within(changed!).getByRole("spinbutton", { name: "Delay in days" });
+    await user.clear(delay);
+    await user.type(delay, "1.5{Enter}");
+    expect(sentCommands().at(-1)).toEqual({ type: "updateLink", predecessorId: "ui", followerId: "hooks", kind: "FF", lag: 1.5 });
+  });
+
+  it("the add-link picker leaves out the task's own parent and subtasks", async () => {
+    const rows = [
+      section("x", { position: "a0" }),
+      task("plan", { parentId: "x", position: "a0", title: "plan" }),
+      task("build", { parentId: "plan", position: "a0", title: "build" }),
+      task("code", { parentId: "build", position: "a0", userStart: "2026-10-01", duration: 2, title: "code" }),
+      task("ship", { parentId: "x", position: "a1", userStart: "2026-10-12", duration: 1, title: "ship" }),
+      task("docs", { parentId: "x", position: "a2", userStart: "2026-10-14", duration: 1, title: "docs" }),
+    ];
+    const { user } = await panelBoard(rows, ADMIN, [], [{ predecessorId: "ship", followerId: "build", kind: "FS", lag: 0 }]);
+    await selectRow(user, "build");
+    await user.click(within(panel()).getByRole("button", { name: "Add link" }));
+    const offered = () => within(screen.getByRole("listbox")).getAllByRole("option").map((option) => option.textContent);
+    expect(offered()).toEqual([expect.stringMatching(/^#6 docs/)]); // not itself, the section, its parent, its subtask or ship (already waited on)
+    await user.keyboard("{Escape}");
+    await user.selectOptions(within(panel()).getByRole("combobox", { name: "New link direction" }), "Needed by");
+    await user.click(within(panel()).getByRole("button", { name: "Add link" }));
+    expect(offered()).toEqual([expect.stringMatching(/^#5 ship/), expect.stringMatching(/^#6 docs/)]);
+    await user.type(screen.getByRole("combobox", { name: "Find a task to link" }), "docs{Enter}");
+    expect(sentCommands().at(-1)).toEqual({ type: "addLink", predecessorId: "build", followerId: "docs", kind: "FS" });
+  });
+
+  it("× sends removeLink", async () => {
+    const { user } = await panelBoard(LINK_ROWS, ADMIN, [], LINKS);
+    await selectRow(user, "hooks");
+    const [line] = within(within(panel()).getByRole("group", { name: "Needed by" })).getAllByRole("listitem");
+    await user.click(within(line!).getByRole("button", { name: "Remove link" }));
+    expect(sentCommands().at(-1)).toEqual({ type: "removeLink", predecessorId: "hooks", followerId: "qa", kind: "SS" });
+    expect(within(panel()).queryByRole("group", { name: "Needed by" })).not.toBeInTheDocument(); // none left
+  });
+
+  it("viewers see links without controls", async () => {
+    const { user } = await panelBoard(LINK_ROWS, VIEWER, [], LINKS);
+    await selectRow(user, "hooks");
+    const [line] = within(within(panel()).getByRole("group", { name: "Waits on" })).getAllByRole("listitem");
+    expect(line).toHaveTextContent("#2 ui");
+    expect(line).toHaveTextContent("after it finishes, 2 days later");
+    expect(within(panel()).getByRole("group", { name: "Needed by" })).toHaveTextContent("once it starts");
+    expect(within(panel()).queryByRole("combobox", { name: /link/i })).not.toBeInTheDocument();
+    expect(within(panel()).queryByRole("spinbutton", { name: "Delay in days" })).not.toBeInTheDocument();
+    expect(within(panel()).queryByRole("button", { name: /^(Add|Remove) link$/ })).not.toBeInTheDocument();
+  });
+
   it("is read-only for viewers, who can still comment", async () => {
     const { user } = await panelBoard(ROWS, VIEWER);
     await selectRow(user, "hooks");
     expect(within(panel()).getByRole("textbox", { name: "Task title" })).toBeDisabled();
-    expect(within(panel()).queryByRole("button", { name: /^Predecessor/ })).not.toBeInTheDocument(); // shown as text
+    expect(within(panel()).queryByRole("button", { name: /^(Add|Remove) link$/ })).not.toBeInTheDocument();
     expect(within(panel()).queryByRole("button", { name: /^Add a/ })).not.toBeInTheDocument();
     expect(within(panel()).getByRole("textbox", { name: "Write a comment" })).toBeEnabled();
   });
@@ -296,12 +376,12 @@ describe("history wording", () => {
     changes: changes.map((change) => ({ rowId: "t", ...change })),
   });
   it("describes changes in words", () => {
-    expect(describeEntry(entry("createRow", [{ field: "*", before: null, after: {} }]), names)).toBe("created it");
-    expect(describeEntry(entry("indent", [{ field: "parentId", before: null, after: "p" }, { field: "position", before: "a", after: "b" }]), names)).toBe("moved it in the list");
-    expect(describeEntry(entry("linkTasks", [{ field: "predecessorId", before: null, after: "p" }]), names)).toBe("made it follow “Design”");
-    expect(describeEntry(entry("convertMilestone", [{ field: "duration", before: 3, after: 0 }]), names)).toBe("made it a milestone");
-    expect(describeEntry(entry("undo", [{ field: "resourceId", before: ANA.id, after: null }]), names)).toBe("undid a change (unassigned it)");
+    expect(describeEntry(entry("createRow", [{ field: "*", before: null, after: {} }]), names, "t")).toBe("created it");
+    expect(describeEntry(entry("indent", [{ field: "parentId", before: null, after: "p" }, { field: "position", before: "a", after: "b" }]), names, "t")).toBe("moved it in the list");
+    expect(describeEntry(entry("linkTasks", [{ field: "predecessorId", before: null, after: "p" }]), names, "t")).toBe("made it follow “Design”");
+    expect(describeEntry(entry("convertMilestone", [{ field: "duration", before: 3, after: 0 }]), names, "t")).toBe("made it a milestone");
+    expect(describeEntry(entry("undo", [{ field: "resourceId", before: ANA.id, after: null }]), names, "t")).toBe("undid a change (unassigned it)");
     // offsets are never shown: a drag that also stored one reads as just the move
-    expect(describeEntry(entry("moveTask", [{ field: "userStart", before: "2026-10-01", after: "2026-10-05" }, { field: "offset", before: 0, after: -2 }]), names)).toMatch(/^scheduled it for/);
+    expect(describeEntry(entry("moveTask", [{ field: "userStart", before: "2026-10-01", after: "2026-10-05" }, { field: "offset", before: 0, after: -2 }]), names, "t")).toMatch(/^scheduled it for/);
   });
 });

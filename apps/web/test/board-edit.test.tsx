@@ -30,11 +30,11 @@ async function editableBoard(rows: ProjectStateDto["rows"] = ROWS, user = ADMIN)
 /** Commands the board sent, without their ids. */
 const sentCommands = (): Command[] =>
   FakeWebSocket.last.sent.flatMap((message) => ((message as { type: string }).type === "command" ? [(message as { command: Command }).command] : []));
-/** Opens a task's predecessor picker, in its details panel (the list has no predecessor column). */
-async function pickPredecessorOf(user: ReturnType<typeof renderApp>["user"], title: string) {
+/** Opens a task's add-link picker, in its details panel (the list has no predecessor column). */
+async function addLinkTo(user: ReturnType<typeof renderApp>["user"], title: string) {
   await user.click(screen.getByRole("button", { name: `Open details of “${title}”` }));
   const panel = await screen.findByRole("complementary", { name: `Details of “${title}”` });
-  await user.click(within(panel).getByRole("button", { name: /^Predecessor: / }));
+  await user.click(within(panel).getByRole("button", { name: "Add link" }));
   return panel;
 }
 const listRow = (title: string) => screen.getAllByRole("row").find((row) => within(row).queryByText(title, { exact: true }))!;
@@ -172,10 +172,10 @@ describe("editing the task list", () => {
 
   it("keeps a picked predecessor that starts later: the task moves after it", async () => {
     const { user } = await editableBoard();
-    const panel = await pickPredecessorOf(user, "ui");
-    await user.type(screen.getByRole("combobox", { name: "Find a predecessor" }), "#3{Enter}");
-    expect(sentCommands().at(-1)).toEqual({ type: "linkTasks", fromId: "hooks", toId: "ui" });
-    expect(within(panel).getByRole("button", { name: /^Predecessor: #3 hooks/ })).toBeInTheDocument(); // ui follows hooks, as picked
+    const panel = await addLinkTo(user, "ui");
+    await user.type(screen.getByRole("combobox", { name: "Find a task to link" }), "#3{Enter}");
+    expect(sentCommands().at(-1)).toEqual({ type: "addLink", predecessorId: "hooks", followerId: "ui", kind: "FS" });
+    expect(within(within(panel).getByRole("group", { name: "Waits on" })).getByRole("button", { name: "#3 hooks" })).toBeInTheDocument(); // ui follows hooks, as picked
     expect(screen.queryByText(/so it now follows this task instead/)).not.toBeInTheDocument();
   });
 
@@ -193,22 +193,24 @@ describe("editing the task list", () => {
     expect(sentCommands().at(-1)).toEqual({ type: "convertMilestone", id: "hooks", milestone: true });
     expect(screen.queryByRole("columnheader", { name: /Pred/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Predecessor of/ })).not.toBeInTheDocument();
-    // The predecessor opens a searchable list of tasks (row number or title), like the assignee picker.
-    const panel = await pickPredecessorOf(user, "hooks");
-    const search = screen.getByRole("combobox", { name: "Find a predecessor" });
-    expect(screen.getByRole("option", { selected: true })).toHaveTextContent("No predecessor");
-    expect(screen.queryByRole("option", { name: /design/ })).not.toBeInTheDocument(); // sections can't be predecessors
+    // Adding a link opens a searchable list of tasks (row number or title), like the assignee picker.
+    const panel = await addLinkTo(user, "hooks");
+    const search = screen.getByRole("combobox", { name: "Find a task to link" });
+    expect(screen.queryByRole("option", { name: /design/ })).not.toBeInTheDocument(); // sections can't be linked
     await user.type(search, "#2{Enter}");
-    expect(sentCommands().at(-1)).toEqual({ type: "linkTasks", fromId: "ui", toId: "hooks" });
-    await user.click(within(panel).getByRole("button", { name: /^Predecessor: #2 ui/ })); // opens again: the choice is checked, no offset to edit
-    expect(screen.getByRole("option", { selected: true })).toHaveTextContent("#2 ui");
-    expect(screen.queryByRole("spinbutton", { name: /offset/i })).not.toBeInTheDocument();
+    expect(sentCommands().at(-1)).toEqual({ type: "addLink", predecessorId: "ui", followerId: "hooks", kind: "FS" });
+    await user.click(within(panel).getByRole("button", { name: "Add link" })); // ui is waited on that way already
+    expect(screen.queryByRole("option", { name: /ui/ })).not.toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await user.selectOptions(within(panel).getByRole("combobox", { name: "New link kind" }), "once it starts"); // another kind may join them too
+    await user.click(within(panel).getByRole("button", { name: "Add link" }));
+    expect(screen.getByRole("option", { name: /ui/ })).toBeInTheDocument();
   });
 
   it("explains edits the engine refuses and doesn't send them", async () => {
     const { user } = await editableBoard([...ROWS, task("idea", { parentId: "design", position: "a2" })]);
-    await pickPredecessorOf(user, "hooks");
-    await user.type(screen.getByRole("combobox", { name: "Find a predecessor" }), "idea{Enter}");
+    await addLinkTo(user, "hooks");
+    await user.type(screen.getByRole("combobox", { name: "Find a task to link" }), "idea{Enter}");
     expect(await screen.findByRole("alert")).toHaveTextContent("Both tasks need dates before they can be linked");
     expect(sentCommands()).toEqual([]);
   });
