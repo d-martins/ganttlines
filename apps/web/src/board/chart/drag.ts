@@ -1,4 +1,4 @@
-import { dayOf, fromDay, halfDay, isAfternoon, spanEnd, spanStart, type Command, type DayHalf, type DayNum, type HalfDay, type RowId, type Span } from "@ganttlines/engine";
+import { dayOf, fromDay, halfDay, isAfternoon, spanEnd, spanStart, type Command, type DayHalf, type DayNum, type HalfDay, type LinkKind, type RowId, type Span } from "@ganttlines/engine";
 import { create } from "zustand";
 import { DAY_WIDTH, type Timeline } from "./timeline";
 
@@ -14,7 +14,17 @@ export interface ChartDrag {
   line: { x1: number; y1: number; x2: number; y2: number } | null;
   /** link drags: the task under the pointer that would be linked */
   targetId: RowId | null;
+  /** link drags: the end of the dragged bar the link leaves from */
+  from?: LinkEnd;
+  /** link drags: the end of the target the link would tie to (null: no target) */
+  targetEnd?: LinkEnd | null;
 }
+
+export type LinkEnd = "start" | "end";
+
+/** The kind of a link from the predecessor's end `from` to the follower's end `to`; null for start → end, which isn't a kind. */
+export const linkKindOf = (from: LinkEnd, to: LinkEnd): LinkKind | null =>
+  from === "end" ? (to === "start" ? "FS" : "FF") : to === "start" ? "SS" : null;
 
 export const useChartDrag = create<{ drag: ChartDrag | null }>(() => ({ drag: null }));
 

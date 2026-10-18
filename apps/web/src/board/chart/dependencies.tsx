@@ -1,4 +1,4 @@
-import { linkKey } from "@ganttlines/engine";
+import { linkKey, type LinkKind } from "@ganttlines/engine";
 import type { BoardModel, BoardRow } from "../model";
 import type { BarStyle } from "../view-store";
 import { extent, halfHeight, shapeOf, ROW_HEIGHT } from "./bars";
@@ -21,6 +21,23 @@ export function elbow(from: { left: number; right: number; y: number; half: numb
   if (x >= from.left + 2) return `M${x},${startY} V${to.y} H${to.left}`;
   const between = from.y + (down ? rowHeight / 2 : -rowHeight / 2);
   return `M${center},${startY} V${between} H${to.left - STUB} V${to.y} H${to.left}`;
+}
+
+/**
+ * Path of a link of `kind` from its predecessor to its follower. FS is the elbow into the follower's
+ * start. SS leaves the predecessor's start, passes left of both bars and enters the follower's start
+ * (pointing right); FF leaves the predecessor's end, passes right of both and enters the follower's
+ * end (pointing left).
+ */
+export function linkPath(
+  kind: LinkKind,
+  from: { left: number; right: number; y: number; half: number },
+  to: { left: number; right: number; y: number },
+  rowHeight: number,
+): string {
+  if (kind === "FS") return elbow(from, to, rowHeight);
+  if (kind === "SS") return `M${from.left},${from.y} H${Math.min(from.left, to.left) - STUB} V${to.y} H${to.left}`;
+  return `M${from.right},${from.y} H${Math.max(from.right, to.right) + STUB} V${to.y} H${to.right}`;
 }
 
 /** Dependency arrows between shown rows that touch the rendered window [firstRow, lastRow). */
@@ -52,7 +69,7 @@ export function Dependencies({
     const start = extent(predecessor.kind, predecessor.span, timeline, style);
     const end = extent(entry.kind, entry.span, timeline, style);
     const y = (i: number) => i * rowHeight + rowHeight / 2;
-    const d = elbow({ ...start, y: y(from), half: halfHeight(shapeOf(predecessor), style) }, { left: end.left, y: y(to) }, rowHeight);
+    const d = linkPath(link.kind, { ...start, y: y(from), half: halfHeight(shapeOf(predecessor), style) }, { ...end, y: y(to) }, rowHeight);
     paths.push({ key: linkKey(link), d, violation });
   }
   return (

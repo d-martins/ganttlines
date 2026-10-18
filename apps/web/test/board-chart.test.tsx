@@ -1,8 +1,9 @@
-import type { Command } from "@ganttlines/engine";
+import type { Command, Link } from "@ganttlines/engine";
 import { toDay } from "@ganttlines/engine";
 import type { ProjectStateDto } from "@ganttlines/protocol";
 import { fireEvent, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { linkPath } from "../src/board/chart/dependencies";
 import { formatDay } from "../src/board/format";
 import { useBoardView } from "../src/board/view-store";
 import { ANA, CALENDAR, FakeWebSocket, PROJECT_ID, projectState, section, task } from "./board-fixtures";
@@ -18,11 +19,11 @@ const ROWS = [
   task("idea", { parentId: "x", position: "a2", duration: 2 }),
 ];
 
-async function chartBoard(rows: ProjectStateDto["rows"] = ROWS, user = ADMIN) {
+async function chartBoard(rows: ProjectStateDto["rows"] = ROWS, user = ADMIN, links: Link[] = []) {
   FakeWebSocket.instances = [];
   vi.stubGlobal("WebSocket", FakeWebSocket);
   const api = signedIn(user, [project(PROJECT_ID, "Launch")]);
-  api.on(`GET /api/projects/${PROJECT_ID}/state`, () => ({ body: projectState(rows) }));
+  api.on(`GET /api/projects/${PROJECT_ID}/state`, () => ({ body: projectState(rows, 5, links) }));
   api.on("GET /api/calendar", () => ({ body: CALENDAR }));
   api.on("GET /api/resources", () => ({ body: { resources: [ANA] } }));
   api.on(`GET /api/projects/${PROJECT_ID}/highlights`, () => ({ body: { highlights: [] } }));
@@ -132,6 +133,62 @@ describe("chart editing", () => {
     expect(sentCommands()).toEqual([{ type: "addLink", predecessorId: "ui", followerId: "hooks", kind: "FS" }]);
   });
 
+  // hooks spans Oct 12–13: chart x 1344 → 1408 (the chart starts Mon Aug 31; days are 32 px), its middle at 1376.
+  const HOOKS_LEFT_HALF = 1350;
+  const HOOKS_RIGHT_HALF = 1400;
+  const HOOKS_Y = 2 * 30 + 15;
+  const startDot = () => within(bar(/^ui,/).parentElement!).getByTitle("Drag from the start onto another task to link them");
+  const endDot = () => within(bar(/^ui,/).parentElement!).getByTitle("Drag onto another task to link them");
+
+  it("dragging from the end dot onto the left half of a bar sends FS; onto the right half sends FF", async () => {
+    await chartBoard();
+    drag(endDot(), 500, HOOKS_LEFT_HALF, HOOKS_Y);
+    drag(endDot(), 500, HOOKS_RIGHT_HALF, HOOKS_Y);
+    expect(sentCommands()).toEqual([
+      { type: "addLink", predecessorId: "ui", followerId: "hooks", kind: "FS" },
+      { type: "addLink", predecessorId: "ui", followerId: "hooks", kind: "FF" },
+    ]);
+  });
+
+  it("dragging from the start dot onto the left half sends SS", async () => {
+    await chartBoard();
+    drag(startDot(), 500, HOOKS_LEFT_HALF, HOOKS_Y);
+    expect(sentCommands()).toEqual([{ type: "addLink", predecessorId: "ui", followerId: "hooks", kind: "SS" }]);
+  });
+
+  it("start dot onto a right half sends nothing", async () => {
+    await chartBoard();
+    const dot = startDot();
+    fireEvent.pointerDown(dot, { button: 0, clientX: 500, clientY: 0 });
+    fireEvent.pointerMove(window, { clientX: HOOKS_RIGHT_HALF, clientY: HOOKS_Y });
+    const hooksStrip = document.querySelector('[data-chart-body] [data-row="2"]')!;
+    expect(hooksStrip.className).not.toContain("bg-accent-soft"); // no target highlight
+    fireEvent.pointerUp(window, { clientX: HOOKS_RIGHT_HALF, clientY: HOOKS_Y });
+    expect(sentCommands()).toEqual([]);
+  });
+
+  const WITH_API = [...ROWS, task("api", { parentId: "x", position: "a3", userStart: "2026-09-28", duration: 2 })];
+  const fs = (predecessorId: string, followerId: string): Link => ({ predecessorId, followerId, kind: "FS", lag: 0 });
+  const arrows = () => [...document.querySelectorAll('[data-testid="dependency"]')];
+
+  it("each link draws one arrow; two links into one task draw two", async () => {
+    // Two links into hooks, and a second (SS) link between ui and hooks: three arrows.
+    await chartBoard(WITH_API, ADMIN, [fs("ui", "hooks"), fs("api", "hooks"), { ...fs("ui", "hooks"), kind: "SS" }]);
+    expect(arrows()).toHaveLength(3);
+    expect(new Set(arrows().map((arrow) => arrow.getAttribute("d"))).size).toBe(3);
+  });
+
+  it("only the violated link's arrow is red", async () => {
+    // hooks is locked to Oct 1, before ui (ending Oct 8) finishes; api finishes Sep 29.
+    const rows = WITH_API.map((row) => (row.id === "hooks" ? task("hooks", { parentId: "x", position: "a1", userStart: "2026-10-01", duration: 2, locked: true }) : row));
+    await chartBoard(rows, ADMIN, [fs("ui", "hooks"), fs("api", "hooks")]);
+    const [red, plain] = [arrows().filter((arrow) => arrow.hasAttribute("data-violation")), arrows().filter((arrow) => !arrow.hasAttribute("data-violation"))];
+    expect(red).toHaveLength(1);
+    expect(plain).toHaveLength(1);
+    expect(red[0]).toHaveAttribute("stroke", "var(--violation)");
+    expect(plain[0]).toHaveAttribute("stroke", "var(--dependency)");
+  });
+
   it("works from the keyboard: arrows move or resize, Enter opens the options", async () => {
     const { user } = await chartBoard();
     bar(/^hooks,/).focus();
@@ -204,5 +261,23 @@ describe("chart editing", () => {
     expect(screen.queryByRole("button", { name: /^Options for/ })).not.toBeInTheDocument();
     fireEvent.contextMenu(document.querySelector("[data-chart-body]")!, { clientX: 100, clientY: 5 });
     expect(screen.queryByRole("menuitem", { name: "Highlight this day…" })).not.toBeInTheDocument();
+  });
+});
+
+describe("linkPath", () => {
+  const from = { left: 40, right: 100, y: 15, half: 7 };
+  const to = { left: 60, right: 140, y: 45 };
+
+  it("FS is the elbow into the follower's left side", () => {
+    expect(linkPath("FS", from, { ...to, left: 140 }, 30)).toBe("M92,22 V45 H140");
+  });
+
+  it("linkPath SS/FF snapshots", () => {
+    // SS: out of the left edges, round the leftmost, into the follower's left side (pointing right).
+    expect(linkPath("SS", from, to, 30)).toBe("M40,15 H32 V45 H60");
+    expect(linkPath("SS", { ...from, y: 45 }, { ...to, left: 20, y: 15 }, 30)).toBe("M40,45 H12 V15 H20");
+    // FF: out of the right edges, round the rightmost, into the follower's right side (pointing left).
+    expect(linkPath("FF", from, to, 30)).toBe("M100,15 H148 V45 H140");
+    expect(linkPath("FF", from, { ...to, right: 80 }, 30)).toBe("M100,15 H108 V45 H80");
   });
 });

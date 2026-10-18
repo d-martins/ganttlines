@@ -9,7 +9,7 @@ import { useSelection } from "../selection";
 import type { BarStyle } from "../view-store";
 import { BarMenu } from "./bar-menu";
 import { ActualTrack, BAR_HEIGHT, barDetails, extent, GhostBar, ROW_HEIGHT, RowBar } from "./bars";
-import { dragCommand, edgeAt, startAt, stepHalf, useChartDrag, type ChartDrag, type DragKind } from "./drag";
+import { dragCommand, edgeAt, linkKindOf, startAt, stepHalf, useChartDrag, type ChartDrag, type DragKind, type LinkEnd } from "./drag";
 import type { Timeline } from "./timeline";
 import { AUTO_SCROLL_STEP, AUTO_SCROLL_TICK_MS, edgePush, HEADER_HEIGHT } from "../auto-scroll";
 
@@ -54,7 +54,8 @@ export function ChartRows({
 
   const run = (command: Command) => runCommand(latest.current.board, command);
 
-  const startDrag = (event: ReactPointerEvent, entry: BoardRow, absoluteIndex: number, kind: DragKind) => {
+  /** `linkFrom`: for link drags, the end of the bar the link leaves from. */
+  const startDrag = (event: ReactPointerEvent, entry: BoardRow, absoluteIndex: number, kind: DragKind, linkFrom: LinkEnd = "end") => {
     if (!canEdit || event.button !== 0 || !entry.span) return;
     event.preventDefault();
     event.stopPropagation();
@@ -95,14 +96,21 @@ export function ChartRows({
       const { timeline: now, allRows: shown } = latest.current;
       if (kind === "link") {
         const target = shown[Math.floor(y / rowHeight)];
-        const targetId = target && target.row.kind === "task" && target.span && target.row.id !== rowId ? target.row.id : null;
+        const onTask = target && target.row.kind === "task" && target.span && target.row.id !== rowId ? target : null;
+        // The follower's start when the pointer is over the left half of its bar, otherwise its end.
+        const box = onTask ? extent(onTask.kind, onTask.span!, now, style) : null;
+        const targetEnd: LinkEnd | null = box ? (x < (box.left + box.right) / 2 ? "start" : "end") : null;
+        const linkKind = targetEnd ? linkKindOf(linkFrom, targetEnd) : null;
+        const targetId = linkKind ? onTask!.row.id : null;
         const from = extent(entry.kind, span, now, style);
         current = {
           rowId,
           kind,
-          command: targetId ? { type: "addLink", predecessorId: rowId, followerId: targetId, kind: "FS" } : null,
-          line: { x1: from.right + 8, y1: absoluteIndex * rowHeight + rowHeight / 2, x2: x, y2: y },
+          command: targetId && linkKind ? { type: "addLink", predecessorId: rowId, followerId: targetId, kind: linkKind } : null,
+          line: { x1: linkFrom === "end" ? from.right + 8 : from.left - 8, y1: absoluteIndex * rowHeight + rowHeight / 2, x2: x, y2: y },
           targetId,
+          from: linkFrom,
+          targetEnd: linkKind ? targetEnd : null,
         };
       } else {
         current = { rowId, kind, command: dragCommand(kind, rowId, span, now, x - grabOffset - now.x(span.start), x), line: null, targetId: null };
@@ -255,17 +263,24 @@ export function ChartRows({
                 ) : null}
                 <div
                   aria-hidden
+                  title="Drag from the start onto another task to link them"
+                  onPointerDown={(event) => startDrag(event, entry, absoluteIndex, "link", "start")}
+                  className="absolute h-2.5 w-2.5 cursor-crosshair rounded-full border-2 border-[var(--dependency)] bg-bg opacity-0 group-hover/row:opacity-100 hover:scale-125"
+                  style={{ left: box.left - 14, top: center - 5 }}
+                />
+                <div
+                  aria-hidden
                   title="Drag onto another task to link them"
                   onPointerDown={(event) => startDrag(event, entry, absoluteIndex, "link")}
                   className="absolute h-2.5 w-2.5 cursor-crosshair rounded-full border-2 border-[var(--dependency)] bg-bg opacity-0 group-hover/row:opacity-100 hover:scale-125"
                   style={{ left: box.right + 4, top: center - 5 }}
                 />
-                {/* Just left of the bar; sticky, so it stays past the task list while the bar starts under it (and leaves with the bar). */}
+                {/* Left of the bar, clear of its start dot; sticky, so it stays past the task list while the bar starts under it (and leaves with the bar). */}
                 <div className="pointer-events-none absolute left-0 flex items-center" style={{ width: box.right, top: center - 10, height: 20 }}>
                   <div
                     data-bar-tools
                     className={`pointer-events-auto sticky flex gap-1 group-focus-within/row:opacity-100 group-hover/row:opacity-100 ${menuFor === row.id ? "opacity-100" : "opacity-0"}`}
-                    style={{ marginLeft: Math.max(box.left - 50, 0), left: "calc(var(--list-width) + 4px)" }}
+                    style={{ marginLeft: Math.max(box.left - 64, 0), left: "calc(var(--list-width) + 4px)" }}
                     onClick={(event) => event.stopPropagation()}
                   >
                     <AssigneePicker
