@@ -90,7 +90,7 @@ describe("several copies: live updates", () => {
   it("sends edits made on one copy to browsers on the other, in order", async () => {
     const { a, b, ed, projectId } = await twoCopies();
     const onB = await connect(b, ed.cookie);
-    onB.send({ type: "join", projectId, version: 0 });
+    onB.send({ type: "join", projectId, version: 0, protocol: 2 });
     await onB.next("joined");
     for (let i = 0; i < 5; i++) await command(a, ed.cookie, projectId, createTask(`T${i}`));
     const versions: number[] = [];
@@ -104,7 +104,7 @@ describe("several copies: live updates", () => {
     const taskId = randomUUID();
     await command(a, ed.cookie, projectId, { ...createTask("Design"), id: taskId });
     const onB = await connect(b, ed.cookie);
-    onB.send({ type: "join", projectId, version: 1 });
+    onB.send({ type: "join", projectId, version: 1, protocol: 2 });
     await onB.next("joined");
     await a.inject({ method: "PATCH", url: `/api/projects/${projectId}`, headers: { cookie: ed.cookie }, payload: { name: "Launch 2" } });
     expect((await onB.next("project")).project.name).toBe("Launch 2");
@@ -126,7 +126,7 @@ describe("several copies: live updates", () => {
     expect(await onB.closed).toBe(CLOSE_SESSION_ENDED);
 
     const adminOnB = await connect(b, admin);
-    adminOnB.send({ type: "join", projectId, version: 0 });
+    adminOnB.send({ type: "join", projectId, version: 0, protocol: 2 });
     await adminOnB.next("joined");
     await a.inject({ method: "PATCH", url: `/api/projects/${projectId}`, headers: { cookie: admin }, payload: { archived: true } });
     await a.inject({ method: "DELETE", url: `/api/projects/${projectId}`, headers: { cookie: admin } });
@@ -146,10 +146,10 @@ describe("several copies: who's viewing", () => {
   it("shows people on both copies, and drops a copy's viewers when it stops", async () => {
     const { a, b, admin, ed, projectId } = await twoCopies();
     const onA = await connect(a, admin);
-    onA.send({ type: "join", projectId, version: 0 });
+    onA.send({ type: "join", projectId, version: 0, protocol: 2 });
     await onA.next("joined");
     const onB = await connect(b, ed.cookie);
-    onB.send({ type: "join", projectId, version: 0 });
+    onB.send({ type: "join", projectId, version: 0, protocol: 2 });
     expect((await onB.next("joined")).viewers.map((v) => v.name).sort()).toEqual(["Admin", "Ed"]);
     expect((await onA.next("presence", (m) => m.viewers.length === 2)).viewers.map((v) => v.name).sort()).toEqual(["Admin", "Ed"]);
     copies.splice(copies.indexOf(a), 1);
@@ -171,7 +171,7 @@ describe("several copies: revocations hold even if a notification is lost", () =
   it("checks a live connection's person again before each command", async () => {
     const { b, ed, projectId } = await twoCopies();
     const onB = await connect(b, ed.cookie);
-    onB.send({ type: "join", projectId, version: 0 });
+    onB.send({ type: "join", projectId, version: 0, protocol: 2 });
     await onB.next("joined");
     await t.db.user.update({ where: { email: "ed@example.com" }, data: { role: "viewer" } }); // demoted, nobody told B
     onB.send({ type: "command", commandId: randomUUID(), command: createTask("Sneaky") });
@@ -199,7 +199,7 @@ describe("several copies: access checks on open connections", () => {
     const ed = await createUser(b, admin, { email: "ed@example.com", name: "Ed", role: "editor" });
     const projectId = (await b.inject({ method: "POST", url: "/api/projects", headers: { cookie: ed.cookie }, payload: { name: "Launch" } })).json().project.id as string;
     const onB = await connect(b, ed.cookie);
-    onB.send({ type: "join", projectId, version: 0 });
+    onB.send({ type: "join", projectId, version: 0, protocol: 2 });
     await onB.next("joined");
     await t.db.user.update({ where: { email: "ed@example.com" }, data: { role: "guest" } }); // demoted, nobody told B
     onB.send({ type: "command", commandId: randomUUID(), command: createTask("Sneaky") });
@@ -231,7 +231,7 @@ describe("several copies: board changes are announced by the edit's own transact
     const admin = await setupAdmin(a);
     const projectId = (await a.inject({ method: "POST", url: "/api/projects", headers: { cookie: admin }, payload: { name: "Launch" } })).json().project.id as string;
     const onB = await connect(b, admin);
-    onB.send({ type: "join", projectId, version: 0 });
+    onB.send({ type: "join", projectId, version: 0, protocol: 2 });
     await onB.next("joined");
     await command(a, admin, projectId, createTask("Design"));
     expect((await onB.next("patch")).version).toBe(1);
@@ -426,7 +426,7 @@ describe("several copies: hardening", () => {
     const c = await testApp({ db: t.db, config });
     copies.push(c);
     const onC = await connect(c, ed.cookie);
-    onC.send({ type: "join", projectId, version: 0 });
+    onC.send({ type: "join", projectId, version: 0, protocol: 2 });
     await onC.next("joined");
     const add = (app: FastifyInstance, date: string) => app.inject({ method: "POST", url: `/api/projects/${projectId}/highlights`, headers: { cookie: ed.cookie }, payload: { date, color: "#ff0000" } });
     // Lists in between are fine (a change may be relayed before the next one is made); an older list after a newer one isn't.

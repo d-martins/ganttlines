@@ -1,5 +1,5 @@
 import type { Comment, Db } from "@ganttlines/db";
-import type { RowChange } from "@ganttlines/engine";
+import type { Change } from "@ganttlines/engine";
 import type { BaselineDto, CommentDto, HighlightDto, ProjectDto } from "@ganttlines/protocol";
 import type { AccessService } from "../auth/access";
 import type { InstanceService } from "../calendar/instance-service";
@@ -137,7 +137,7 @@ export class Live {
             version: entry.version,
             commandId: entry.commandId,
             actor: { userId: entry.actorUserId, label: entry.actorLabel },
-            changes: entry.changes as unknown as RowChange[],
+            changes: entry.changes as unknown as Change[],
           });
         });
       case "project":

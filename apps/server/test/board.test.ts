@@ -31,7 +31,7 @@ describe("comments", () => {
   it("lets viewers comment, authors edit and delete, and shows them live", async () => {
     const { ana, vi, projectId, taskId } = await board();
     const watcher = await connect(t.app, ana);
-    watcher.send({ type: "join", projectId, version: 0 });
+    watcher.send({ type: "join", projectId, version: 0, protocol: 2 });
     await watcher.next("joined");
     const created = await t.app.inject({ method: "POST", url: `/api/projects/${projectId}/comments`, headers: { cookie: vi }, payload: { taskId, body: "Can we start earlier?" } });
     expect(created.statusCode).toBe(201);
@@ -145,7 +145,7 @@ describe("highlights", () => {
   it("are managed by editors (incl. collaborating links), read by everyone, and pushed live", async () => {
     const { admin, ana, vi, projectId } = await board();
     const watcher = await connect(t.app, vi);
-    watcher.send({ type: "join", projectId, version: 0 });
+    watcher.send({ type: "join", projectId, version: 0, protocol: 2 });
     await watcher.next("joined");
     expect((await t.app.inject({ method: "POST", url: `/api/projects/${projectId}/highlights`, headers: { cookie: vi }, payload: { date: "2026-10-09", color: "#ffcc00" } })).statusCode).toBe(403);
     const created = await t.app.inject({ method: "POST", url: `/api/projects/${projectId}/highlights`, headers: { cookie: ana }, payload: { date: "2026-10-09", label: "Demo", color: "#ffcc00" } });
@@ -197,5 +197,26 @@ describe("activity", () => {
     expect(forTask.entries.map((e: { name: string }) => e.name)).toEqual(["setDuration", "updateTitle", "createRow"]);
     expect(forTask.entries[1].changes).toEqual([{ rowId: taskId, field: "title", before: "Design", after: "Design v2" }]);
     expect((await t.app.inject({ url: `/api/projects/${projectId}/activity?limit=500`, headers: { cookie: vi } })).statusCode).toBe(400);
+  });
+
+  it("activity of a task lists the links into and out of it", async () => {
+    const { ana, vi, projectId, taskId } = await board();
+    const send = (command: object) =>
+      t.app.inject({ method: "POST", url: `/api/projects/${projectId}/commands`, headers: { cookie: ana }, payload: { commandId: randomUUID(), command } });
+    const [before, after] = [randomUUID(), randomUUID()];
+    await send({ type: "createRow", id: before, kind: "task", parentId: null, afterId: null, title: "Before", start: "2026-10-01" });
+    await send({ type: "createRow", id: after, kind: "task", parentId: null, afterId: null, title: "After", start: "2026-10-20" });
+    await send({ type: "addLink", predecessorId: before, followerId: taskId, kind: "FS" });
+    await send({ type: "addLink", predecessorId: taskId, followerId: after, kind: "SS" });
+    await send({ type: "addLink", predecessorId: before, followerId: after, kind: "FS" }); // doesn't touch the task
+
+    const forTask = (await t.app.inject({ url: `/api/projects/${projectId}/activity?rowId=${taskId}`, headers: { cookie: vi } })).json();
+    expect(forTask.entries.map((e: { name: string }) => e.name)).toEqual(["addLink", "addLink", "createRow"]);
+    const [outOf, into] = forTask.entries;
+    expect(outOf.rowIds).toEqual(expect.arrayContaining([taskId, after]));
+    expect(outOf.changes).toEqual([{ link: { predecessorId: taskId, followerId: after, kind: "SS" }, field: "*", before: null, after: { predecessorId: taskId, followerId: after, kind: "SS", lag: 0 } }]);
+    expect(into.rowIds).toEqual(expect.arrayContaining([before, taskId]));
+    expect(into.changes).toContainEqual({ link: { predecessorId: before, followerId: taskId, kind: "FS" }, field: "*", before: null, after: { predecessorId: before, followerId: taskId, kind: "FS", lag: 0 } });
+    expect(into.changes.every((change: { rowId?: string; link?: object }) => change.rowId === taskId || change.link)).toBe(true);
   });
 });

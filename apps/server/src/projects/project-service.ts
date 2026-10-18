@@ -1,20 +1,25 @@
-import { Prisma, toDbColumns, type Db, type Project } from "@ganttlines/db";
+import { Prisma, toDbColumns, toDbLink, type Db, type Project } from "@ganttlines/db";
 import {
   applyChanges,
   applyCommand,
   baselineTasks,
   buildTree,
+  type Change,
   childrenOf,
   type Command,
   computeSchedule,
-  diffRows,
+  diffState,
+  findLinkProblem,
   findTreeProblem,
   hasCycle,
+  isLinkChange,
   isParentTask,
+  type Link,
+  linkKey,
+  type LinkRef,
   type ProjectState,
   revertChanges,
   type Row,
-  type RowChange,
   type Span,
 } from "@ganttlines/engine";
 import type { BaselineTaskDto, ChangesDto, CommandResultDto, ProjectDto, ProjectStateDto } from "@ganttlines/protocol";
@@ -44,7 +49,7 @@ export interface AppliedEvent {
   version: number;
   commandId: string;
   actor: Actor;
-  changes: RowChange[];
+  changes: Change[];
 }
 
 export interface UndoResultDto extends CommandResultDto {
@@ -104,7 +109,7 @@ export class ProjectService {
   state(projectId: string): Promise<ProjectStateDto> {
     return this.queue.run(projectId, async () => {
       const { meta, state } = await this.load(projectId);
-      return { project: toProjectDto(meta), rows: Object.values(state.rows) };
+      return { project: toProjectDto(meta), rows: Object.values(state.rows), links: Object.values(state.links) };
     });
   }
 
@@ -143,7 +148,7 @@ export class ProjectService {
       if (version - since > MAX_CATCH_UP || since > version) return { version, reload: true };
       const entries = await this.db.commandLog.findMany({ where: { projectId, version: { gt: since } }, orderBy: { version: "asc" } });
       let total = 0;
-      for (const entry of entries) total += (entry.changes as unknown as RowChange[]).length;
+      for (const entry of entries) total += (entry.changes as unknown as Change[]).length;
       if (total > MAX_CATCH_UP_CHANGES) return { version, reload: true };
       return {
         version,
@@ -151,7 +156,7 @@ export class ProjectService {
           version: entry.version,
           commandId: entry.commandId,
           actor: { userId: entry.actorUserId, label: entry.actorLabel },
-          changes: entry.changes as unknown as RowChange[],
+          changes: entry.changes as unknown as Change[],
         })),
       };
     });
@@ -290,12 +295,13 @@ export class ProjectService {
     const projectId = stored.meta.id;
     const logged = await this.db.commandLog.findUnique({ where: { commandId: target } });
     if (!logged || logged.projectId !== projectId) throw new HttpError(422, "invalid", "That change is no longer available");
-    const { state, skipped } = revertChanges(stored.state, logged.changes as unknown as RowChange[], direction);
-    const problem = findTreeProblem(Object.values(state.rows));
+    const { state, skipped } = revertChanges(stored.state, logged.changes as unknown as Change[], direction);
+    const rows = Object.values(state.rows);
+    const problem = findTreeProblem(rows) ?? findLinkProblem(rows, Object.values(state.links));
     if (problem || hasCycle(state, (await this.instance.current()).calendar)) {
       throw new HttpError(409, "conflict", `Can't ${direction} this any more: the board changed since`);
     }
-    const changes = diffRows(stored.state, state);
+    const changes = diffState(stored.state, state);
     if (changes.length === 0) throw new HttpError(409, "conflict", `Nothing left to ${direction}: it was all changed since`);
     const result = await this.commit(stored, actor, commandId, direction, { target, skipped, by }, state, changes, bookkeeping);
     return { ...result, skipped };
@@ -354,13 +360,13 @@ export class ProjectService {
       return fresh;
     }
     let state = stored.state;
-    for (const entry of entries) state = applyChanges(state, entry.changes as unknown as RowChange[]);
+    for (const entry of entries) state = applyChanges(state, entry.changes as unknown as Change[]);
     stored.state = state;
     stored.meta = meta;
     return stored;
   }
 
-  /** Persists rows + log entry + version bump atomically, updates the cache, then notifies listeners. */
+  /** Persists rows and links + log entry + version bump atomically, updates the cache, then notifies listeners. */
   private async commit(
     stored: StoredProject,
     actor: Actor,
@@ -368,7 +374,7 @@ export class ProjectService {
     name: string,
     payload: unknown,
     state: ProjectState,
-    changes: RowChange[],
+    changes: Change[],
     /** undo history bookkeeping: saved in the same transaction when the store can, otherwise right after */
     bookkeeping?: (tx?: Tx) => Promise<void>,
   ): Promise<CommandResultDto> {
@@ -377,7 +383,7 @@ export class ProjectService {
     const version = stored.meta.version + 1;
     const meta = await this.db.$transaction(
       async (tx) => {
-        await writeRows(tx, projectId, state, changes);
+        await writeChanges(tx, projectId, state, changes);
         await tx.commandLog.create({
           data: {
             projectId,
@@ -432,7 +438,7 @@ export class ProjectService {
     const skipped = (logged.payload as { skipped?: unknown } | null)?.skipped;
     return {
       version: logged.version,
-      changes: logged.changes as unknown as RowChange[],
+      changes: logged.changes as unknown as Change[],
       ...(typeof skipped === "number" ? { skipped } : {}),
     };
   }
@@ -501,22 +507,52 @@ function notify<T>(listener: (value: T) => void, value: T): void {
   }
 }
 
-/** Persists the rows touched by `changes` using their final values in `state` (deletes/creates batched). */
-async function writeRows(tx: Tx, projectId: string, state: ProjectState, changes: readonly RowChange[]): Promise<void> {
-  const created = new Set(changes.filter((change) => change.field === "*" && change.before === null).map((change) => change.rowId));
+/**
+ * Persists the rows and links touched by `changes` using their final values in `state`. Links go
+ * before the rows they join are deleted and after the rows they join are created.
+ */
+async function writeChanges(tx: Tx, projectId: string, state: ProjectState, changes: readonly Change[]): Promise<void> {
+  const created = new Set<string>();
+  const touched = new Set<string>();
+  const createdLinks = new Set<string>();
+  const touchedLinks = new Map<string, LinkRef>();
+  for (const change of changes) {
+    if (isLinkChange(change)) {
+      const key = linkKey(change.link);
+      if (change.field === "*" && change.before === null) createdLinks.add(key);
+      touchedLinks.set(key, change.link);
+    } else {
+      if (change.field === "*" && change.before === null) created.add(change.rowId);
+      touched.add(change.rowId);
+    }
+  }
   const deleted: string[] = [];
   const inserted: Prisma.RowCreateManyInput[] = [];
   const updated: Row[] = [];
-  for (const rowId of new Set(changes.map((change) => change.rowId))) {
+  for (const rowId of touched) {
     const row = state.rows[rowId];
     if (!row) deleted.push(rowId);
     else if (created.has(rowId)) inserted.push({ ...toDbColumns(row), projectId });
     else updated.push(row);
   }
+  const deletedLinks: Prisma.LinkWhereInput[] = [];
+  const insertedLinks: Prisma.LinkCreateManyInput[] = [];
+  const updatedLinks: Link[] = [];
+  for (const [key, { predecessorId, followerId, kind }] of touchedLinks) {
+    const link = state.links[key];
+    if (!link) deletedLinks.push({ predecessorId, followerId, kind });
+    else if (createdLinks.has(key)) insertedLinks.push(toDbLink(link, projectId));
+    else updatedLinks.push(link);
+  }
+  if (deletedLinks.length > 0) await tx.link.deleteMany({ where: { projectId, OR: deletedLinks } });
   if (deleted.length > 0) await tx.row.deleteMany({ where: { projectId, id: { in: deleted } } });
   if (inserted.length > 0) await tx.row.createMany({ data: inserted });
+  if (insertedLinks.length > 0) await tx.link.createMany({ data: insertedLinks });
   for (const row of updated) {
     const { id, ...columns } = toDbColumns(row);
     await tx.row.updateMany({ where: { id, projectId }, data: columns });
+  }
+  for (const { predecessorId, followerId, kind, lag } of updatedLinks) {
+    await tx.link.updateMany({ where: { projectId, predecessorId, followerId, kind }, data: { lag } });
   }
 }

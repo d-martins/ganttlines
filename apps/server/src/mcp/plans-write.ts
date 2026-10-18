@@ -416,8 +416,9 @@ async function applyTaskFields(
   if (fields.assignee !== undefined) {
     await edit.run({ type: "setAssignee", id, resourceId: fields.assignee === null ? null : pickPerson(team, fields.assignee).id });
   }
+  let predecessorId: string | undefined;
   if (fields.predecessor === null) {
-    await edit.run({ type: "removePredecessor", id });
+    throw new ToolProblem("Removing a predecessor isn't available through this tool.");
   } else if (fields.predecessor !== undefined) {
     const predecessor = edit.find(fields.predecessor, "task", added);
     await edit.load();
@@ -426,9 +427,13 @@ async function applyTaskFields(
       const start = spanStart(edit, predecessor.id);
       if (start) await edit.run({ type: "moveTask", id, start });
     }
-    await edit.run({ type: "linkTasks", fromId: predecessor.id, toId: id });
+    await edit.run({ type: "addLink", predecessorId: predecessor.id, followerId: id, kind: "FS" });
+    predecessorId = predecessor.id;
   }
-  if (fields.lagDays !== undefined) await edit.run({ type: "setOffset", id, offset: fields.lagDays });
+  if (fields.lagDays !== undefined) {
+    if (!predecessorId) throw new ToolProblem("Give `predecessor` along with `lagDays`.");
+    await edit.run({ type: "updateLink", predecessorId, followerId: id, kind: "FS", lag: fields.lagDays });
+  }
   if (fields.half !== undefined && (fields.start === undefined || fields.predecessor || fields.lagDays !== undefined)) {
     // The half day last, on whichever day the task now starts (a link or lag places it in whole days).
     await edit.load();
@@ -436,13 +441,7 @@ async function applyTaskFields(
     if (!entry?.span) throw new ToolProblem("This task has no start date yet: give `start` along with `half`.");
     const afternoon = fields.half === "afternoon";
     if (entry.span.startsAfternoon !== afternoon) {
-      const row = entry.row as { predecessorId?: string | null; offset?: number; locked?: boolean };
-      if (row.predecessorId && !row.locked) {
-        // A follower keeps following: its lag moves by half a day (moving the bar would pin its date).
-        await edit.run({ type: "setOffset", id, offset: (row.offset ?? 0) + (afternoon ? 0.5 : -0.5) });
-      } else {
-        await edit.run({ type: "moveTask", id, start: fromDay(entry.span.start), half: fields.half });
-      }
+      await edit.run({ type: "moveTask", id, start: fromDay(entry.span.start), half: fields.half });
     }
   }
   if (fields.description !== undefined) await edit.run({ type: "setDescription", id, description: fields.description });

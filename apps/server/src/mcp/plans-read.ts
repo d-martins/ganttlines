@@ -1,5 +1,4 @@
-import { fromDay } from "@ganttlines/engine";
-import type { RowChange } from "@ganttlines/engine";
+import { fromDay, isLinkChange, type Change } from "@ganttlines/engine";
 import { z } from "zod";
 import type { OutlineRow } from "../projects/project-service";
 import { pickPerson, pickProject, ToolProblem } from "./lookup";
@@ -20,7 +19,6 @@ export function describeRow({ row, depth, isParent, span, violation }: OutlineRo
     ...(span?.endsMidday ? { endsMidday: true } : {}),
     ...(isParent ? {} : { durationDays: row.duration }),
     assignee: row.resourceId ? { id: row.resourceId, name: names.people.get(row.resourceId) ?? "Unknown" } : null,
-    predecessor: row.predecessorId ? { id: row.predecessorId, title: names.rows.get(row.predecessorId) ?? "Unknown", lagDays: row.offset } : null,
     ...(row.locked ? { locked: true } : {}),
     ...(violation ? { startsTooEarly: true } : {}),
     ...(row.actualDuration !== null ? { actualDurationDays: row.actualDuration } : {}),
@@ -159,7 +157,7 @@ export const readPlans: ToolGroup = (server, tools) => {
           at: entry.createdAt.toISOString(),
           by: entry.actorLabel,
           change: entry.name,
-          tasks: [...new Set((entry.changes as unknown as RowChange[]).map((change) => change.rowId))].map((id) => titles.get(id) ?? "(deleted)"),
+          tasks: [...new Set((entry.changes as unknown as Change[]).flatMap((change) => (isLinkChange(change) ? [change.link.predecessorId, change.link.followerId] : [change.rowId])))].map((id) => titles.get(id) ?? "(deleted)"),
         }));
         return answer(`${changes.length} recent ${changes.length === 1 ? "change" : "changes"} to “${project.name}”.`, { changes });
       }),

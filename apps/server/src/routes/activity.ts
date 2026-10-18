@@ -1,4 +1,4 @@
-import type { RowChange } from "@ganttlines/engine";
+import { isLinkChange, type Change } from "@ganttlines/engine";
 import { BOARD_LIMITS, type ActivityDto } from "@ganttlines/protocol";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
@@ -13,7 +13,7 @@ const ActivityQuery = z.object({
   rowId: z.uuid().optional(),
 });
 
-/** The project's history (newest first), optionally only the changes that touched one row. */
+/** The project's history (newest first), optionally only the changes that touched one row or its links. */
 export function activityRoutes(app: FastifyInstance, context: RouteContext): void {
   const { db } = context;
 
@@ -27,7 +27,15 @@ export function activityRoutes(app: FastifyInstance, context: RouteContext): voi
       where: {
         projectId,
         ...(before === undefined ? {} : { version: { lt: before } }),
-        ...(rowId === undefined ? {} : { changes: { array_contains: [{ rowId }] } }),
+        ...(rowId === undefined
+          ? {}
+          : {
+              OR: [
+                { changes: { array_contains: [{ rowId }] } },
+                { changes: { array_contains: [{ link: { followerId: rowId } }] } },
+                { changes: { array_contains: [{ link: { predecessorId: rowId } }] } },
+              ],
+            }),
       },
       orderBy: { version: "desc" },
       take: limit + 1,
@@ -35,18 +43,22 @@ export function activityRoutes(app: FastifyInstance, context: RouteContext): voi
     const page = rows.slice(0, limit);
     return {
       entries: page.map((entry) => {
-        const changes = entry.changes as unknown as RowChange[];
+        const changes = entry.changes as unknown as Change[];
         return {
           version: entry.version,
           commandId: entry.commandId,
           name: entry.name,
           actor: { userId: entry.actorUserId, label: entry.actorLabel, linkId: entry.actorLinkId },
           createdAt: entry.createdAt.toISOString(),
-          rowIds: [...new Set(changes.map((change) => change.rowId))],
-          changes: rowId === undefined ? changes : changes.filter((change) => change.rowId === rowId),
+          rowIds: [...new Set(changes.flatMap((change) => (isLinkChange(change) ? [change.link.predecessorId, change.link.followerId] : [change.rowId])))],
+          changes: rowId === undefined ? changes : changes.filter((change) => touches(change, rowId)),
         };
       }),
       nextBefore: rows.length > limit ? page[page.length - 1]!.version : null,
     };
   });
+}
+
+function touches(change: Change, rowId: string): boolean {
+  return isLinkChange(change) ? change.link.predecessorId === rowId || change.link.followerId === rowId : change.rowId === rowId;
 }

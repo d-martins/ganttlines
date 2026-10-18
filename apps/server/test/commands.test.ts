@@ -15,6 +15,14 @@ function send(cookie: string, projectId: string, command: object, commandId: str
   return t.app.inject({ method: "POST", url: `/api/projects/${projectId}/commands`, headers: { cookie }, payload: { commandId, command } });
 }
 
+/** The project as a fresh server (empty cache) reads it back from the database. */
+async function reload(cookie: string, projectId: string) {
+  const restarted = await testApp({ db: t.db, config: testConfig });
+  const state = (await restarted.inject({ url: `/api/projects/${projectId}/state`, headers: { cookie } })).json();
+  await restarted.close();
+  return state;
+}
+
 const createTask = (id: string, title = "Task", start?: string) => ({
   type: "createRow",
   id,
@@ -59,25 +67,95 @@ describe("project commands", () => {
     expect(reloaded.rows).toEqual([expect.objectContaining({ id, duration: 2.5, actualDuration: 3.5 })]);
   });
 
-  it("stores afternoon starts and half-day offsets", async () => {
+  it("stores afternoon starts and half-day lags", async () => {
     const { editor, projectId } = await editorWithProject();
     const [a, b] = [randomUUID(), randomUUID()];
     await send(editor, projectId, createTask(a, "Design", "2026-10-05"));
     await send(editor, projectId, createTask(b, "Build", "2026-10-08"));
     expect((await send(editor, projectId, { type: "moveTask", id: a, start: "2026-10-05", half: "afternoon" })).statusCode).toBe(200);
-    expect((await send(editor, projectId, { type: "linkTasks", fromId: a, toId: b })).statusCode).toBe(200);
-    expect((await send(editor, projectId, { type: "setOffset", id: b, offset: 0.5 })).statusCode).toBe(200);
+    expect((await send(editor, projectId, { type: "addLink", predecessorId: a, followerId: b, kind: "FS" })).statusCode).toBe(200);
+    expect((await send(editor, projectId, { type: "updateLink", predecessorId: a, followerId: b, kind: "FS", lag: 0.5 })).statusCode).toBe(200);
 
-    const restarted = await testApp({ db: t.db, config: testConfig });
-    const reloaded = (await restarted.inject({ url: `/api/projects/${projectId}/state`, headers: { cookie: editor } })).json();
-    await restarted.close();
+    const reloaded = await reload(editor, projectId);
     expect(reloaded.rows).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: a, userStart: "2026-10-05", startsAfternoon: true }),
         // a ends Tue 6 midday; b starts that afternoon, plus half a day: Wed 7 morning
-        expect.objectContaining({ id: b, offset: 0.5, userStart: "2026-10-07", startsAfternoon: false }),
+        expect.objectContaining({ id: b, userStart: "2026-10-07", startsAfternoon: false }),
       ]),
     );
+    expect(reloaded.links).toEqual([{ predecessorId: a, followerId: b, kind: "FS", lag: 0.5 }]);
+  });
+
+  it("addLink over REST persists the link; reloading the project from the database shows it", async () => {
+    const { editor, projectId } = await editorWithProject();
+    const [a, b] = [randomUUID(), randomUUID()];
+    await send(editor, projectId, createTask(a, "Design", "2026-10-05"));
+    await send(editor, projectId, createTask(b, "Build", "2026-10-05"));
+    const added = await send(editor, projectId, { type: "addLink", predecessorId: a, followerId: b, kind: "SS", lag: 1 });
+    expect(added.statusCode).toBe(200);
+    expect(added.json().changes).toContainEqual({ link: { predecessorId: a, followerId: b, kind: "SS" }, field: "*", before: null, after: { predecessorId: a, followerId: b, kind: "SS", lag: 1 } });
+    const live = (await t.app.inject({ url: `/api/projects/${projectId}/state`, headers: { cookie: editor } })).json();
+    expect(live.links).toEqual([{ predecessorId: a, followerId: b, kind: "SS", lag: 1 }]);
+    expect(await t.db.link.findMany({ where: { projectId } })).toEqual([{ projectId, predecessorId: a, followerId: b, kind: "SS", lag: 1 }]);
+    expect(await reload(editor, projectId)).toEqual(live);
+  });
+
+  it("changes a link's lag and kind, and removes it, in the database", async () => {
+    const { editor, projectId } = await editorWithProject();
+    const [a, b] = [randomUUID(), randomUUID()];
+    await send(editor, projectId, createTask(a, "Design", "2026-10-05"));
+    await send(editor, projectId, createTask(b, "Build", "2026-10-05"));
+    await send(editor, projectId, { type: "addLink", predecessorId: a, followerId: b, kind: "FS" });
+    expect((await send(editor, projectId, { type: "updateLink", predecessorId: a, followerId: b, kind: "FS", lag: 2 })).statusCode).toBe(200);
+    expect(await t.db.link.findMany({ where: { projectId } })).toEqual([expect.objectContaining({ kind: "FS", lag: 2 })]);
+    expect((await send(editor, projectId, { type: "updateLink", predecessorId: a, followerId: b, kind: "FS", newKind: "FF" })).statusCode).toBe(200);
+    expect(await t.db.link.findMany({ where: { projectId } })).toEqual([expect.objectContaining({ kind: "FF", lag: 2 })]);
+    expect((await reload(editor, projectId)).links).toEqual([{ predecessorId: a, followerId: b, kind: "FF", lag: 2 }]);
+    expect((await send(editor, projectId, { type: "removeLink", predecessorId: a, followerId: b, kind: "FF" })).statusCode).toBe(200);
+    expect(await t.db.link.count({ where: { projectId } })).toBe(0);
+    expect((await reload(editor, projectId)).links).toEqual([]);
+  });
+
+  it("deleting a task removes its links in the database too", async () => {
+    const { editor, projectId } = await editorWithProject();
+    const [a, b, c] = [randomUUID(), randomUUID(), randomUUID()];
+    for (const id of [a, b, c]) await send(editor, projectId, createTask(id, "T", "2026-10-05"));
+    await send(editor, projectId, { type: "addLink", predecessorId: a, followerId: b, kind: "FS" });
+    await send(editor, projectId, { type: "addLink", predecessorId: b, followerId: c, kind: "FS" });
+    await send(editor, projectId, { type: "addLink", predecessorId: a, followerId: c, kind: "SS" });
+    const deleted = await send(editor, projectId, { type: "deleteRows", ids: [b] });
+    expect(deleted.statusCode).toBe(200);
+    expect(await t.db.link.findMany({ where: { projectId } })).toEqual([expect.objectContaining({ predecessorId: a, followerId: c, kind: "SS" })]);
+    expect((await reload(editor, projectId)).links).toEqual([expect.objectContaining({ predecessorId: a, followerId: c, kind: "SS" })]);
+  });
+
+  it("undo of addLink deletes the row in the Link table", async () => {
+    const { editor, projectId } = await editorWithProject();
+    const [a, b] = [randomUUID(), randomUUID()];
+    await send(editor, projectId, createTask(a, "Design", "2026-10-05"));
+    await send(editor, projectId, createTask(b, "Build", "2026-10-05"));
+    await send(editor, projectId, { type: "addLink", predecessorId: a, followerId: b, kind: "FS" });
+    expect(await t.db.link.count({ where: { projectId } })).toBe(1);
+    const undo = await t.app.inject({ method: "POST", url: `/api/projects/${projectId}/undo`, headers: { cookie: editor }, payload: { commandId: randomUUID() } });
+    expect(undo.json()).toMatchObject({ skipped: 0 });
+    expect(await t.db.link.count({ where: { projectId } })).toBe(0);
+    const redo = await t.app.inject({ method: "POST", url: `/api/projects/${projectId}/redo`, headers: { cookie: editor }, payload: { commandId: randomUUID() } });
+    expect(redo.json()).toMatchObject({ skipped: 0 });
+    expect((await reload(editor, projectId)).links).toEqual([{ predecessorId: a, followerId: b, kind: "FS", lag: 0 }]);
+  });
+
+  it("a project whose stored link joins a task to its parent loads as corrupt", async () => {
+    const { editor, projectId } = await editorWithProject();
+    const [parent, child] = [randomUUID(), randomUUID()];
+    await send(editor, projectId, createTask(parent, "Parent", "2026-10-05"));
+    await send(editor, projectId, { type: "createRow", id: child, kind: "task", parentId: parent, afterId: null, title: "Child", start: "2026-10-05" });
+    await t.db.link.create({ data: { projectId, predecessorId: parent, followerId: child, kind: "FS", lag: 0 } });
+    const restarted = await testApp({ db: t.db, config: testConfig });
+    const response = await restarted.inject({ url: `/api/projects/${projectId}/state`, headers: { cookie: editor } });
+    await restarted.close();
+    expect(response.statusCode).toBe(500);
+    expect(response.json().error).toBe("project_corrupt");
   });
 
   it("returns the original result when a command is retried with the same commandId", async () => {
