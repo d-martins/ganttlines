@@ -645,6 +645,13 @@ describe("removeLink", () => {
     expect(predecessorOf(state, "b")).toBeNull();
   });
 
+  it("with keepPlace: false, leaves the task's own start as it was, so it moves back", () => {
+    const state = run(linked, cal, { ...remove("a", "b"), keepPlace: false });
+    expect(taskIn(state, "b").userStart).toBe("2026-10-05");
+    expect(datesIn(state, "b")?.start).toBe("2026-10-05");
+    expect(predecessorOf(state, "b")).toBeNull();
+  });
+
   it("refuses a link that doesn't exist", () => {
     expect(applyCommand(linked, cal, remove("a", "b", "FF"))).toMatchObject({ ok: false, reason: "not_found" });
   });

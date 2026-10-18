@@ -47,7 +47,7 @@ export const CommandSchema = z.discriminatedUnion("type", [
   cmd("setLocked", { id, locked: z.boolean() }),
   cmd("addLink", { predecessorId: id, followerId: id, kind: linkKind, lag: lag.optional() }),
   cmd("updateLink", { predecessorId: id, followerId: id, kind: linkKind, lag: lag.optional(), newKind: linkKind.optional() }),
-  cmd("removeLink", { predecessorId: id, followerId: id, kind: linkKind }),
+  cmd("removeLink", { predecessorId: id, followerId: id, kind: linkKind, keepPlace: z.boolean().optional() }),
   cmd("indent", { id }),
   cmd("outdent", { id }),
   cmd("moveRow", { id, parentId: id.nullable(), afterId: id.nullable() }),

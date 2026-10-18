@@ -27,6 +27,7 @@ describe("CommandSchema", () => {
       { type: "addLink", predecessorId: A, followerId: B, kind: "SS", lag: 1.5 },
       { type: "updateLink", predecessorId: A, followerId: B, kind: "FS", lag: -2, newKind: "FF" },
       { type: "removeLink", predecessorId: A, followerId: B, kind: "FF" },
+      { type: "removeLink", predecessorId: A, followerId: B, kind: "FS", keepPlace: false },
       { type: "moveTask", id: A, start: "2026-10-09", half: "afternoon" },
       { type: "resizeTask", id: A, edge: "end", date: "2026-10-09", half: "morning" },
       { type: "indent", id: A },

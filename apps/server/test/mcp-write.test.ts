@@ -332,6 +332,28 @@ describe("AI access: editing plans", () => {
     await client.close();
   });
 
+  it("replacing a late predecessor with an earlier one moves the task earlier", async () => {
+    const { client } = await editorsApp();
+    await call(client, "add_tasks", {
+      project: "Launch",
+      tasks: [
+        { title: "Late", start: "2026-10-05", durationDays: 5 }, // Mon 5 – Fri 9
+        { title: "Early", start: "2026-10-05", durationDays: 1 }, // Mon 5
+        { title: "F", durationDays: 1, predecessor: "Late" }, // its own date Mon 5, shown Mon 12
+        { title: "G", durationDays: 1, predecessors: [{ task: "Late" }] },
+      ],
+    });
+    const swapped = await call(client, "update_task", { project: "Launch", task: "F", predecessor: "Early" });
+    expect(swapped["task"]).toMatchObject({ predecessors: [on("Early", { kind: "FS", lagDays: 0 })], start: "2026-10-06" });
+    const replaced = await call(client, "update_task", { project: "Launch", task: "G", predecessors: [{ task: "Early" }] });
+    expect(replaced["task"]).toMatchObject({ predecessors: [on("Early", { kind: "FS", lagDays: 0 })], start: "2026-10-06" });
+    // An asked start the new link doesn't allow is still placed by it, and the answer says so.
+    const asked = await call(client, "update_task", { project: "Launch", task: "F", start: "2026-10-05", predecessor: "Late" });
+    expect(asked["task"]).toMatchObject({ start: "2026-10-12" });
+    expect(asked["notes"]).toEqual(["“F” was asked to start 2026-10-05 but starts 2026-10-12: the tasks it waits on and their lags, or the calendar, place it there."]);
+    await client.close();
+  });
+
   it("an invalid link in predecessors rolls back the whole call", async () => {
     const { client } = await editorsApp();
     await call(client, "add_tasks", {

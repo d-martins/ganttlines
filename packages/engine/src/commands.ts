@@ -43,7 +43,11 @@ export type Command =
   | { type: "addLink"; predecessorId: RowId; followerId: RowId; kind: LinkKind; lag?: number }
   /** Changes the lag, the kind (`newKind`), or both; the link keeps its lag when `lag` is left out. */
   | { type: "updateLink"; predecessorId: RowId; followerId: RowId; kind: LinkKind; lag?: number; newKind?: LinkKind }
-  | { type: "removeLink"; predecessorId: RowId; followerId: RowId; kind: LinkKind }
+  /**
+   * `keepPlace` (default true) keeps the follower where it is shown; false leaves its own start
+   * as it was, so it moves to where its remaining links and its own date put it.
+   */
+  | { type: "removeLink"; predecessorId: RowId; followerId: RowId; kind: LinkKind; keepPlace?: boolean }
   | { type: "indent"; id: RowId }
   | { type: "outdent"; id: RowId }
   | { type: "moveRow"; id: RowId; parentId: RowId | null; afterId: RowId | null }
@@ -137,7 +141,8 @@ class Execution {
       case "updateLink":
         return this.updateLink(command, command.lag, command.newKind);
       case "removeLink":
-        this.detachLink(this.existingLink(command));
+        if (command.keepPlace === false) this.deleteLink(this.existingLink(command));
+        else this.detachLink(this.existingLink(command));
         return this.result();
       case "indent":
         return this.indent(command.id);

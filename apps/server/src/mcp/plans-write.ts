@@ -467,8 +467,9 @@ async function setLinks(edit: BoardEdit, id: string, wanted: readonly WantedLink
   const current = edit.row(id)?.links.into ?? [];
   const same = (link: { predecessorId: string; kind: LinkKind }, other: { predecessorId: string; kind: LinkKind }) =>
     link.predecessorId === other.predecessorId && link.kind === other.kind;
+  // A replaced link doesn't pin the task: it goes where its remaining links and its own date put it.
   for (const link of current) {
-    if (!wanted.some((other) => same(link, other))) await edit.run({ type: "removeLink", predecessorId: link.predecessorId, followerId: id, kind: link.kind });
+    if (!wanted.some((other) => same(link, other))) await edit.run({ type: "removeLink", predecessorId: link.predecessorId, followerId: id, kind: link.kind, keepPlace: false });
   }
   for (const link of wanted) {
     const existing = current.find((other) => same(link, other));
