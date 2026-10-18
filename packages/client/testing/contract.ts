@@ -1,4 +1,4 @@
-import type { ClientMessage, ProjectDto, ServerMessage } from "@ganttlines/protocol";
+import { PROTOCOL_VERSION, type ClientMessage, type ProjectDto, type ServerMessage } from "@ganttlines/protocol";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { SocketLike, WorkspaceSource } from "../src/source";
 
@@ -45,7 +45,7 @@ export async function fillWorkspace(source: WorkspaceSource): Promise<ProjectDto
   await source.setWorkingWeekdays([1, 2, 3, 4]);
   const link = source.openBoard(project.id).openLink();
   await new Promise((resolve) => setTimeout(resolve, 10));
-  link.send(JSON.stringify({ type: "join", projectId: project.id, version: 0 }));
+  link.send(JSON.stringify({ type: "join", projectId: project.id, version: 0, protocol: PROTOCOL_VERSION }));
   link.send(JSON.stringify({ type: "command", commandId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", command: { type: "createRow", id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", kind: "task", parentId: null, afterId: null, title: "Design", start: "2026-10-05" } }));
   await new Promise((resolve) => setTimeout(resolve, 30));
   await source.createBaseline(project.id, "Kick-off");
@@ -70,7 +70,7 @@ export function workspaceContract(setup: () => Promise<WorkspaceSource>): void {
     const board = source.openBoard(project.id);
     const live = listen(board.openLink());
     await live.open;
-    live.send({ type: "join", projectId: project.id, version: 0 });
+    live.send({ type: "join", projectId: project.id, version: 0, protocol: PROTOCOL_VERSION });
     await live.next("joined");
     live.send({
       type: "command",
@@ -106,7 +106,7 @@ export function workspaceContract(setup: () => Promise<WorkspaceSource>): void {
       expect(await board.load()).toMatchObject({ project: { id: project.id, version: 0 }, rows: [] });
       const live = listen(board.openLink());
       await live.open;
-      live.send({ type: "join", projectId: project.id, version: 0 });
+      live.send({ type: "join", projectId: project.id, version: 0, protocol: PROTOCOL_VERSION });
       expect(await live.next("joined")).toMatchObject({ projectId: project.id, version: 0 });
       live.send({
         type: "command",
@@ -148,7 +148,7 @@ export function workspaceContract(setup: () => Promise<WorkspaceSource>): void {
       const { project, board, live } = await projectWithTask();
       const late = listen(board.openLink());
       await late.open;
-      late.send({ type: "join", projectId: project.id, version: 0 });
+      late.send({ type: "join", projectId: project.id, version: 0, protocol: PROTOCOL_VERSION });
       await late.next("joined");
       const caughtUp = await Promise.race([
         late.next("patch", (message) => message.version === 1).then((message) => message.type),
