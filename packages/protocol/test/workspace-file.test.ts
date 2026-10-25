@@ -43,6 +43,12 @@ describe("WorkspaceFile", () => {
     expect(WorkspaceFile.safeParse(file(2, [taskRow(A)])).success).toBe(false);
     expect(WorkspaceFile.safeParse(file(1, [taskRow(A)], [])).success).toBe(false);
   });
+
+  it("leaves duplicate links and links to missing tasks to the import, which refuses them", () => {
+    const link = { predecessorId: A, followerId: B, kind: "FS", lag: 0 };
+    expect(WorkspaceFile.safeParse(file(2, [taskRow(A), taskRow(B)], [link, { ...link, lag: 1 }])).success).toBe(true);
+    expect(WorkspaceFile.safeParse(file(2, [taskRow(A)], [link])).success).toBe(true);
+  });
 });
 
 describe("WorkspaceFileV1", () => {

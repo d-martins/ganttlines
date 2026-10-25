@@ -170,6 +170,12 @@ describe("the workspace file", () => {
       twice.projects[0].rows.push({ ...twice.projects[0].rows[0], id: B, position: "a1" });
       twice.projects[0].links.push({ predecessorId: A, followerId: B, kind: "FS", lag: 0 }, { predecessorId: A, followerId: B, kind: "FS", lag: 1 });
       await expect(readWorkspaceFile(JSON.stringify(twice))).rejects.toMatchObject({ code: "invalid_file", message: expect.stringMatching(/twice/) });
+      const dangling = await base();
+      dangling.projects[0].links.push({ predecessorId: A, followerId: "99999999-9999-4999-8999-999999999999", kind: "SS", lag: 0 });
+      await expect(readWorkspaceFile(JSON.stringify(dangling))).rejects.toMatchObject({
+        code: "invalid_file",
+        message: `This file can't be opened: project “Launch”: link 99999999-9999-4999-8999-999999999999|${A}|SS has a missing task 99999999-9999-4999-8999-999999999999`,
+      });
     });
 
     it("with the same id twice", async () => {

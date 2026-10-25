@@ -212,6 +212,17 @@ describe("local boards", () => {
     expect(board.links).toEqual([{ predecessorId: TASK, followerId: BUILD, kind: "FS", lag: -0.5 }]);
     expect(board.rows[1]).not.toHaveProperty("predecessorId");
     expect(source.exportFile().version).toBe(2);
+
+    // The next change writes the project back in the new shape.
+    const link = source.openBoard(project.id).openLink();
+    await settle();
+    link.send(JSON.stringify({ type: "join", projectId: project.id, version: 2, protocol: PROTOCOL_VERSION }));
+    link.send(JSON.stringify({ type: "command", commandId: "99999999-9999-4999-8999-999999999999", command: { type: "updateTitle", id: TASK, title: "Design" } }));
+    await settle();
+    const [stored] = (await store.load()).projects;
+    expect(stored?.links).toEqual([{ predecessorId: TASK, followerId: BUILD, kind: "FS", lag: -0.5 }]);
+    expect(stored?.rows.flatMap((row) => Object.keys(row)).filter((key) => key === "predecessorId" || key === "offset")).toEqual([]);
+    expect(stored?.rows[0]).toMatchObject({ title: "Design" });
   });
 
   it("ends a deleted project's open boards", async () => {
