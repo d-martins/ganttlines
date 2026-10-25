@@ -874,6 +874,52 @@ describe("moveTask with links of every kind", () => {
     expect(datesIn(state, "b")).toEqual({ start: "2026-10-12", end: "2026-10-13" });
   });
 
+  describe("a milestone held back by an FF delay", () => {
+    it("lands on the day it was dropped, even on an afternoon half", () => {
+      const a = task("a", { userStart: "2026-10-05" }); // Mon 5
+      const linked = project(a, task("m", { userStart: "2026-10-05", duration: 0 }), link("a", "m", 2, "FF"));
+      expect(datesIn(linked, "m")?.start).toBe("2026-10-07");
+      const state = run(linked, cal, { type: "moveTask", id: "m", start: "2026-10-06", half: "afternoon" });
+      expect(datesIn(state, "m")?.start).toBe("2026-10-06");
+      expect(state.links["m|a|FF"]?.lag).toBe(1);
+      expect(taskIn(state, "m").startsAfternoon).toBe(false);
+    });
+
+    it("lands on the day it was dropped after a half-day predecessor", () => {
+      const a = task("a", { userStart: "2026-10-05", duration: 0.5 }); // Mon 5 morning
+      const linked = project(a, task("m", { userStart: "2026-10-05", duration: 0 }), link("a", "m", 1.5, "FF"));
+      expect(datesIn(linked, "m")?.start).toBe("2026-10-06");
+      const state = run(linked, cal, { type: "moveTask", id: "m", start: "2026-10-05", half: "afternoon" });
+      expect(datesIn(state, "m")?.start).toBe("2026-10-05");
+      expect(state.links["m|a|FF"]?.lag).toBe(0.5);
+    });
+
+    it("lands on the day its parent's drag shifts it to", () => {
+      const linked = project(
+        task("x", { userStart: "2026-10-05" }), // Mon 5
+        task("p"),
+        task("c", { parentId: "p", userStart: "2026-10-06" }), // Tue 6
+        task("m", { parentId: "p", userStart: "2026-10-05", duration: 0 }), // shown Wed 7
+        task("n", { parentId: "p", userStart: "2026-10-08", duration: 0 }), // Thu 8, unlinked
+        link("x", "m", 2, "FF"),
+      );
+      expect(datesIn(linked, "m")?.start).toBe("2026-10-07");
+      // Half a day earlier: c starts Mon 5 afternoon, m shifts to Tue 6.
+      const state = run(linked, cal, { type: "moveTask", id: "p", start: "2026-10-05", half: "afternoon" });
+      expect(halvesIn(state, "c")?.start).toBe("2026-10-05 pm");
+      expect(datesIn(state, "m")?.start).toBe("2026-10-06");
+      expect(state.links["m|x|FF"]?.lag).toBe(1);
+      expect(taskIn(state, "m").startsAfternoon).toBe(false);
+      expect(taskIn(state, "n")).toMatchObject({ userStart: "2026-10-07", startsAfternoon: false });
+    });
+  });
+
+  it("stores an unlinked milestone dropped on an afternoon half on that day's morning", () => {
+    const state = run(project(task("m", { userStart: "2026-10-05", duration: 0 })), cal, { type: "moveTask", id: "m", start: "2026-10-07", half: "afternoon" });
+    expect(taskIn(state, "m")).toMatchObject({ userStart: "2026-10-07", startsAfternoon: false });
+    expect(datesIn(state, "m")?.start).toBe("2026-10-07");
+  });
+
   it("drags a parent by its FS and SS links, leaving FF links into it alone", () => {
     const state = run(
       project(

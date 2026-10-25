@@ -247,7 +247,7 @@ class Execution {
     const delta = this.calendar.workingHalvesBetween(from, half, null);
     const shifted = new Map<RowId, HalfDay>();
     for (const leaf of leaves) {
-      shifted.set(leaf.id, this.calendar.addWorkingHalves(spanStart(this.spanOf(leaf.id)!), delta, leaf.resourceId));
+      shifted.set(leaf.id, onItsDay(leaf, this.calendar.addWorkingHalves(spanStart(this.spanOf(leaf.id)!), delta, leaf.resourceId)));
       this.patch(leaf, startAt(shifted.get(leaf.id)!));
     }
     // Re-anchor leaves tied to tasks outside the group against where those tasks now are
@@ -436,7 +436,7 @@ class Execution {
     const resource = task.resourceId;
     const inherited = this.constraintsOf(task, false);
     const half = Math.max(
-      this.calendar.snapHalf(target, resource),
+      onItsDay(task, this.calendar.snapHalf(target, resource)),
       requiredStart(
         this.calendar,
         task,
@@ -481,7 +481,9 @@ class Execution {
         const overlap = this.calendar.workingHalvesBetween(naturalStart(this.calendar, span, resource), clamped, resource) / 2;
         this.patchLink(link, { lag: holdsBack ? overlap : Math.min(0, overlap) });
       } else if (holdsBack) {
-        const excess = this.calendar.workingHalvesBetween(clamped, required, resource) / 2;
+        // A milestone's FF requirement is the morning of its day, so it lands on the drop's day.
+        const from = link.kind === "FF" ? onItsDay(task, clamped) : clamped;
+        const excess = this.calendar.workingHalvesBetween(from, required, resource) / 2;
         this.patchLink(link, { lag: Math.max(0, link.lag - excess) });
       }
     }
@@ -654,6 +656,11 @@ class Execution {
   private result(): ProjectState {
     return { rows: this.rows, links: this.links };
   }
+}
+
+/** A milestone is a point on its day, so it goes on that day's morning; other tasks stay at `half`. */
+function onItsDay(task: Pick<TaskRow, "duration">, half: HalfDay): HalfDay {
+  return task.duration === 0 ? halfDay(dayOf(half)) : half;
 }
 
 /** Stored inputs for a task starting at `half`. */
