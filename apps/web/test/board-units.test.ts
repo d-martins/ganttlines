@@ -1,7 +1,8 @@
-import { Calendar, linkKey, toDay, weekday, type Link } from "@ganttlines/engine";
+import { Calendar, linkKey, toDay, weekday, type Change, type Link } from "@ganttlines/engine";
+import type { ActivityEntryDto } from "@ganttlines/protocol";
 import { describe, expect, it } from "vitest";
 import { elbow } from "../src/board/chart/dependencies";
-import { describeChange } from "../src/board/panel/activity";
+import { describeChange, describeEntry } from "../src/board/panel/activity";
 import { chartRange, Timeline } from "../src/board/chart/timeline";
 import { dropMove } from "../src/board/list/list-actions";
 import { durations } from "../src/board/list/task-list";
@@ -28,9 +29,20 @@ describe("history of links", () => {
     expect(describeChange(lag, names, "f")).toBe("changed the delay after “Design” to 3 days");
     expect(describeChange(created(2, "FF"), names, "p")).toBe("“Build” now waits on it, can't finish before it");
     expect(describeChange(removed, names, "p")).toBe("“Build” no longer waits on it");
-    expect(describeChange(lag, names, "p")).toBeNull();
+    expect(describeChange(lag, names, "p")).toBe("changed the delay of “Build”'s link to 3 days");
+    expect(describeChange({ ...lag, after: -2 }, names, "f")).toBe("changed the delay after “Design” to overlapping 2 days");
+    expect(describeChange({ ...lag, after: -2 }, names, "p")).toBe("changed the delay of “Build”'s link to overlapping 2 days");
     const gone = { ...names, state: { rows: { f: names.state.rows.f }, links: {} } };
     expect(describeChange(removed, gone, "f")).toBe("no longer waits on a deleted task");
+  });
+
+  it("a kind change reads as one phrase", () => {
+    const toSS = [removed, created(0, "SS")];
+    const entry = (changes: Change[], name = "updateLink") => ({ version: 1, name, actor: { label: "Ana" }, createdAt: "2026-10-01T00:00:00Z", changes }) as ActivityEntryDto;
+    expect(describeEntry(entry(toSS), names, "f")).toBe("changed the link with “Design” to “once it starts” (was “after it finishes”)");
+    expect(describeEntry(entry(toSS), names, "p")).toBe("“Build”'s link to it is now “once it starts”");
+    // Created first, deleted second (as an undo may log it): still one kind change.
+    expect(describeEntry(entry([...toSS].reverse(), "undo"), names, "f")).toBe("undid a change (changed the link with “Design” to “once it starts” (was “after it finishes”))");
   });
 });
 

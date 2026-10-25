@@ -20,8 +20,8 @@ import { useEffect, useRef, useState, type Ref } from "react";
 import { IconButton } from "../../ui/button";
 import { parseDays } from "../list/list-actions";
 import { useSelection } from "../selection";
+import { delayWords } from "../link-words";
 import { TaskPicker } from "../task-picker";
-import { delayWords } from "./activity";
 import { CommitInput, INPUT } from "./commit-input";
 
 type Direction = "into" | "outOf";

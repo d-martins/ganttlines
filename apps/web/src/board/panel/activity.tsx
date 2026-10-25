@@ -1,10 +1,11 @@
-import { isLinkChange, LINK_KIND_WORDS, toDay, type Change, type LinkChange, type ProjectState, type RowId } from "@ganttlines/engine";
+import { isLinkChange, isLinkKindChange, LINK_KIND_WORDS, pairKindChanges, toDay, type Change, type LinkChange, type LinkKind, type LinkKindChange, type ProjectState, type RowId } from "@ganttlines/engine";
 import type { ActivityEntryDto, ResourceDto } from "@ganttlines/protocol";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { errorMessage } from "../../api/client";
 import { rowActivity } from "../../api/queries";
 import { Button } from "../../ui/button";
 import { formatDay, fullTime, timeAgo } from "../format";
+import { delayWords, lagWords } from "../link-words";
 
 interface Names {
   state: ProjectState;
@@ -12,20 +13,25 @@ interface Names {
 }
 
 const quote = (text: unknown) => `“${typeof text === "string" && text ? text : "Untitled"}”`;
-const days = (n: number) => `${n} ${n === 1 ? "day" : "days"}`;
+const kindWords = (kind: LinkKind) => `“${LINK_KIND_WORDS[kind]}”`;
 
-/** A link's delay after its kind: ", 2 days later", ", overlapping 1 day", or nothing. */
-export function delayWords(lag: number): string {
-  return lag > 0 ? `, ${days(lag)} later` : lag < 0 ? `, overlapping ${days(-lag)}` : "";
-}
-
-/** A link change as seen from one of its two tasks (`rowId`); null to leave out. */
-function describeLinkChange({ link, field, after }: LinkChange, names: Names, rowId: RowId): string | null {
+/** A link change (or kind change) as seen from one of its two tasks (`rowId`); null to leave out. */
+function describeLinkChange(change: LinkChange | LinkKindChange, names: Names, rowId: RowId): string | null {
+  const { link } = change;
   const asFollower = link.followerId === rowId;
   if (!asFollower && link.predecessorId !== rowId) return null;
   const otherRow = names.state.rows[asFollower ? link.predecessorId : link.followerId];
   const other = otherRow ? quote(otherRow.title) : "a deleted task";
-  if (field === "lag") return asFollower && typeof after === "number" ? `changed the delay after ${other} to ${days(after)}` : null;
+  if (isLinkKindChange(change)) {
+    return asFollower
+      ? `changed the link with ${other} to ${kindWords(change.toKind)} (was ${kindWords(change.fromKind)})`
+      : `${other}'s link to it is now ${kindWords(change.toKind)}`;
+  }
+  const { field, after } = change;
+  if (field === "lag") {
+    if (typeof after !== "number") return null;
+    return asFollower ? `changed the delay after ${other} to ${lagWords(after)}` : `changed the delay of ${other}'s link to ${lagWords(after)}`;
+  }
   if (after === null) return asFollower ? `no longer waits on ${other}` : `${other} no longer waits on it`;
   const phrase = LINK_KIND_WORDS[link.kind];
   if (!asFollower) return `${other} now waits on it, ${phrase}`;
@@ -37,8 +43,8 @@ function describeLinkChange({ link, field, after }: LinkChange, names: Names, ro
  * One stored change, as a phrase seen from the row `rowId` ("renamed it to “Hooks”", "now waits on
  * “Design”, after it finishes"); null to leave out.
  */
-export function describeChange(change: Change, names: Names, rowId: RowId): string | null {
-  if (isLinkChange(change)) return describeLinkChange(change, names, rowId);
+export function describeChange(change: Change | LinkKindChange, names: Names, rowId: RowId): string | null {
+  if (isLinkKindChange(change) || isLinkChange(change)) return describeLinkChange(change, names, rowId);
   const { field, before, after } = change;
   switch (field) {
     case "*":
@@ -77,7 +83,7 @@ export function describeChange(change: Change, names: Names, rowId: RowId): stri
 
 /** What an entry did to this row, e.g. "moved it in the list, renamed it to “Hooks”". */
 export function describeEntry(entry: ActivityEntryDto, names: Names, rowId: RowId): string {
-  const phrases = [...new Set(entry.changes.map((change) => describeChange(change, names, rowId)).filter((phrase): phrase is string => phrase !== null))];
+  const phrases = [...new Set(pairKindChanges(entry.changes).map((change) => describeChange(change, names, rowId)).filter((phrase): phrase is string => phrase !== null))];
   const what = phrases.join(", ") || "changed it";
   return entry.name === "undo" ? `undid a change (${what})` : entry.name === "redo" ? `redid a change (${what})` : what;
 }
