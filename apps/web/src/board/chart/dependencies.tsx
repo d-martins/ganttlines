@@ -1,7 +1,7 @@
 import { linkKey, type LinkKind } from "@ganttlines/engine";
 import type { BoardModel, BoardRow } from "../model";
 import type { BarStyle } from "../view-store";
-import { extent, halfHeight, shapeOf, ROW_HEIGHT } from "./bars";
+import { DOT_REACH, extent, halfHeight, shapeOf, ROW_HEIGHT } from "./bars";
 import type { Timeline } from "./timeline";
 
 const STUB = 8;
@@ -25,8 +25,8 @@ export function elbow(from: { left: number; right: number; y: number; half: numb
 
 /**
  * Path of a link of `kind` from its predecessor to its follower. FS is the elbow into the follower's
- * start. SS leaves the predecessor's start, passes left of both bars and enters the follower's start
- * (pointing right); FF leaves the predecessor's end, passes right of both and enters the follower's
+ * start. SS leaves the predecessor's start dot (from its outer edge, not through it), passes left of
+ * both bars and their start dots and enters the follower's start (pointing right); FF leaves the predecessor's end, passes right of both and enters the follower's
  * end (pointing left).
  */
 export function linkPath(
@@ -36,7 +36,10 @@ export function linkPath(
   rowHeight: number,
 ): string {
   if (kind === "FS") return elbow(from, to, rowHeight);
-  if (kind === "SS") return `M${from.left},${from.y} H${Math.min(from.left, to.left) - STUB} V${to.y} H${to.left}`;
+  if (kind === "SS") {
+    const out = from.left - DOT_REACH;
+    return `M${out},${from.y} H${Math.min(from.left, to.left) - DOT_REACH - STUB} V${to.y} H${to.left}`;
+  }
   return `M${from.right},${from.y} H${Math.max(from.right, to.right) + STUB} V${to.y} H${to.right}`;
 }
 

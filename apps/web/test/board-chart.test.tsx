@@ -318,9 +318,10 @@ describe("linkPath", () => {
   });
 
   it("linkPath SS/FF snapshots", () => {
-    // SS: out of the left edges, round the leftmost, into the follower's left side (pointing right).
-    expect(linkPath("SS", from, to, 30)).toBe("M40,15 H32 V45 H60");
-    expect(linkPath("SS", { ...from, y: 45 }, { ...to, left: 20, y: 15 }, 30)).toBe("M40,45 H12 V15 H20");
+    // SS: out of the predecessor's start dot (its outer edge, 14 px left of the bar), round the leftmost
+    // clear of both start dots, into the follower's left side (pointing right).
+    expect(linkPath("SS", from, to, 30)).toBe("M26,15 H18 V45 H60");
+    expect(linkPath("SS", { ...from, y: 45 }, { ...to, left: 20, y: 15 }, 30)).toBe("M26,45 H-2 V15 H20");
     // FF: out of the right edges, round the rightmost, into the follower's right side (pointing left).
     expect(linkPath("FF", from, to, 30)).toBe("M100,15 H148 V45 H140");
     expect(linkPath("FF", from, { ...to, right: 80 }, 30)).toBe("M100,15 H108 V45 H80");
