@@ -1,3 +1,4 @@
+import { MAX_LAG } from "@ganttlines/engine";
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProjectService } from "../src/projects/project-service";
@@ -159,6 +160,25 @@ describe("AI access: editing plans", () => {
     expect(moved["error"]).toBeUndefined();
     const board = (await call(client, "get_project", { project: "Launch" }))["rows"] as { title: string; start: string }[];
     expect(board.find((row) => row.title === "F")).toMatchObject({ start: "2026-10-16" });
+    await client.close();
+  });
+
+  it("refuses a lag given while removing the predecessor", async () => {
+    const { client } = await editorsApp();
+    await call(client, "add_tasks", { project: "Launch", tasks: [{ title: "P", start: "2026-10-12" }, { title: "F", predecessor: "P", lagDays: 1 }] });
+    const refused = await call(client, "update_task", { project: "Launch", task: "F", predecessor: null, lagDays: 2 });
+    expect(refused).toEqual({ error: "“F”: lagDays needs a predecessor — it can't be set while removing it." });
+    const board = (await call(client, "get_project", { project: "Launch" }))["rows"] as { title: string; predecessors?: unknown[] }[];
+    expect(board.find((row) => row.title === "F")!.predecessors).toEqual([on("P", { lagDays: 1 })]);
+    await client.close();
+  });
+
+  it("moves the bar to set the half day when the lag can't move half a day further", async () => {
+    const { client } = await editorsApp();
+    await call(client, "add_tasks", { project: "Launch", tasks: [{ title: "P", start: "2026-10-12" }, { title: "F", predecessor: "P", lagDays: MAX_LAG }] });
+    const later = await call(client, "update_task", { project: "Launch", task: "F", half: "afternoon" });
+    expect(later["error"]).toBeUndefined();
+    expect(later["task"]).toMatchObject({ startsAfternoon: true, predecessors: [on("P", { lagDays: MAX_LAG })] });
     await client.close();
   });
 

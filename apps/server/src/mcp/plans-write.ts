@@ -417,6 +417,7 @@ function shorthandProblem(fields: { predecessors?: unknown; predecessor?: unknow
   const shorthand = fields.predecessor !== undefined || fields.lagDays !== undefined;
   if (!shorthand) return null;
   if (fields.predecessors !== undefined) return `“${title}”: give either predecessors, or predecessor and lagDays, not both.`;
+  if (fields.predecessor === null && fields.lagDays !== undefined) return `“${title}”: lagDays needs a predecessor — it can't be set while removing it.`;
   if (links > 1) return `“${title}” waits on several tasks: use predecessors to change its links.`;
   return null;
 }
@@ -448,10 +449,7 @@ function wantedLinks(
     return wanted;
   }
   // The shorthand: the task's one link, as a link to a task "after it finishes".
-  if (fields.predecessor === null) {
-    if (fields.lagDays !== undefined) throw new ToolProblem("Give `predecessor` along with `lagDays`.");
-    return [];
-  }
+  if (fields.predecessor === null) return [];
   if (fields.predecessor !== undefined) return [{ predecessorId: edit.find(fields.predecessor, "task", added).id, kind: "FS", lag: fields.lagDays }];
   if (fields.lagDays !== undefined) {
     const [link] = edit.row(id)?.links.into ?? [];
@@ -529,9 +527,11 @@ async function applyTaskFields(
     const afternoon = fields.half === "afternoon";
     if (entry.span.startsAfternoon !== afternoon) {
       const [link, ...others] = entry.links.into;
-      if (link?.kind === "FS" && others.length === 0 && !entry.isParent && !(entry.row.kind === "task" && entry.row.locked)) {
+      const lag = (link?.lag ?? 0) + (afternoon ? 0.5 : -0.5);
+      // Only FS lags move here (SS and FF can't go below 0); one that would pass MAX_LAG moves the bar instead.
+      if (link?.kind === "FS" && others.length === 0 && Math.abs(lag) <= MAX_LAG && !entry.isParent && !(entry.row.kind === "task" && entry.row.locked)) {
         // A follower keeps following: its lag moves by half a day (moving the bar would pin its date).
-        await edit.run({ type: "updateLink", predecessorId: link.predecessorId, followerId: id, kind: "FS", lag: link.lag + (afternoon ? 0.5 : -0.5) });
+        await edit.run({ type: "updateLink", predecessorId: link.predecessorId, followerId: id, kind: "FS", lag });
       } else {
         await edit.run({ type: "moveTask", id, start: fromDay(entry.span.start), half: fields.half });
       }
