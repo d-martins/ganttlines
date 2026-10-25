@@ -11,7 +11,7 @@ import {
   toDay,
   TASK_DEFAULTS,
   violatedLinks,
-  workedDays,
+  workedDaysOfAll,
   type Calendar,
   type Link,
   type LinkKey,
@@ -105,6 +105,8 @@ export function boardModel(
   const sectionSpans = switched ? rollUpSections(state, saved) : null;
 
   const tree = buildTree(state);
+  // Every parent's and section's worked days (leaf tasks have none).
+  const worked = schedule && !switched ? workedDaysOfAll(state, schedule, calendar, tree) : null;
   const rows = visible.map((entry): BoardRow => {
     const { row } = entry;
     const actualDays = actualDaysOf(state, tree, row.id);
@@ -131,7 +133,7 @@ export function boardModel(
       violation: computed?.violation ?? false,
       ghost: saved.get(row.id) ?? null,
       actualDays,
-      workedDays: schedule && span && (liveKind === "parent" || liveKind === "section") ? workedDays(state, schedule, calendar, row.id, tree) : null,
+      workedDays: span ? (worked?.get(row.id) ?? null) : null,
       actual,
     };
   });
