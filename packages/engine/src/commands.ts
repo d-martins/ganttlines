@@ -339,8 +339,10 @@ class Execution {
   }
 
   /**
-   * A changed link re-places an unlocked leaf follower at the earliest start all its links allow;
-   * an FS lag is clamped so it never starts before the day after its predecessor starts.
+   * When the changed link was deciding an unlocked leaf follower's start, the follower is re-placed
+   * at the earliest start all its constraints now allow (earlier or later); otherwise it keeps its
+   * own date, moving later only if the link now holds it back. An FS lag is clamped so the follower
+   * never starts before the day after its predecessor starts.
    */
   private updateLink(ref: LinkRef, lag: number | undefined, newKind: LinkKind | undefined): ProjectState {
     const link = this.existingLink(ref);
@@ -360,12 +362,15 @@ class Execution {
 
     const resource = follower.resourceId;
     const predecessor = this.spanOf(link.predecessorId);
+    const shown = this.spanOf(follower.id);
+    const deciding = shown !== null && predecessor !== null && this.calendar.snapHalf(linkRequirement(this.calendar, follower, link, predecessor), resource) === spanStart(shown);
     if (kind === "FS" && predecessor) {
       const natural = naturalStart(this.calendar, predecessor, resource);
       const floor = floorStart(this.calendar, predecessor, resource);
       updated.lag = Math.max(nextLag * 2, this.calendar.workingHalvesBetween(natural, floor, resource)) / 2;
     }
     this.putLink(updated);
+    if (!deciding) return this.result();
     const constraints = this.constraintsOf(follower).map((constraint) => ({ link: constraint, span: this.spanOf(constraint.predecessorId) }));
     const required = requiredStart(this.calendar, follower, constraints);
     if (required === -Infinity) return this.result();

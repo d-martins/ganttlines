@@ -614,6 +614,29 @@ describe("updateLink", () => {
     expect(taskIn(updated, "b").userStart).toBe("2026-10-08");
   });
 
+  it("moves the task earlier when the link deciding its start gets a shorter delay", () => {
+    const state = project(task("a", { userStart: "2026-10-05", duration: 3 }), task("b", { userStart: "2026-10-12" }), link("a", "b", 2));
+    const updated = run(state, cal, { type: "updateLink", predecessorId: "a", followerId: "b", kind: "FS", lag: 0 });
+    expect(taskIn(updated, "b").userStart).toBe("2026-10-08");
+    expect(datesIn(updated, "b")?.start).toBe("2026-10-08");
+  });
+
+  it("keeps a later date of the task's own when the edited link isn't deciding its start", () => {
+    // Dragged to Wed 14, later than the link (Thu 8) allows.
+    const state = project(task("a", { userStart: "2026-10-05", duration: 3 }), task("b", { userStart: "2026-10-14" }), link("a", "b"));
+    const updated = run(state, cal, { type: "updateLink", predecessorId: "a", followerId: "b", kind: "FS", lag: 1 });
+    expect(taskIn(updated, "b").userStart).toBe("2026-10-14");
+    expect(datesIn(updated, "b")?.start).toBe("2026-10-14");
+    expect(lagOf(updated, "b")).toBe(1);
+  });
+
+  it("pushes the task later when a link that wasn't deciding its start now does", () => {
+    const state = project(task("a", { userStart: "2026-10-05", duration: 3 }), task("b", { userStart: "2026-10-12" }), link("a", "b"));
+    const updated = run(state, cal, { type: "updateLink", predecessorId: "a", followerId: "b", kind: "FS", lag: 5 });
+    expect(datesIn(updated, "b")?.start).toBe("2026-10-15");
+    expect(taskIn(updated, "b").userStart).toBe("2026-10-12");
+  });
+
   it("refuses a locked leaf, and a link that doesn't exist", () => {
     const locked = project(task("a", { userStart: "2026-10-05" }), task("b", { userStart: "2026-10-06", locked: true }), link("a", "b"));
     expect(update(locked, { lag: 1 })).toMatchObject({ ok: false, reason: "locked" });
