@@ -14,7 +14,7 @@ const sql = (name: string) => readFileSync(`${MIGRATIONS}${name}/migration.sql`,
 
 const project = "00000000-0000-4000-8000-000000000001";
 const other = "00000000-0000-4000-8000-000000000002";
-const id = (n: number) => `10000000-0000-4000-8000-00000000000${n}`;
+const id = (n: number) => `10000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 
 beforeAll(async () => {
   container = await new PostgreSqlContainer("postgres:17").start();
@@ -66,5 +66,13 @@ describe("20261018120000_links", () => {
     await client.query(`DELETE FROM "Row" WHERE id = $1`, [id(2)]);
     const { rows } = await client.query(`SELECT "followerId" FROM "Link"`);
     expect(rows).toEqual([{ followerId: id(3) }]);
+  });
+
+  it("deletes a task's links when it is the predecessor, and a project's links with the project", async () => {
+    await client.query(`DELETE FROM "Row" WHERE id = $1`, [id(1)]);
+    expect((await client.query(`SELECT 1 FROM "Link"`)).rowCount).toBe(0);
+    await client.query(`INSERT INTO "Link" ("projectId", "predecessorId", "followerId", kind, lag) VALUES ($1, $2, $3, 'SS', 0)`, [project, id(6), id(3)]);
+    await client.query(`DELETE FROM "Project" WHERE id = $1`, [project]);
+    expect((await client.query(`SELECT 1 FROM "Link"`)).rowCount).toBe(0);
   });
 });

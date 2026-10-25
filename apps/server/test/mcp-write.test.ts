@@ -382,13 +382,33 @@ describe("AI access: editing plans", () => {
         { title: "A", start: "2026-10-05", durationDays: 1 },
         { title: "B", start: "2026-10-05", durationDays: 1 },
         { title: "Parent", start: "2026-10-12" },
-        { title: "Kid", parent: "Parent", start: "2026-10-12", durationDays: 1, predecessor: "A" },
+        { title: "Kid", parent: "Parent", start: "2026-10-05", durationDays: 1, predecessor: "A", lagDays: 1 }, // Wed 7
       ],
     });
-    const result = await call(client, "update_task", { project: "Launch", task: "Kid", title: "Kid 2", predecessors: [{ task: "B" }, { task: "Parent" }] });
+    // Before failing, the call has already moved Kid to Mon 12 (four days after B).
+    const result = await call(client, "update_task", { project: "Launch", task: "Kid", title: "Kid 2", predecessors: [{ task: "B", lagDays: 4 }, { task: "Parent" }] });
     expect(result).toEqual({ error: "“Kid”: A task can't link to its own parent or subtask. Nothing was changed." });
     const board = (await call(client, "get_project", { project: "Launch" }))["rows"] as { title: string; predecessors?: unknown[] }[];
-    expect(board.find((row) => row.title === "Kid")!.predecessors).toEqual([on("A", { kind: "FS" })]);
+    expect(board.find((row) => row.title === "Kid")).toMatchObject({ start: "2026-10-07", predecessors: [on("A", { kind: "FS", lagDays: 1 })] });
+    expect(board.find((row) => row.title === "B")).toMatchObject({ followers: [] });
+    await client.close();
+  });
+
+  it("refuses predecessors that list the same task twice with the same kind, and changes nothing", async () => {
+    const { client } = await editorsApp();
+    await call(client, "add_tasks", {
+      project: "Launch",
+      tasks: [
+        { title: "A", start: "2026-10-05", durationDays: 1 },
+        { title: "B", start: "2026-10-05", durationDays: 1 },
+        { title: "F", durationDays: 1, predecessor: "B" },
+      ],
+    });
+    const result = await call(client, "update_task", { project: "Launch", task: "F", title: "F2", predecessors: [{ task: "A" }, { task: "A", kind: "FS", lagDays: 1 }] });
+    expect(result).toEqual({ error: "“F”: predecessors lists “A” twice with the same kind. Nothing was changed." });
+    const board = (await call(client, "get_project", { project: "Launch" }))["rows"] as { title: string; predecessors?: unknown[] }[];
+    expect(board.map((row) => row.title)).toEqual(["A", "B", "F"]);
+    expect(board.find((row) => row.title === "F")).toMatchObject({ start: "2026-10-06", predecessors: [on("B", { kind: "FS", lagDays: 0 })] });
     await client.close();
   });
 
