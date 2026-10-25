@@ -1,5 +1,6 @@
 import type { Change, LinkChange } from "./changes";
 import type { ProjectState, Row, RowId } from "./model";
+import { hasAncestor } from "./tree";
 
 /** FS: starts after the predecessor finishes; SS: starts once it starts; FF: can't finish before it finishes. */
 export type LinkKind = "FS" | "SS" | "FF";
@@ -52,15 +53,7 @@ export function linksOutOf(state: ProjectState, predecessorId: RowId): Link[] {
  */
 export function findLinkProblem(rows: readonly Row[], links: readonly Link[]): string | null {
   const byId = new Map(rows.map((row) => [row.id, row]));
-  // Bounded by the row count so corrupted parent links can never loop forever.
-  const isAncestor = (ancestorId: RowId, id: RowId): boolean => {
-    let current = byId.get(id)?.parentId ?? null;
-    for (let steps = byId.size; current !== null && steps > 0; steps--) {
-      if (current === ancestorId) return true;
-      current = byId.get(current)?.parentId ?? null;
-    }
-    return false;
-  };
+  const isAncestor = (ancestorId: RowId, id: RowId) => hasAncestor((rowId) => byId.get(rowId), byId.size, ancestorId, id);
   const into = new Map<RowId, number>();
   for (const link of links) {
     const name = linkKey(link);

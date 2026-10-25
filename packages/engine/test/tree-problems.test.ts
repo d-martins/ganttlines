@@ -45,6 +45,10 @@ describe("findLinkProblem", () => {
     expect(findLinkProblem(tasks, links)).toEqual(expect.any(String));
   });
 
+  it("terminates even if parent links are corrupted into a loop", () => {
+    expect(findLinkProblem([task("x", "y"), task("y", "x"), task("z")], [link("z", "x")])).toBeNull();
+  });
+
   it("reports 51 links into one task", () => {
     const many = Array.from({ length: 51 }, (_, i) => task(`t${i}`));
     const links = many.map((row) => link(row.id, "b"));

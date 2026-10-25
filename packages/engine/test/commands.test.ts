@@ -998,6 +998,14 @@ describe("tree commands", () => {
     expect(datesIn(state, "b")?.start).toBe("2026-10-08");
   });
 
+  it("a follower that becomes a parent by the move isn't pinned", () => {
+    const before = project(task("a", { userStart: "2026-10-05", duration: 3 }), task("b", { userStart: "2026-10-05" }), link("a", "b")); // b shown Thu 8
+    const result = applyCommand(before, cal, { type: "moveRow", id: "a", parentId: "b", afterId: null });
+    if (!result.ok) throw new Error(result.message);
+    expect(result.state.links).toEqual({});
+    expect(result.changes).not.toContainEqual(expect.objectContaining({ rowId: "b", field: "userStart" }));
+  });
+
   it("moving a task into the parent that follows it removes that link", () => {
     const state = run(
       project(task("x", { userStart: "2026-10-05", duration: 5 }), task("p"), task("c", { parentId: "p", userStart: "2026-10-05" }), link("x", "p", 0, "FF"), link("x", "c", 0, "SS")),

@@ -182,7 +182,7 @@ class Execution {
     if (!previous) throw new Rejection("invalid", "Nothing to indent under");
     this.assertValidParent(row.kind, previous.id);
     this.patch(row, { parentId: previous.id, position: this.positionAfter(previous.id, this.lastChildId(previous.id)) });
-    return this.dropLinksWithinChains();
+    return this.dropLinksWithinChains(id);
   }
 
   private outdent(id: RowId): ProjectState {
@@ -190,7 +190,7 @@ class Execution {
     if (row.parentId === null) throw new Rejection("invalid", "Already at the top level");
     const parent = this.row(row.parentId);
     this.patch(row, { parentId: parent.parentId, position: this.positionAfter(parent.parentId, parent.id) });
-    return this.dropLinksWithinChains();
+    return this.dropLinksWithinChains(id);
   }
 
   private moveRow(id: RowId, parentId: RowId | null, afterId: RowId | null): ProjectState {
@@ -200,7 +200,7 @@ class Execution {
     }
     this.assertValidParent(row.kind, parentId);
     this.patch(row, { parentId, position: this.positionAfter(parentId, afterId, id) });
-    return this.dropLinksWithinChains();
+    return this.dropLinksWithinChains(id);
   }
 
   private deleteRows(ids: RowId[]): ProjectState {
@@ -318,8 +318,6 @@ class Execution {
 
   private addLink(ref: LinkRef, lag: number): ProjectState {
     const { predecessorId, followerId, kind } = ref;
-    this.row(predecessorId);
-    this.row(followerId);
     this.task(predecessorId);
     this.task(followerId);
     if (!LINK_KINDS.includes(kind)) throw new Rejection("invalid", `Unknown link kind ${kind}`);
@@ -503,13 +501,15 @@ class Execution {
    * Removes `link` while keeping its follower visually where it is: a leaf keeps its current start;
    * for a parent, the subtasks an FS or SS link was pushing are pinned at their current start (the
    * others keep following their own constraints), while an FF link only stretched the parent, which
-   * snaps back to its subtasks.
+   * snaps back to its subtasks. `after`, the tree after a move, skips a leaf the move made a parent
+   * (its dates now come from its subtasks).
    */
-  private detachLink(link: Link): void {
+  private detachLink(link: Link, after?: Tree): void {
     this.deleteLink(link);
     const task = this.rows[link.followerId];
     if (task?.kind !== "task") return;
     if (!isParentTask(this.tree, task)) {
+      if (after && isParentTask(after, task)) return;
       const span = this.spanOf(task.id);
       if (span) this.patch(task, startAt(spanStart(span)));
       return;
@@ -528,12 +528,20 @@ class Execution {
     }
   }
 
-  /** Removes the links a move left between a task and one of its ancestors, as removeLink does. */
-  private dropLinksWithinChains(): ProjectState {
+  /**
+   * Removes the links a move of `id` left between a task and one of its ancestors, as removeLink
+   * does. Only links touching the moved subtree can be such links. `detachLink` reads the tree
+   * from before the move on purpose: it keeps the follower where the schedule before the command
+   * showed it.
+   */
+  private dropLinksWithinChains(id: RowId): ProjectState {
     const state = this.result();
+    let after: Tree | undefined;
+    const moved = new Set(subtreeIds(this.tree, id));
     for (const key of Object.keys(this.links).sort()) {
       const link = this.links[key]!;
-      if (isAncestor(state, link.predecessorId, link.followerId) || isAncestor(state, link.followerId, link.predecessorId)) this.detachLink(link);
+      if (!moved.has(link.predecessorId) && !moved.has(link.followerId)) continue;
+      if (isAncestor(state, link.predecessorId, link.followerId) || isAncestor(state, link.followerId, link.predecessorId)) this.detachLink(link, (after ??= buildTree(state)));
     }
     return this.result();
   }
