@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createUser, setupAdmin, testApp, testConfig, useTestApp } from "./helpers";
 
 const t = useTestApp();
@@ -32,6 +32,41 @@ const createTask = (id: string, title = "Task", start?: string) => ({
   title,
   ...(start ? { start } : {}),
 });
+
+afterEach(() => vi.restoreAllMocks());
+
+/**
+ * Records the Row and Link writes the server issues inside transactions, in order, each with the
+ * number of the transaction it ran in.
+ */
+function recordWrites() {
+  const writes: { transaction: number; call: string; args: unknown }[] = [];
+  const transaction = t.db.$transaction.bind(t.db) as (work: unknown, options?: unknown) => Promise<unknown>;
+  let count = 0;
+  vi.spyOn(t.db, "$transaction").mockImplementation(((work: unknown, options?: unknown) => {
+    if (typeof work !== "function") return transaction(work, options);
+    const number = ++count;
+    const watch = (tx: object) =>
+      new Proxy(tx, {
+        get(target, model, receiver) {
+          const delegate = Reflect.get(target, model, receiver) as Record<string, unknown>;
+          if (model !== "row" && model !== "link") return delegate;
+          return new Proxy(delegate, {
+            get(methods, method) {
+              const fn = Reflect.get(methods, method) as (...args: unknown[]) => unknown;
+              if (typeof fn !== "function" || typeof method !== "string") return fn;
+              return (...args: unknown[]) => {
+                writes.push({ transaction: number, call: `${model}.${method}`, args: args[0] });
+                return fn.apply(methods, args);
+              };
+            },
+          });
+        },
+      });
+    return transaction((tx: object) => (work as (tx: object) => unknown)(watch(tx)), options);
+  }) as never);
+  return writes;
+}
 
 describe("project commands", () => {
   it("applies a command, bumps the version and persists the rows", async () => {
@@ -71,7 +106,7 @@ describe("project commands", () => {
     const { editor, projectId } = await editorWithProject();
     const [a, b] = [randomUUID(), randomUUID()];
     await send(editor, projectId, createTask(a, "Design", "2026-10-05"));
-    await send(editor, projectId, createTask(b, "Build", "2026-10-08"));
+    await send(editor, projectId, createTask(b, "Build", "2026-10-05"));
     expect((await send(editor, projectId, { type: "moveTask", id: a, start: "2026-10-05", half: "afternoon" })).statusCode).toBe(200);
     expect((await send(editor, projectId, { type: "addLink", predecessorId: a, followerId: b, kind: "FS" })).statusCode).toBe(200);
     expect((await send(editor, projectId, { type: "updateLink", predecessorId: a, followerId: b, kind: "FS", lag: 0.5 })).statusCode).toBe(200);
@@ -124,10 +159,42 @@ describe("project commands", () => {
     await send(editor, projectId, { type: "addLink", predecessorId: a, followerId: b, kind: "FS" });
     await send(editor, projectId, { type: "addLink", predecessorId: b, followerId: c, kind: "FS" });
     await send(editor, projectId, { type: "addLink", predecessorId: a, followerId: c, kind: "SS" });
+    const writes = recordWrites();
     const deleted = await send(editor, projectId, { type: "deleteRows", ids: [b] });
     expect(deleted.statusCode).toBe(200);
+    // The links are deleted by name before the row, so the database's cascade has nothing left to do.
+    const deletes = writes.filter(({ call }) => call.endsWith(".deleteMany"));
+    expect(deletes.map(({ call }) => call)).toEqual(["link.deleteMany", "row.deleteMany"]);
+    expect((deletes[0]!.args as { where: { OR: unknown[] } }).where.OR).toEqual(
+      expect.arrayContaining([
+        { predecessorId: a, followerId: b, kind: "FS" },
+        { predecessorId: b, followerId: c, kind: "FS" },
+      ]),
+    );
     expect(await t.db.link.findMany({ where: { projectId } })).toEqual([expect.objectContaining({ predecessorId: a, followerId: c, kind: "SS" })]);
     expect((await reload(editor, projectId)).links).toEqual([expect.objectContaining({ predecessorId: a, followerId: c, kind: "SS" })]);
+  });
+
+  it("undo of a delete re-creates the rows and their links in one transaction", async () => {
+    const { editor, projectId } = await editorWithProject();
+    const [a, b, c] = [randomUUID(), randomUUID(), randomUUID()];
+    for (const id of [a, b, c]) await send(editor, projectId, createTask(id, "T", "2026-10-05"));
+    await send(editor, projectId, { type: "addLink", predecessorId: a, followerId: b, kind: "FS" });
+    await send(editor, projectId, { type: "addLink", predecessorId: b, followerId: c, kind: "SS", lag: 1 });
+    const before = await reload(editor, projectId);
+    await send(editor, projectId, { type: "deleteRows", ids: [b] });
+    const writes = recordWrites();
+    const undo = await t.app.inject({ method: "POST", url: `/api/projects/${projectId}/undo`, headers: { cookie: editor }, payload: { commandId: randomUUID() } });
+    expect(undo.json()).toMatchObject({ skipped: 0 });
+    const creates = writes.filter(({ call }) => call.endsWith(".createMany"));
+    expect(creates.map(({ call }) => call)).toEqual(["row.createMany", "link.createMany"]);
+    expect(new Set(creates.map(({ transaction }) => transaction)).size).toBe(1);
+    expect(await t.db.link.count({ where: { projectId } })).toBe(2);
+    const after = await reload(editor, projectId);
+    expect(after.links).toEqual(expect.arrayContaining(before.links));
+    expect(after.links).toHaveLength(2);
+    const byId = (rows: { id: string }[]) => [...rows].sort((x, y) => (x.id < y.id ? -1 : 1));
+    expect(byId(after.rows)).toEqual(byId(before.rows));
   });
 
   it("undo of addLink deletes the row in the Link table", async () => {
