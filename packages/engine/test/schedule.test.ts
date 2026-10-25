@@ -223,9 +223,10 @@ describe("computeSchedule — link kinds", () => {
     link("x", "p", 0, "FF"),
   ];
 
-  it("FF onto a parent stretches it, not its subtasks", () => {
-    const schedule = computeSchedule(project(section("s"), ...parent), june);
+  it("FF onto a parent stretches it, not its subtasks; the section above follows the stretch", () => {
+    const schedule = computeSchedule(project(section("s"), task("p", { parentId: "s" }), ...parent.slice(1)), june);
     expect(datesOf(schedule, "p")).toEqual({ start: "2026-06-01", end: "2026-06-12" });
+    expect(datesOf(schedule, "s")).toEqual({ start: "2026-06-01", end: "2026-06-12" });
     expect(datesOf(schedule, "c1")).toEqual({ start: "2026-06-01", end: "2026-06-03" });
     expect(datesOf(schedule, "c2")).toEqual({ start: "2026-06-02", end: "2026-06-03" });
   });

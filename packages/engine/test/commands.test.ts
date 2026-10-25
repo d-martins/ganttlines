@@ -939,6 +939,27 @@ describe("tree commands", () => {
     expect(revertChanges(result.state, result.changes, "undo")).toEqual({ state: before, skipped: 0 });
   });
 
+  it("undo of a delete brings back the rows and every link they had, redo deletes them again", () => {
+    const before = project(
+      task("x", { userStart: "2026-10-05" }),
+      task("p"),
+      task("c1", { parentId: "p", userStart: "2026-10-05" }),
+      task("c2", { parentId: "p", userStart: "2026-10-05" }),
+      task("y", { userStart: "2026-10-05" }),
+      link("x", "c1"),
+      link("c1", "c2", 0, "SS"),
+      link("c2", "y"),
+      link("x", "p", 0, "FF"),
+    );
+    const result = applyCommand(before, cal, { type: "deleteRows", ids: ["p"] });
+    if (!result.ok) throw new Error(result.message);
+    expect(Object.keys(result.state.rows).sort()).toEqual(["x", "y"]);
+    expect(result.state.links).toEqual({});
+    const undone = revertChanges(result.state, result.changes, "undo");
+    expect(undone).toEqual({ state: before, skipped: 0 });
+    expect(revertChanges(undone.state, result.changes, "redo")).toEqual({ state: result.state, skipped: 0 });
+  });
+
   it("ignores ids that no longer exist when deleting", () => {
     const state = run(base, cal, { type: "deleteRows", ids: ["gone", "b"] });
     expect(orderOf(state, "s")).toEqual(["a", "c"]);
