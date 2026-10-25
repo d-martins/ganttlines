@@ -5,7 +5,7 @@ import { errorMessage } from "../../api/client";
 import { rowActivity } from "../../api/queries";
 import { Button } from "../../ui/button";
 import { formatDay, fullTime, timeAgo } from "../format";
-import { delayWords, lagWords } from "../link-words";
+import { days, delayWords } from "../link-words";
 
 interface Names {
   state: ProjectState;
@@ -30,7 +30,11 @@ function describeLinkChange(change: LinkChange | LinkKindChange, names: Names, r
   const { field, after } = change;
   if (field === "lag") {
     if (typeof after !== "number") return null;
-    return asFollower ? `changed the delay after ${other} to ${lagWords(after)}` : `changed the delay of ${other}'s link to ${lagWords(after)}`;
+    // An overlap, and FS with no delay, say what the follower now does; otherwise the delay itself.
+    if (after < 0) return asFollower ? `now overlaps ${other} by ${days(-after)}` : `${other} now overlaps it by ${days(-after)}`;
+    if (after === 0 && link.kind === "FS") return asFollower ? `now starts right after ${other}` : `${other} now starts right after it`;
+    const delay = after === 0 ? "none" : days(after);
+    return asFollower ? `changed the delay after ${other} to ${delay}` : `changed the delay of ${other}'s link to ${delay}`;
   }
   if (after === null) return asFollower ? `no longer waits on ${other}` : `${other} no longer waits on it`;
   const phrase = LINK_KIND_WORDS[link.kind];

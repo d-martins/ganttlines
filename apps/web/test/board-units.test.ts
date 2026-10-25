@@ -30,8 +30,13 @@ describe("history of links", () => {
     expect(describeChange(created(2, "FF"), names, "p")).toBe("“Build” now waits on it, can't finish before it");
     expect(describeChange(removed, names, "p")).toBe("“Build” no longer waits on it");
     expect(describeChange(lag, names, "p")).toBe("changed the delay of “Build”'s link to 3 days");
-    expect(describeChange({ ...lag, after: -2 }, names, "f")).toBe("changed the delay after “Design” to overlapping 2 days");
-    expect(describeChange({ ...lag, after: -2 }, names, "p")).toBe("changed the delay of “Build”'s link to overlapping 2 days");
+    expect(describeChange({ ...lag, after: -2 }, names, "f")).toBe("now overlaps “Design” by 2 days");
+    expect(describeChange({ ...lag, after: -2 }, names, "p")).toBe("“Build” now overlaps it by 2 days");
+    expect(describeChange({ ...lag, after: 0 }, names, "f")).toBe("now starts right after “Design”");
+    expect(describeChange({ ...lag, after: 0 }, names, "p")).toBe("“Build” now starts right after it");
+    const ssLag = { ...lag, link: { ...ref, kind: "SS" as const }, after: 0 };
+    expect(describeChange(ssLag, names, "f")).toBe("changed the delay after “Design” to none");
+    expect(describeChange(ssLag, names, "p")).toBe("changed the delay of “Build”'s link to none");
     const gone = { ...names, state: { rows: { f: names.state.rows.f }, links: {} } };
     expect(describeChange(removed, gone, "f")).toBe("no longer waits on a deleted task");
   });
