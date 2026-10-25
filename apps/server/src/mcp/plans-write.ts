@@ -139,6 +139,13 @@ async function editProject(tools: ToolContext, ref: string): Promise<BoardEdit> 
   return edit;
 }
 
+const Predecessor = z.object({
+  task: z.string().min(1).describe("the task (id or title) this one waits on"),
+  kind: z.enum(["FS", "SS", "FF"]).optional().describe("FS: starts after it finishes (default); SS: starts once it starts; FF: can't finish before it"),
+  lagDays: LAG.optional().describe("working days of delay (default 0, or as it was); negative overlaps, FS only"),
+});
+type Predecessor = z.infer<typeof Predecessor>;
+
 const TaskFields = {
   description: z.string().max(20_000).optional().describe("Markdown"),
   color: z.enum(TASK_COLORS).optional(),
@@ -147,13 +154,7 @@ const TaskFields = {
   durationDays: DAYS.optional().describe("working days, in half-day steps (default 1)"),
   assignee: z.string().nullable().optional().describe("a team member's id or name; null for nobody"),
   predecessors: z
-    .array(
-      z.object({
-        task: z.string().min(1).describe("the task (id or title) this one waits on"),
-        kind: z.enum(["FS", "SS", "FF"]).optional().describe("FS: starts after it finishes (default); SS: starts once it starts; FF: can't finish before it"),
-        lagDays: LAG.optional().describe("working days of delay (default 0, or as it was); negative overlaps, FS only"),
-      }),
-    )
+    .array(Predecessor)
     .max(MAX_LINKS_PER_TASK)
     .optional()
     .describe("every task this one waits on, replacing its links ([] for none)"),
@@ -433,7 +434,7 @@ interface WantedLink {
 function wantedLinks(
   edit: BoardEdit,
   id: string,
-  fields: { predecessors?: { task: string; kind?: LinkKind | undefined; lagDays?: number | undefined }[] | undefined; predecessor?: string | null | undefined; lagDays?: number | undefined },
+  fields: { predecessors?: Predecessor[] | undefined; predecessor?: string | null | undefined; lagDays?: number | undefined },
   added: readonly { id: string; title: string }[],
 ): WantedLink[] | undefined {
   if (fields.predecessors !== undefined) {
@@ -498,7 +499,7 @@ async function applyTaskFields(
     half?: "morning" | "afternoon" | undefined;
     durationDays?: number | undefined;
     assignee?: string | null | undefined;
-    predecessors?: { task: string; kind?: LinkKind | undefined; lagDays?: number | undefined }[] | undefined;
+    predecessors?: Predecessor[] | undefined;
     predecessor?: string | null | undefined;
     lagDays?: number | undefined;
     milestone?: boolean | undefined;

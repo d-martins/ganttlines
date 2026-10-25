@@ -36,7 +36,7 @@ const TaskRowV1 = z.strictObject({
   predecessorId: id.nullable(),
   offset: halfSteps(z.number().min(-MAX_LAG).max(MAX_LAG)),
 });
-const Link = z.strictObject({ predecessorId: id, followerId: id, kind: z.enum(["FS", "SS", "FF"]), lag: halfSteps(z.number().min(-MAX_LAG).max(MAX_LAG)) });
+const LinkRecord = z.strictObject({ predecessorId: id, followerId: id, kind: z.enum(["FS", "SS", "FF"]), lag: halfSteps(z.number().min(-MAX_LAG).max(MAX_LAG)) });
 
 const workspaceFields = {
   format: z.literal("ganttlines-workspace"),
@@ -104,7 +104,7 @@ export const WorkspaceFile = z.strictObject({
       z.strictObject({
         ...projectFields,
         rows: z.array(z.discriminatedUnion("kind", [SectionRow, TaskRow])).max(20_000),
-        links: z.array(Link).max(100_000),
+        links: z.array(LinkRecord).max(100_000),
       }),
     )
     .max(1_000),
