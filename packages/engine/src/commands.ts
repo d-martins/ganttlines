@@ -361,7 +361,8 @@ class Execution {
     const resource = follower.resourceId;
     const predecessor = this.spanOf(link.predecessorId);
     const shown = this.spanOf(follower.id);
-    const deciding = shown !== null && predecessor !== null && this.calendar.snapHalf(linkRequirement(this.calendar, follower, link, predecessor), resource) === spanStart(shown);
+    const shownStart = shown ? spanStart(shown) : null;
+    const deciding = shownStart !== null && predecessor !== null && this.calendar.snapHalf(linkRequirement(this.calendar, follower, link, predecessor), resource) === shownStart;
     if (kind === "FS" && predecessor) {
       const natural = naturalStart(this.calendar, predecessor, resource);
       const floor = floorStart(this.calendar, predecessor, resource);
@@ -372,7 +373,10 @@ class Execution {
     const constraints = this.constraintsOf(follower).map((constraint) => ({ link: constraint, span: this.spanOf(constraint.predecessorId) }));
     const required = requiredStart(this.calendar, follower, constraints);
     if (required === -Infinity) return this.result();
-    return this.patch(follower, startAt(this.calendar.snapHalf(required, resource)));
+    const start = this.calendar.snapHalf(required, resource);
+    // Another link tying for the start keeps it where it is: nothing to store.
+    if (start === shownStart) return this.result();
+    return this.patch(follower, startAt(start));
   }
 
   /** The link `ref` names; both tasks must exist. */

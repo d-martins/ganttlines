@@ -637,6 +637,29 @@ describe("updateLink", () => {
     expect(taskIn(updated, "b").userStart).toBe("2026-10-12");
   });
 
+  it("leaves the task's own date alone when another link ties for its start", () => {
+    const state = project(
+      task("a", { userStart: "2026-10-05", duration: 3 }), // natural successor start Thu 8
+      task("a2", { userStart: "2026-10-05" }),
+      task("b", { userStart: "2026-10-01" }),
+      link("a", "b"),
+      link("a2", "b", 3, "SS"), // Thu 8 too
+    );
+    const result = applyCommand(state, cal, { type: "updateLink", predecessorId: "a2", followerId: "b", kind: "SS", lag: 0 });
+    if (!result.ok) throw new Error(result.message);
+    expect(result.changes).toEqual([{ link: { predecessorId: "a2", followerId: "b", kind: "SS" }, field: "lag", before: 3, after: 0 }]);
+    expect(datesIn(result.state, "b")?.start).toBe("2026-10-08");
+  });
+
+  it("re-places the task by half days when its deciding link's delay has a half day", () => {
+    const state = project(task("a", { userStart: "2026-10-05", duration: 3 }), task("b", { userStart: "2026-10-01" }), link("a", "b", 0.5)); // Thu 8 afternoon
+    expect(halvesIn(state, "b")?.start).toBe("2026-10-08 pm");
+    const morning = run(state, cal, { type: "updateLink", predecessorId: "a", followerId: "b", kind: "FS", lag: 0 });
+    expect(taskIn(morning, "b")).toMatchObject({ userStart: "2026-10-08", startsAfternoon: false });
+    const later = run(state, cal, { type: "updateLink", predecessorId: "a", followerId: "b", kind: "FS", lag: 1.5 });
+    expect(taskIn(later, "b")).toMatchObject({ userStart: "2026-10-09", startsAfternoon: true });
+  });
+
   it("refuses a locked leaf, and a link that doesn't exist", () => {
     const locked = project(task("a", { userStart: "2026-10-05" }), task("b", { userStart: "2026-10-06", locked: true }), link("a", "b"));
     expect(update(locked, { lag: 1 })).toMatchObject({ ok: false, reason: "locked" });

@@ -38,7 +38,7 @@ export {
   type TaskColor,
   type TaskRow,
 } from "./model";
-export { computeSchedule, CycleError, hasCycle, spanEnd, spanOfHalves, spanStart, violatedLinks, type Computed, type Schedule, type Span } from "./schedule";
+export { computeSchedule, CycleError, hasCycle, linkRequirement, spanEnd, spanOfHalves, spanStart, violatedLinks, type Computed, type Schedule, type Span } from "./schedule";
 export { buildTree, childrenOf, findTreeProblem, isAncestor, isParentTask, type Tree } from "./tree";
 export { revertChanges, type Reverted } from "./undo";
 export { baselineTasks, type BaselineTask } from "./baseline";
