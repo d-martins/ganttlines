@@ -19,8 +19,6 @@ export function TaskPicker({
   numbers,
   trigger,
   searchLabel,
-  open,
-  onOpenChange,
 }: {
   exclude: (row: Row) => boolean;
   onPick: (id: RowId) => void;
@@ -29,8 +27,6 @@ export function TaskPicker({
   numbers: ReadonlyMap<RowId, number>;
   trigger: ReactNode;
   searchLabel: string;
-  open?: boolean;
-  onOpenChange?: (open: boolean) => void;
 }) {
   const numberOf = (id: RowId) => numbers.get(id) ?? 0;
   const options = (query: string): SearchOption[] => {
@@ -53,7 +49,6 @@ export function TaskPicker({
       searchLabel={searchLabel}
       placeholder="Row number or title…"
       empty="No task matches."
-      {...(open !== undefined ? { open, onOpenChange: onOpenChange ?? (() => undefined) } : {})}
       align="end"
     />
   );
