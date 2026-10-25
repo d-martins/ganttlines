@@ -1,3 +1,4 @@
+import type { Change, LinkChange } from "./changes";
 import type { ProjectState, Row, RowId } from "./model";
 
 /** FS: starts after the predecessor finishes; SS: starts once it starts; FF: can't finish before it finishes. */
@@ -82,4 +83,50 @@ export function findLinkProblem(rows: readonly Row[], links: readonly Link[]): s
     into.set(link.followerId, count);
   }
   return null;
+}
+
+/** A link whose kind changed: logged as a delete of the old kind and a create of the new one. */
+export interface LinkKindChange {
+  /** the link as it is now */
+  link: Link;
+  fromKind: LinkKind;
+  toKind: LinkKind;
+}
+
+export const isLinkKindChange = (change: Change | LinkKindChange): change is LinkKindChange => "toKind" in change;
+
+/**
+ * The changes of one history entry with each whole-link delete and create of the same two tasks
+ * read as one kind change (where the first of the two was); everything else passes through.
+ */
+export function pairKindChanges(changes: readonly Change[]): (Change | LinkKindChange)[] {
+  // A whole-link create (`created`) or delete.
+  const isWhole = (change: Change, created: boolean): change is LinkChange =>
+    "link" in change && change.field === "*" && (created ? change.before === null : change.after === null) && change.before !== change.after;
+  const used = new Set<number>();
+  const result: (Change | LinkKindChange)[] = [];
+  for (const [index, change] of changes.entries()) {
+    if (used.has(index)) continue;
+    const created = isWhole(change, true);
+    if (created || isWhole(change, false)) {
+      const { link } = change as LinkChange;
+      const match = changes.findIndex(
+        (other, at) =>
+          at > index &&
+          !used.has(at) &&
+          isWhole(other, !created) &&
+          other.link.predecessorId === link.predecessorId &&
+          other.link.followerId === link.followerId &&
+          other.link.kind !== link.kind,
+      );
+      if (match >= 0) {
+        used.add(match);
+        const [removed, added] = (created ? [changes[match], change] : [change, changes[match]]) as [LinkChange, LinkChange];
+        result.push({ link: added.after as Link, fromKind: removed.link.kind, toKind: added.link.kind });
+        continue;
+      }
+    }
+    result.push(change);
+  }
+  return result;
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { applyChanges, changedRowIds, diffState } from "../src/changes";
-import { linkKey, type Link } from "../src/links";
+import { applyChanges, changedRowIds, diffState, type Change } from "../src/changes";
+import { linkKey, pairKindChanges, type Link } from "../src/links";
 import type { ProjectState } from "../src/model";
 import { link, project, section, task } from "./fixtures";
 
@@ -108,5 +108,34 @@ describe("changedRowIds", () => {
         { rowId: "c", field: "*", before: null, after: {} },
       ]),
     ).toEqual(["b", "a", "c"]);
+  });
+});
+
+describe("pairKindChanges", () => {
+  const fs = link("a", "b", 1);
+  const ss = link("a", "b", 1, "SS");
+  const deleted = (old: Link): Change => ({ link: { predecessorId: old.predecessorId, followerId: old.followerId, kind: old.kind }, field: "*", before: old, after: null });
+  const created = (next: Link): Change => ({ link: { predecessorId: next.predecessorId, followerId: next.followerId, kind: next.kind }, field: "*", before: null, after: next });
+
+  it("reads a delete and a create of the same two tasks as one kind change, where the first of the two was", () => {
+    const title: Change = { rowId: "b", field: "title", before: "x", after: "y" };
+    expect(pairKindChanges([title, deleted(fs), created(ss)])).toEqual([title, { link: ss, fromKind: "FS", toKind: "SS" }]);
+    expect(pairKindChanges([created(ss), title, deleted(fs)])).toEqual([{ link: ss, fromKind: "FS", toKind: "SS" }, title]);
+  });
+
+  it("passes everything else through", () => {
+    const other = link("c", "b", 0, "SS");
+    const lag: Change = { link: { predecessorId: "a", followerId: "b", kind: "FS" }, field: "lag", before: 0, after: 1 };
+    // Different pairs, a lone delete, and a lag change aren't kind changes.
+    expect(pairKindChanges([deleted(fs), created(other), lag])).toEqual([deleted(fs), created(other), lag]);
+    // Each delete pairs with one create only.
+    const ff = link("a", "b", 0, "FF");
+    expect(pairKindChanges([deleted(fs), created(ss), created(ff)])).toEqual([{ link: ss, fromKind: "FS", toKind: "SS" }, created(ff)]);
+  });
+
+  it("pairs the changes a kind change diffs to", () => {
+    const before = project(task("a", { userStart: "2026-10-05" }), task("b", { userStart: "2026-10-06" }), fs);
+    const after = project(task("a", { userStart: "2026-10-05" }), task("b", { userStart: "2026-10-06" }), ss);
+    expect(pairKindChanges(diffState(before, after))).toEqual([{ link: ss, fromKind: "FS", toKind: "SS" }]);
   });
 });
