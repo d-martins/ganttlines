@@ -1,6 +1,6 @@
 /** Words for a link's delay, shared by the links panel and the history. */
 
-export const days = (n: number) => `${n} ${n === 1 ? "day" : "days"}`;
+const days = (n: number) => `${n} ${n === 1 ? "day" : "days"}`;
 
 /** A delay on its own: "2 days", "overlapping 1 day". */
 export const lagWords = (lag: number) => (lag < 0 ? `overlapping ${days(-lag)}` : days(lag));

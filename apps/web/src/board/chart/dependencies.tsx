@@ -26,8 +26,8 @@ export function elbow(from: { left: number; right: number; y: number; half: numb
 /**
  * Path of a link of `kind` from its predecessor to its follower. FS is the elbow into the follower's
  * start. SS leaves the predecessor's start dot (from its outer edge, not through it), passes left of
- * both bars and their start dots and enters the follower's start (pointing right); FF leaves the predecessor's end, passes right of both and enters the follower's
- * end (pointing left).
+ * both bars and their start dots and enters the follower's start (pointing right); FF leaves the
+ * predecessor's end, passes right of both and enters the follower's end (pointing left).
  */
 export function linkPath(
   kind: LinkKind,
