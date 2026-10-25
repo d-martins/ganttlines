@@ -3,6 +3,7 @@ import { toDay } from "@ganttlines/engine";
 import type { ProjectStateDto } from "@ganttlines/protocol";
 import { fireEvent, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { toolsLeft } from "../src/board/chart/chart-rows";
 import { linkPath } from "../src/board/chart/dependencies";
 import { formatDay } from "../src/board/format";
 import { useBoardView } from "../src/board/view-store";
@@ -73,6 +74,9 @@ describe("chart editing", () => {
     const tools = screen.getByRole("button", { name: "Options for “ui”" }).closest("[data-bar-tools]") as HTMLElement;
     expect(tools.className).toContain("sticky");
     expect(tools.style.left).toBe("calc(var(--list-width) + 4px)");
+    // Clear of the start dot: its right edge (two 20 px buttons, 4 px apart) 4 px or more left of the dot.
+    const dot = within(bar(/^ui,/).parentElement!).getByTitle("Drag from the start onto another task to link them");
+    expect(parseFloat(tools.style.marginLeft) + 44).toBeLessThanOrEqual(parseFloat(dot.style.left) - 4);
   });
 
   it("shows sections as dividers across the chart, without dates", async () => {
@@ -303,9 +307,18 @@ describe("chart editing", () => {
     await chartBoard(ROWS, VIEWER);
     expect(screen.getByRole("img", { name: /^hooks,/ })).toBeInTheDocument();
     expect(screen.queryByTitle("Drag onto another task to link them")).not.toBeInTheDocument();
+    expect(screen.queryByTitle("Drag from the start onto another task to link them")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Options for/ })).not.toBeInTheDocument();
     fireEvent.contextMenu(document.querySelector("[data-chart-body]")!, { clientX: 100, clientY: 5 });
     expect(screen.queryByRole("menuitem", { name: "Highlight this day…" })).not.toBeInTheDocument();
+  });
+});
+
+describe("toolsLeft", () => {
+  it("puts a bar's quick tools left of its start dot, 4 px clear, or past its end dot when the chart's edge leaves no room", () => {
+    expect(toolsLeft({ left: 200, right: 300 })).toBe(136); // tools 136–180, start dot 186–196
+    expect(toolsLeft({ left: 62, right: 300 })).toBe(0); // just fits: tools 0–44, start dot 48–58
+    expect(toolsLeft({ left: 40, right: 100 })).toBe(118); // end dot 104–114, tools from 118
   });
 });
 

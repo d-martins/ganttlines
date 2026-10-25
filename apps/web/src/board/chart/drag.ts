@@ -7,7 +7,6 @@ export type DragKind = "move" | "start" | "end" | "link";
 /** A drag in progress on the chart; the board previews `command` through the engine. */
 export interface ChartDrag {
   rowId: RowId;
-  kind: DragKind;
   /** what dropping now would send (null: nothing would change) */
   command: Command | null;
   /** link drags: the line from the bullet to the pointer, in chart coordinates */
