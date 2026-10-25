@@ -1,4 +1,4 @@
-import { fromDay, MAX_LAG, MAX_LINKS_PER_TASK, TASK_COLORS, type Command, type LinkKind } from "@ganttlines/engine";
+import { fromDay, halfDay, linkRequirement, MAX_LAG, MAX_LINKS_PER_TASK, spanStart as firstHalf, TASK_COLORS, type Command, type LinkKind } from "@ganttlines/engine";
 import type { Project } from "@ganttlines/db";
 import { CommandSchema, CreateProjectBody, toEngineCommand } from "@ganttlines/protocol";
 import { randomUUID } from "node:crypto";
@@ -61,6 +61,10 @@ class BoardEdit {
 
   row(id: string) {
     return this.rows.find((entry) => entry.row.id === id);
+  }
+
+  async calendar() {
+    return (await this.tools.context.instance.current()).calendar;
   }
 
   /** Records what this call changed on the connection (replacing the previous call's). */
@@ -399,11 +403,13 @@ function placementNotes(entries: { title: string; asked: { start?: string | unde
       notes.push(`“${title}” is locked and starts too early for ${which}, shown in red on the board: unlock it, or move it later.`);
       continue;
     }
-    if (!asked.start || !placed?.start) continue;
+    // Only a half day asked for: on the day it starts.
+    const askedDay = asked.start ?? (asked.half ? placed?.start : undefined);
+    if (!askedDay || !placed?.start) continue;
     const askedAfternoon = asked.half === "afternoon";
-    if (placed.start === asked.start && Boolean(placed.startsAfternoon) === askedAfternoon) continue;
+    if (placed.start === askedDay && Boolean(placed.startsAfternoon) === askedAfternoon) continue;
     const when = (day: string, afternoon: boolean) => `${day}${afternoon ? " (afternoon)" : ""}`;
-    notes.push(`“${title}” was asked to start ${when(asked.start, askedAfternoon)} but starts ${when(placed.start, Boolean(placed.startsAfternoon))}: the tasks it waits on and their lags, or the calendar, place it there.`);
+    notes.push(`“${title}” was asked to start ${when(askedDay, askedAfternoon)} but starts ${when(placed.start, Boolean(placed.startsAfternoon))}: the tasks it waits on and their lags, or the calendar, place it there.`);
   }
   return notes;
 }
@@ -528,9 +534,18 @@ async function applyTaskFields(
     const afternoon = fields.half === "afternoon";
     if (entry.span.startsAfternoon !== afternoon) {
       const [link, ...others] = entry.links.into;
+      const { row } = entry;
       const lag = (link?.lag ?? 0) + (afternoon ? 0.5 : -0.5);
-      // Only FS lags move here (SS and FF can't go below 0); one that would pass MAX_LAG moves the bar instead.
-      if (link?.kind === "FS" && others.length === 0 && Math.abs(lag) <= MAX_LAG && !entry.isParent && !(entry.row.kind === "task" && entry.row.locked)) {
+      const predecessor = link ? edit.row(link.predecessorId)?.span : null;
+      let followsByLag = false;
+      // Only a lone FS link (SS and FF can't go below 0) on an unlocked leaf, within MAX_LAG.
+      if (link?.kind === "FS" && predecessor && others.length === 0 && Math.abs(lag) <= MAX_LAG && !entry.isParent && row.kind === "task" && !row.locked) {
+        // It must decide the start now, and the moved lag must put it on the asked half (not held at the overlap floor).
+        const calendar = await edit.calendar();
+        const startWith = (withLag: number) => calendar.snapHalf(linkRequirement(calendar, row, { ...link, lag: withLag }, predecessor), row.resourceId);
+        followsByLag = startWith(link.lag) === firstHalf(entry.span) && startWith(lag) === halfDay(entry.span.start, afternoon);
+      }
+      if (link && followsByLag) {
         // A follower keeps following: its lag moves by half a day (moving the bar would pin its date).
         await edit.run({ type: "updateLink", predecessorId: link.predecessorId, followerId: id, kind: "FS", lag });
       } else {

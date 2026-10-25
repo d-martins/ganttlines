@@ -182,6 +182,28 @@ describe("AI access: editing plans", () => {
     await client.close();
   });
 
+  it("moves the bar to set the half day of a follower dated later than its link allows", async () => {
+    const { client } = await editorsApp();
+    // P is Mon 12; F's own date, Thu 15, is later than the link's Tue 13.
+    await call(client, "add_tasks", { project: "Launch", tasks: [{ title: "P", start: "2026-10-12" }, { title: "F", start: "2026-10-15", predecessor: "P" }] });
+    const later = await call(client, "update_task", { project: "Launch", task: "F", half: "afternoon" });
+    expect(later["error"]).toBeUndefined();
+    expect(later["task"]).toMatchObject({ start: "2026-10-15", startsAfternoon: true, predecessors: [on("P", { lagDays: 0 })] });
+    expect(later["notes"]).toBeUndefined();
+    await client.close();
+  });
+
+  it("says so when a follower at its link's overlap floor can't move half a day earlier", async () => {
+    const { client } = await editorsApp();
+    // P takes Mon 12's morning; F follows that afternoon, as early as its link allows.
+    await call(client, "add_tasks", { project: "Launch", tasks: [{ title: "P", start: "2026-10-12", durationDays: 0.5 }, { title: "F", predecessor: "P" }] });
+    const earlier = await call(client, "update_task", { project: "Launch", task: "F", half: "morning" });
+    expect(earlier["error"]).toBeUndefined();
+    expect(earlier["task"]).toMatchObject({ start: "2026-10-12", startsAfternoon: true, predecessors: [on("P", { lagDays: 0 })] });
+    expect(earlier["notes"]).toEqual(["“F” was asked to start 2026-10-12 but starts 2026-10-12 (afternoon): the tasks it waits on and their lags, or the calendar, place it there."]);
+    await client.close();
+  });
+
   it("changes nothing when part of a call fails, and says which task", async () => {
     const { ed, projectId, client } = await editorsApp();
     const result = await call(client, "add_tasks", {
