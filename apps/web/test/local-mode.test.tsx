@@ -333,6 +333,12 @@ describe("local mode", () => {
     expect(await screen.findByRole("link", { name: "Sign in" })).toHaveAttribute("href", "https://app.example.com/login");
   });
 
+  it("links to the source code in the local-only build", async () => {
+    vi.stubEnv("VITE_WORKSPACE", "local");
+    renderApp("/");
+    expect(await screen.findByRole("link", { name: "GanttLines on GitHub" })).toHaveAttribute("href", "https://github.com/d-martins/ganttlines");
+  });
+
   it("sends its own sign-in page there", async () => {
     vi.stubEnv("VITE_WORKSPACE", "local");
     vi.stubEnv("VITE_SIGN_IN_URL", "https://app.example.com/login");
