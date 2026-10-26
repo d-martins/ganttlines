@@ -1,4 +1,4 @@
-import { MAX_DATE, MAX_DURATION, MAX_OFFSET, MIN_DATE, TASK_COLORS } from "@ganttlines/engine";
+import { MAX_DATE, MAX_DURATION, MAX_LAG, MIN_DATE, TASK_COLORS } from "@ganttlines/engine";
 import { z } from "zod";
 import { CALENDAR_LIMITS, checkRange } from "./calendar";
 import { LIMITS } from "./api";
@@ -14,7 +14,7 @@ const position = z.string().min(1).max(10_000);
 const projectName = z.string().trim().min(1).max(LIMITS.projectNameMax);
 
 const SectionRow = z.strictObject({ id, kind: z.literal("section"), title: z.string().max(COMMAND_LIMITS.titleMax), parentId: id.nullable(), position });
-const TaskRow = z.strictObject({
+const taskFields = {
   id,
   kind: z.literal("task"),
   title: z.string().max(COMMAND_LIMITS.titleMax),
@@ -27,15 +27,19 @@ const TaskRow = z.strictObject({
   resourceId: id.nullable(),
   color: z.enum(TASK_COLORS),
   locked: z.boolean(),
-  predecessorId: id.nullable(),
-  offset: halfSteps(z.number().min(-MAX_OFFSET).max(MAX_OFFSET)),
   description: z.string().max(COMMAND_LIMITS.descriptionMax),
+};
+const TaskRow = z.strictObject(taskFields);
+// v1 files kept a task's single predecessor and its offset on the row.
+const TaskRowV1 = z.strictObject({
+  ...taskFields,
+  predecessorId: id.nullable(),
+  offset: halfSteps(z.number().min(-MAX_LAG).max(MAX_LAG)),
 });
+const LinkRecord = z.strictObject({ predecessorId: id, followerId: id, kind: z.enum(["FS", "SS", "FF"]), lag: halfSteps(z.number().min(-MAX_LAG).max(MAX_LAG)) });
 
-/** A whole local workspace, as exported to (and imported from) a `.ganttlines.json` file. */
-export const WorkspaceFile = z.strictObject({
+const workspaceFields = {
   format: z.literal("ganttlines-workspace"),
-  version: z.literal(1),
   exportedAt: z.string().max(40),
   workingWeekdays: z
     .array(z.int().min(0).max(6))
@@ -56,42 +60,63 @@ export const WorkspaceFile = z.strictObject({
     )
     .max(CALENDAR_LIMITS.holidays),
   timeOff: z.array(z.strictObject({ id, resourceId: id, startDate: date, endDate: date, note: z.string().max(500) }).superRefine(checkRange)).max(CALENDAR_LIMITS.timeOff),
-  projects: z
+};
+
+const projectFields = {
+  id,
+  name: projectName,
+  archived: z.boolean(),
+  createdAt: z.string().max(40),
+  version: z.int().min(0),
+  highlights: z.array(z.strictObject({ id, date, label: z.string().max(BOARD_LIMITS.highlightLabelMax), color })).max(1_000),
+  baselines: z
     .array(
       z.strictObject({
         id,
-        name: projectName,
-        archived: z.boolean(),
+        name: z.string().trim().min(1).max(BOARD_LIMITS.baselineNameMax),
         createdAt: z.string().max(40),
-        version: z.int().min(0),
-        rows: z.array(z.discriminatedUnion("kind", [SectionRow, TaskRow])).max(20_000),
-        highlights: z.array(z.strictObject({ id, date, label: z.string().max(BOARD_LIMITS.highlightLabelMax), color })).max(1_000),
-        baselines: z
+        createdBy: z.string().max(200),
+        tasks: z
           .array(
             z.strictObject({
-              id,
-              name: z.string().trim().min(1).max(BOARD_LIMITS.baselineNameMax),
-              createdAt: z.string().max(40),
-              createdBy: z.string().max(200),
-              tasks: z
-                .array(
-                  z.strictObject({
-                    rowId: id,
-                    kind: z.enum(["task", "parent", "milestone"]),
-                    title: z.string().max(COMMAND_LIMITS.titleMax),
-                    // computed dates: a schedule can run past the last date anyone can type
-                    start: z.iso.date(),
-                    end: z.iso.date(),
-                    startsAfternoon: z.boolean().optional(),
-                    endsMidday: z.boolean().optional(),
-                  }),
-                )
-                .max(20_000),
+              rowId: id,
+              kind: z.enum(["task", "parent", "milestone"]),
+              title: z.string().max(COMMAND_LIMITS.titleMax),
+              // computed dates: a schedule can run past the last date anyone can type
+              start: z.iso.date(),
+              end: z.iso.date(),
+              startsAfternoon: z.boolean().optional(),
+              endsMidday: z.boolean().optional(),
             }),
           )
-          .max(100),
+          .max(20_000),
+      }),
+    )
+    .max(100),
+};
+
+/** A whole local workspace, as exported to (and imported from) a `.ganttlines.json` file. */
+export const WorkspaceFile = z.strictObject({
+  ...workspaceFields,
+  version: z.literal(2),
+  projects: z
+    .array(
+      z.strictObject({
+        ...projectFields,
+        rows: z.array(z.discriminatedUnion("kind", [SectionRow, TaskRow])).max(20_000),
+        links: z.array(LinkRecord).max(100_000),
       }),
     )
     .max(1_000),
 });
 export type WorkspaceFile = z.infer<typeof WorkspaceFile>;
+
+/** The previous file format, still accepted on import. */
+export const WorkspaceFileV1 = z.strictObject({
+  ...workspaceFields,
+  version: z.literal(1),
+  projects: z
+    .array(z.strictObject({ ...projectFields, rows: z.array(z.discriminatedUnion("kind", [SectionRow, TaskRowV1])).max(20_000) }))
+    .max(1_000),
+});
+export type WorkspaceFileV1 = z.infer<typeof WorkspaceFileV1>;

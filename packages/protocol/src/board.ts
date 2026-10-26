@@ -1,4 +1,4 @@
-import { MAX_DATE, MIN_DATE, type RowChange } from "@ganttlines/engine";
+import { MAX_DATE, MIN_DATE, type Change } from "@ganttlines/engine";
 import { z } from "zod";
 import { BOARD_LIMITS } from "./constants";
 
@@ -86,10 +86,10 @@ export interface ActivityEntryDto {
   name: string;
   actor: { userId: string | null; label: string; linkId: string | null };
   createdAt: string;
-  /** rows this change touched */
+  /** rows this change touched, including both ends of changed links */
   rowIds: string[];
-  /** what changed (only the filtered row's changes when `rowId` is given) */
-  changes: RowChange[];
+  /** what changed (only the filtered row's changes and its links' when `rowId` is given) */
+  changes: Change[];
 }
 
 /** Response of GET /api/projects/:id/activity — newest first; pass `nextBefore` as `before` for more. */

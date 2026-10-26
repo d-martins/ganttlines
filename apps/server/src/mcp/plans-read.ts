@@ -1,5 +1,4 @@
-import { fromDay } from "@ganttlines/engine";
-import type { RowChange } from "@ganttlines/engine";
+import { changedRowIds, fromDay, LINK_KIND_WORDS, linkKey, type Change } from "@ganttlines/engine";
 import { z } from "zod";
 import type { OutlineRow } from "../projects/project-service";
 import { pickPerson, pickProject, ToolProblem } from "./lookup";
@@ -7,8 +6,9 @@ import { answer, guarded, type ToolContext, type ToolGroup } from "./tools";
 
 const ISO_DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "a date as YYYY-MM-DD");
 
-/** A board row as the AI sees it: dates computed, people and predecessors by id and name. */
-export function describeRow({ row, depth, isParent, span, violation }: OutlineRow, names: { people: Map<string, string>; rows: Map<string, string> }) {
+/** A board row as the AI sees it: dates computed, people and linked tasks by id and name. */
+export function describeRow({ row, depth, isParent, span, violation, links, violatedLinks }: OutlineRow, names: { people: Map<string, string>; rows: Map<string, string> }) {
+  const task = (id: string) => ({ id, title: names.rows.get(id) ?? "Unknown" });
   const base = { id: row.id, title: row.title, depth, parentId: row.parentId };
   if (row.kind === "section") return { ...base, type: "section" as const };
   return {
@@ -20,7 +20,14 @@ export function describeRow({ row, depth, isParent, span, violation }: OutlineRo
     ...(span?.endsMidday ? { endsMidday: true } : {}),
     ...(isParent ? {} : { durationDays: row.duration }),
     assignee: row.resourceId ? { id: row.resourceId, name: names.people.get(row.resourceId) ?? "Unknown" } : null,
-    predecessor: row.predecessorId ? { id: row.predecessorId, title: names.rows.get(row.predecessorId) ?? "Unknown", lagDays: row.offset } : null,
+    predecessors: links.into.map((link) => ({
+      task: task(link.predecessorId),
+      kind: link.kind,
+      kindInWords: LINK_KIND_WORDS[link.kind],
+      lagDays: link.lag,
+      ...(violatedLinks.includes(linkKey(link)) ? { startsTooEarly: true } : {}),
+    })),
+    followers: links.outOf.map((link) => ({ task: task(link.followerId), kind: link.kind, kindInWords: LINK_KIND_WORDS[link.kind] })),
     ...(row.locked ? { locked: true } : {}),
     ...(violation ? { startsTooEarly: true } : {}),
     ...(row.actualDuration !== null ? { actualDurationDays: row.actualDuration } : {}),
@@ -73,7 +80,7 @@ export const readPlans: ToolGroup = (server, tools) => {
     {
       title: "Read a project",
       description:
-        "Reads one project's board in order: sections, tasks (with sub-tasks by depth), milestones, computed start/end dates, durations in working days, assignees, predecessors (with lag in working days) and descriptions. Dates are YYYY-MM-DD; a task can start in the afternoon or end at midday.",
+        "Reads one project's board in order: sections, tasks (with sub-tasks by depth), milestones, computed start/end dates, durations in working days, assignees, the tasks each waits on (predecessors: the kind of link, in words, and its lag in working days) and those waiting on it (followers), and descriptions. Dates are YYYY-MM-DD; a task can start in the afternoon or end at midday.",
       inputSchema: z.object({ project: z.string().min(1).describe("the project's id or name") }),
       annotations: { readOnlyHint: true },
     },
@@ -159,7 +166,7 @@ export const readPlans: ToolGroup = (server, tools) => {
           at: entry.createdAt.toISOString(),
           by: entry.actorLabel,
           change: entry.name,
-          tasks: [...new Set((entry.changes as unknown as RowChange[]).map((change) => change.rowId))].map((id) => titles.get(id) ?? "(deleted)"),
+          tasks: changedRowIds(entry.changes as unknown as Change[]).map((id) => titles.get(id) ?? "(deleted)"),
         }));
         return answer(`${changes.length} recent ${changes.length === 1 ? "change" : "changes"} to “${project.name}”.`, { changes });
       }),

@@ -345,7 +345,7 @@ export function Board({
                 <div aria-hidden className="absolute right-0 left-0 bg-accent-soft opacity-60" style={{ top: selectedIndex * rowHeight, height: rowHeight }} />
               ) : null}
               <div aria-hidden className="absolute top-0 w-0.5 bg-[var(--today)]" style={{ left: timeline.x(todayDay) + timeline.dayWidth / 2 - 1, height: bodyHeight }} />
-              <Dependencies rows={model.rows} firstRow={firstRow} lastRow={lastRow} timeline={timeline} style={barStyle} />
+              <Dependencies rows={model.rows} links={model.links} firstRow={firstRow} lastRow={lastRow} timeline={timeline} style={barStyle} />
               <ChartRows rows={shown} allRows={model.rows} firstRow={firstRow} timeline={timeline} style={barStyle} visibleLeft={viewport.left} />
             </div>
             </DayMenu>

@@ -206,7 +206,7 @@ describe("share links over the WebSocket", () => {
     const { admin, projectId, link, token } = await projectWithLink({ access: "anonymous" });
     const visitor = await visit(token, "Rudy");
     const client = await connect(t.app, visitor, undefined, `/ws?share=${token}`);
-    client.send({ type: "join", projectId, version: 0 });
+    client.send({ type: "join", projectId, version: 0, protocol: 2 });
     expect((await client.next("joined")).viewers).toEqual([{ id: expect.stringMatching(/^visitor:/), name: "Rudy (anonymous)" }]);
     client.send({ type: "command", commandId: randomUUID(), command: createTask(randomUUID()) });
     expect(await client.next("reject")).toMatchObject({ error: "forbidden" });
@@ -225,7 +225,7 @@ describe("share links over the WebSocket", () => {
     const other = (await t.app.inject({ method: "POST", url: "/api/projects", headers: { cookie: admin }, payload: { name: "Secret" } })).json().project;
     const visitor = await visit(token);
     const client = await connect(t.app, visitor, undefined, `/ws?share=${token}`);
-    client.send({ type: "join", projectId: other.id, version: 0 });
+    client.send({ type: "join", projectId: other.id, version: 0, protocol: 2 });
     expect(await client.next("error")).toMatchObject({ message: "Share link not found" });
   });
 });

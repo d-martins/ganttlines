@@ -2,13 +2,15 @@ import {
   applyCommand,
   baselineTasks,
   Calendar,
-  diffRows,
+  diffState,
+  findLinkProblem,
   findTreeProblem,
   hasCycle,
+  linkKey,
   revertChanges,
+  type Change,
   type Command,
   type ProjectState,
-  type RowChange,
 } from "@ganttlines/engine";
 import type {
   BaselineDto,
@@ -38,6 +40,7 @@ import type { BoardConnection, CountryDto, WorkspaceCapabilities, WorkspaceSourc
 import { LocalLink } from "./local-link";
 import { checkFormat, emptyWorkspace, toCalendarDto, WORKSPACE_FORMAT, WORKSPACE_VERSION, type ProjectRecord, type StoredHoliday, type StoredResource, type WorkspaceRecord } from "./records";
 import type { LocalStore } from "./store";
+import { upgradeProjectRecord, upgradeWorkspaceRecord } from "./upgrade";
 import { validation, type Validation } from "./validation";
 
 export const AVATAR_COLORS = ["#4f8cff", "#a66cff", "#ff6fae", "#ff8a4c", "#2fbf71", "#1fb5c9", "#f5b82e", "#8a94a6"];
@@ -45,6 +48,8 @@ export const MAX_HIGHLIGHTS = 1_000;
 export const MAX_BASELINES = 100;
 /** WebSocket close code for "this project was deleted" (the board ends). */
 export const CLOSE_PROJECT_DELETED = 4004;
+/** WebSocket close code for "this board was built for an older protocol" (it reloads), as the server sends. */
+export const CLOSE_OUTDATED = 1008;
 
 export const badRequest = (message: string) => new ApiError(400, "invalid_request", message);
 export const notFound = (what: string) => new ApiError(404, "not_found", `${what} not found`);
@@ -76,7 +81,7 @@ export class LocalSource implements WorkspaceSource {
   private serialized: Promise<unknown> = Promise.resolve();
   protected readonly links = new Set<LocalLink>();
   /** per project: undo/redo stacks of command ids, and each command's changes (this visit only) */
-  private readonly history = new Map<string, { undo: string[]; redo: string[]; changes: Map<string, RowChange[]> }>();
+  private readonly history = new Map<string, { undo: string[]; redo: string[]; changes: Map<string, Change[]> }>();
 
   private constructor(
     private readonly store: LocalStore,
@@ -85,11 +90,12 @@ export class LocalSource implements WorkspaceSource {
     private readonly options: LocalSourceOptions,
   ) {}
 
-  /** This browser's workspace (an empty one the first time). */
+  /** This browser's workspace (an empty one the first time; one stored by an older version is upgraded). */
   static async open(store: LocalStore, options: LocalSourceOptions = {}): Promise<LocalSource> {
     const stored = await store.load();
     if (stored.workspace) checkFormat(stored.workspace);
-    return new LocalSource(store, stored.workspace ?? emptyWorkspace(), new Map(stored.projects.map((project) => [project.id, project])), options);
+    const workspace = stored.workspace ? upgradeWorkspaceRecord(stored.workspace) : emptyWorkspace();
+    return new LocalSource(store, workspace, new Map(stored.projects.map((project) => [project.id, upgradeProjectRecord(project)])), options);
   }
 
   // —— projects ——
@@ -102,7 +108,7 @@ export class LocalSource implements WorkspaceSource {
     return this.serial(async () => {
       const { check, protocol } = await validation();
       const body = check(protocol.CreateProjectBody, input);
-      const project: ProjectRecord = { id: this.newId(), name: body.name, archived: false, createdAt: this.now().toISOString(), version: 0, rows: [], highlights: [], baselines: [] };
+      const project: ProjectRecord = { id: this.newId(), name: body.name, archived: false, createdAt: this.now().toISOString(), version: 0, rows: [], links: [], highlights: [], baselines: [] };
       this.projects.set(project.id, project);
       await this.persist(() => this.store.saveProject(project));
       return toProjectDto(project);
@@ -136,7 +142,7 @@ export class LocalSource implements WorkspaceSource {
     return {
       load: async (): Promise<ProjectStateDto> => {
         const project = this.mustProject(projectId);
-        return { project: toProjectDto(project), rows: copy(project.rows) };
+        return { project: toProjectDto(project), rows: copy(project.rows), links: copy(project.links) };
       },
       openLink: () => {
         const link = new LocalLink(
@@ -236,7 +242,7 @@ export class LocalSource implements WorkspaceSource {
   exportFile(): WorkspaceFile {
     const { workingWeekdays, team, locations, holidays, timeOff } = copy(this.workspace);
     const projects = [...this.projects.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map((project) => copy(project));
-    return { format: WORKSPACE_FORMAT, version: WORKSPACE_VERSION, exportedAt: this.now().toISOString(), workingWeekdays, team, locations, holidays, timeOff, projects } as WorkspaceFile;
+    return { format: WORKSPACE_FORMAT, version: WORKSPACE_VERSION, exportedAt: this.now().toISOString(), workingWeekdays, team, locations, holidays, timeOff, projects };
   }
 
   /** Replaces the whole workspace with a (checked) file's: open boards end, undo history starts afresh. */
@@ -264,7 +270,7 @@ export class LocalSource implements WorkspaceSource {
   /** Empties the workspace (Clear workspace). */
   clear(): Promise<void> {
     const empty = emptyWorkspace();
-    return this.replaceWith({ format: WORKSPACE_FORMAT, version: WORKSPACE_VERSION, exportedAt: this.now().toISOString(), workingWeekdays: empty.workingWeekdays, team: [], locations: [], holidays: [], timeOff: [], projects: [] } as WorkspaceFile);
+    return this.replaceWith({ format: WORKSPACE_FORMAT, version: WORKSPACE_VERSION, exportedAt: this.now().toISOString(), workingWeekdays: empty.workingWeekdays, team: [], locations: [], holidays: [], timeOff: [], projects: [] });
   }
 
   // —— the team calendar ——
@@ -478,7 +484,11 @@ export class LocalSource implements WorkspaceSource {
       return;
     }
     const result = protocol.ClientMessage.safeParse(parsed);
-    if (!result.success) return;
+    if (!result.success) {
+      // A board built for an older protocol (a tab left open across an update) reloads, as the server asks it to.
+      if (isOutdatedJoin(parsed, protocol.PROTOCOL_VERSION)) link.close(CLOSE_OUTDATED);
+      return;
+    }
     const message = result.data;
     if (message.type === "leave") {
       link.projectId = null;
@@ -553,10 +563,11 @@ export class LocalSource implements WorkspaceSource {
         stack.pop();
         return error;
       };
-      if (findTreeProblem(Object.values(next.rows)) || hasCycle(next, this.engineCalendar())) {
+      const rows = Object.values(next.rows);
+      if (findTreeProblem(rows) || findLinkProblem(rows, Object.values(next.links)) || hasCycle(next, this.engineCalendar())) {
         throw discard(new ApiError(409, "conflict", `Can't ${direction} this any more: the board changed since`));
       }
-      const changes = diffRows(state, next);
+      const changes = diffState(state, next);
       if (changes.length === 0) throw discard(new ApiError(409, "conflict", `Nothing left to ${direction}: it was all changed since`));
       stack.pop();
       (direction === "undo" ? history.redo : history.undo).push(target);
@@ -575,8 +586,9 @@ export class LocalSource implements WorkspaceSource {
   }
 
   /** Keeps the new board state as the next version, saves it and sends the patch to its open boards. */
-  private async commit(project: ProjectRecord, state: ProjectState, commandId: string, changes: RowChange[]): Promise<number> {
+  private async commit(project: ProjectRecord, state: ProjectState, commandId: string, changes: Change[]): Promise<number> {
     project.rows = Object.values(state.rows);
+    project.links = Object.values(state.links);
     project.version++;
     await this.persist(() => this.store.saveProject(project));
     this.broadcast(project.id, { type: "patch", projectId: project.id, version: project.version, commandId, actor: { userId: null, label: "You" }, changes });
@@ -657,7 +669,14 @@ function buildCalendar(workspace: WorkspaceRecord): Calendar {
 }
 
 function stateOf(project: ProjectRecord): ProjectState {
-  return { rows: Object.fromEntries(project.rows.map((row) => [row.id, row])) };
+  return { rows: Object.fromEntries(project.rows.map((row) => [row.id, row])), links: Object.fromEntries(project.links.map((link) => [linkKey(link), link])) };
+}
+
+/** A join from a board built for an older protocol (or one from before protocols were numbered). */
+function isOutdatedJoin(message: unknown, current: number): boolean {
+  if (typeof message !== "object" || message === null || (message as { type?: unknown }).type !== "join") return false;
+  const protocol = (message as { protocol?: unknown }).protocol;
+  return typeof protocol !== "number" || protocol < current;
 }
 
 function assertPeople(workspace: WorkspaceRecord, ids: "all" | readonly string[]): void {

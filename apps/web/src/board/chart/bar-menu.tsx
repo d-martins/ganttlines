@@ -8,7 +8,7 @@ import { deleteRow } from "../list/list-actions";
 const ITEM = "flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 outline-none data-[highlighted]:bg-surface-2";
 
 /**
- * The spanner menu of a task bar: color, lock, milestone, duplicate, remove predecessor, delete.
+ * The spanner menu of a task bar: color, lock, milestone, duplicate, delete.
  * Controlled, so Enter on a focused bar can open it too.
  */
 export function BarMenu({ task, isParent, open, onOpenChange }: { task: TaskRow; isParent: boolean; open: boolean; onOpenChange: (open: boolean) => void }) {
@@ -56,11 +56,6 @@ export function BarMenu({ task, isParent, open, onOpenChange }: { task: TaskRow;
                 Duplicate
               </DropdownMenu.Item>
             </>
-          ) : null}
-          {task.predecessorId ? (
-            <DropdownMenu.Item className={ITEM} onSelect={() => run({ type: "removePredecessor", id: task.id })}>
-              Remove predecessor
-            </DropdownMenu.Item>
           ) : null}
           <DropdownMenu.Separator className="my-1 h-px bg-border" />
           <DropdownMenu.Item className={`${ITEM} text-danger`} onSelect={() => deleteRow(board, task)}>

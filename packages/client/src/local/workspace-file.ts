@@ -1,7 +1,8 @@
-import { Calendar, findTreeProblem, hasCycle, toDay, type ProjectState, type Row } from "@ganttlines/engine";
-import type { WorkspaceFile } from "@ganttlines/protocol";
+import { Calendar, findLinkProblem, findTreeProblem, hasCycle, linkKey, toDay, type ProjectState, type Row } from "@ganttlines/engine";
+import type { WorkspaceFile, WorkspaceFileV1 } from "@ganttlines/protocol";
 import { ApiError } from "../api";
 import { checkFormat, toCalendarDto, WORKSPACE_FORMAT, WORKSPACE_VERSION } from "./records";
+import { upgradeProjectRecord } from "./upgrade";
 import { validation } from "./validation";
 
 export const MAX_FILE_BYTES = 50 * 1024 * 1024;
@@ -15,8 +16,8 @@ export const MAX_PERSON_DAYS = 2_000_000;
 const invalid = (message: string) => new ApiError(400, "invalid_file", message);
 
 /**
- * Reads a workspace file and checks everything — shape, references, outlines, dependency loops —
- * before anything is changed. Throws `ApiError` 400 with the reason.
+ * Reads a workspace file and checks everything — shape, references, outlines, links, dependency
+ * loops — before anything is changed. A version 1 file is upgraded. Throws `ApiError` 400 with the reason.
  */
 export async function readWorkspaceFile(text: string): Promise<WorkspaceFile> {
   if (text.length > MAX_FILE_BYTES) throw invalid("This file is too big (over 50 MB)");
@@ -29,11 +30,16 @@ export async function readWorkspaceFile(text: string): Promise<WorkspaceFile> {
   if (typeof json !== "object" || json === null) throw invalid("This isn't a GanttLines workspace file");
   checkFormat(json as { format?: unknown; version?: unknown });
   const { protocol, explain } = await validation();
-  const parsed = protocol.WorkspaceFile.safeParse(json);
+  const parsed = (json as { version: number }).version === 1 ? protocol.WorkspaceFileV1.safeParse(json) : protocol.WorkspaceFile.safeParse(json);
   if (!parsed.success) throw invalid(`This file can't be opened: ${explain(parsed.error)}`);
-  const problem = referenceProblem(parsed.data);
+  const file = parsed.data.version === 1 ? upgradeFile(parsed.data) : parsed.data;
+  const problem = referenceProblem(file);
   if (problem) throw invalid(`This file can't be opened: ${problem}`);
-  return parsed.data;
+  return file;
+}
+
+function upgradeFile(file: WorkspaceFileV1): WorkspaceFile {
+  return { ...file, version: 2, projects: file.projects.map((project) => upgradeProjectRecord(project) as WorkspaceFile["projects"][number]) };
 }
 
 /** The first id used twice within a collection (or across projects' rows), if any. */
@@ -53,6 +59,7 @@ function duplicateProblem(file: WorkspaceFile): string | null {
     twice("holiday", file.holidays.map((holiday) => holiday.id)) ??
     twice("time off", file.timeOff.map((entry) => entry.id)) ??
     twice("row", file.projects.flatMap((project) => project.rows.map((row) => row.id))) ??
+    twice("link", file.projects.flatMap((project) => project.links.map(linkKey))) ??
     twice("highlight", file.projects.flatMap((project) => project.highlights.map((highlight) => highlight.id))) ??
     twice("baseline", file.projects.flatMap((project) => project.baselines.map((baseline) => baseline.id)))
   );
@@ -86,11 +93,11 @@ function referenceProblem(file: WorkspaceFile): string | null {
   }
   for (const project of file.projects) {
     const rows = project.rows as Row[];
-    const tree = findTreeProblem(rows);
-    if (tree) return `project “${project.name}”: ${tree}`;
+    const structure = findTreeProblem(rows) ?? findLinkProblem(rows, project.links);
+    if (structure) return `project “${project.name}”: ${structure}`;
     const ghost = rows.find((row) => row.kind === "task" && row.resourceId !== null && !people.has(row.resourceId));
     if (ghost) return `project “${project.name}”: “${ghost.title}” is assigned to a team member who isn't there`;
-    const state: ProjectState = { rows: Object.fromEntries(rows.map((row) => [row.id, row])) };
+    const state: ProjectState = { rows: Object.fromEntries(rows.map((row) => [row.id, row])), links: Object.fromEntries(project.links.map((link) => [linkKey(link), link])) };
     if (hasCycle(state, calendar)) return `project “${project.name}” has tasks that depend on each other in a loop`;
   }
   return null;

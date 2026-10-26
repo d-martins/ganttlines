@@ -1,4 +1,5 @@
-import type { RowChange } from "./changes";
+import { isLinkChange, restoredRow, type Change } from "./changes";
+import { linkKey, type Link, type LinkKey } from "./links";
 import type { ProjectState, Row, RowId } from "./model";
 
 export interface Reverted {
@@ -25,52 +26,85 @@ function sameValue(a: unknown, b: unknown): boolean {
  * Undo (`direction: "undo"`) restores each change's `before` value; redo restores `after`.
  * A field is only restored while it still holds the value this command left behind, so edits
  * made since by anyone are never overwritten (skip-on-conflict). Whole rows are
- * removed only if unchanged and nothing points to them, and re-created only if absent.
+ * removed only if unchanged and nothing points to them, and re-created only if absent; the same
+ * goes for links, and a link they leave joining a task that no longer exists is dropped.
  */
-export function revertChanges(state: ProjectState, changes: readonly RowChange[], direction: "undo" | "redo"): Reverted {
+export function revertChanges(state: ProjectState, changes: readonly Change[], direction: "undo" | "redo"): Reverted {
   const rows: Record<RowId, Row> = { ...state.rows };
+  const links: Record<LinkKey, Link> = { ...state.links };
   const ordered = direction === "undo" ? [...changes].reverse() : changes;
   const removals = new Set<RowId>();
   let skipped = 0;
   for (const change of ordered) {
     const expected = direction === "undo" ? change.after : change.before;
     const target = direction === "undo" ? change.before : change.after;
-    const current = rows[change.rowId];
-    if (change.field === "*") {
-      if (target === null) {
-        // Removed together at the end, so a parent and its children (or a predecessor and the
-        // successor detached by the same command) are handled as one set, whatever their order.
-        if (current && sameValue(current, expected)) removals.add(change.rowId);
-        else skipped++;
-      } else if (!current) {
-        rows[change.rowId] = target as Row;
+    if (isLinkChange(change)) {
+      const key = linkKey(change.link);
+      const current = links[key];
+      if (change.field === "*") {
+        if (target === null) {
+          if (current && sameValue(current, expected)) delete links[key];
+          else skipped++;
+        } else if (!current) {
+          links[key] = target as Link;
+        } else {
+          skipped++;
+        }
+      } else if (current && sameValue(current.lag, expected)) {
+        links[key] = { ...current, lag: target as number };
       } else {
         skipped++;
       }
       continue;
     }
-    const value = current ? (current as unknown as Record<string, unknown>)[change.field] : undefined;
-    if (current && sameValue(value, expected)) rows[change.rowId] = { ...current, [change.field]: target } as Row;
-    else skipped++;
+    const current = rows[change.rowId];
+    if (change.field === "*") {
+      if (target === null) {
+        // Removed together at the end, so a parent and its children (or a predecessor and the
+        // follower detached by the same command) are handled as one set, whatever their order.
+        if (current && sameValue(current, expected)) removals.add(change.rowId);
+        else skipped++;
+      } else if (!current) {
+        rows[change.rowId] = restoredRow(target);
+      } else {
+        skipped++;
+      }
+      continue;
+    }
+    // Fields rows no longer have (from changes logged before they were dropped) are never written back.
+    if (current && Object.hasOwn(current, change.field) && sameValue((current as unknown as Record<string, unknown>)[change.field], expected)) {
+      rows[change.rowId] = { ...current, [change.field]: target } as Row;
+    } else {
+      skipped++;
+    }
   }
-  skipped += removeUnreferenced(rows, removals);
-  return { state: { rows }, skipped };
+  skipped += removeUnreferenced(rows, links, removals);
+  for (const change of changes) {
+    if (!isLinkChange(change)) continue;
+    const key = linkKey(change.link);
+    const link = links[key];
+    if (!link || (rows[link.predecessorId] && rows[link.followerId])) continue;
+    delete links[key];
+    skipped++;
+  }
+  return { state: { rows, links }, skipped };
 }
 
 /**
- * Deletes the `candidates` that no remaining row points to (as parent or predecessor). A candidate
- * that is still referenced from outside the set is kept — and so are the candidates it points to.
- * Returns how many candidates had to be kept.
+ * Deletes the `candidates` that nothing remaining points to (a row as parent, or either end of a
+ * link). A candidate that is still referenced from outside the set is kept — and so are the
+ * candidates it points to. Returns how many candidates had to be kept.
  */
-function removeUnreferenced(rows: Record<RowId, Row>, candidates: Set<RowId>): number {
+function removeUnreferenced(rows: Record<RowId, Row>, links: Readonly<Record<LinkKey, Link>>, candidates: Set<RowId>): number {
   const initial = candidates.size;
+  const linked = new Set<RowId>();
+  for (const link of Object.values(links)) linked.add(link.predecessorId).add(link.followerId);
   for (let changed = true; changed; ) {
     changed = false;
-    const referenced = new Set<RowId>();
+    const referenced = new Set<RowId>(linked);
     for (const row of Object.values(rows)) {
       if (candidates.has(row.id)) continue;
       if (row.parentId !== null) referenced.add(row.parentId);
-      if (row.kind === "task" && row.predecessorId !== null) referenced.add(row.predecessorId);
     }
     for (const id of candidates) {
       if (referenced.has(id)) {

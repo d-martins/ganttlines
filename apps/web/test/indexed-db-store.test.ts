@@ -1,8 +1,55 @@
-import { LocalSource } from "@ganttlines/client";
+import * as client from "@ganttlines/client";
+import { emptyWorkspace, LocalSource, WORKSPACE_VERSION } from "@ganttlines/client";
+import { TASK_DEFAULTS } from "@ganttlines/engine";
 import { IDBFactory } from "fake-indexeddb";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { IndexedDbStore } from "../src/workspace/indexed-db-store";
 import { fillWorkspace } from "@ganttlines/client/testing";
+
+vi.mock("@ganttlines/client", async (original) => {
+  const actual = await original<typeof import("@ganttlines/client")>();
+  return { ...actual, upgradeProjectRecord: vi.fn(actual.upgradeProjectRecord) };
+});
+
+const A = "11111111-1111-4111-8111-111111111111";
+const B = "22222222-2222-4222-8222-222222222222";
+const v1Task = (id: string, predecessorId: string | null, offset: number) => ({ ...TASK_DEFAULTS, id, kind: "task", title: id, parentId: null, position: "a0", predecessorId, offset });
+const v1Project = (id: string) => ({ id, name: "Launch", archived: false, createdAt: "2026-10-01T00:00:00.000Z", version: 3, rows: [v1Task(A, null, 0), v1Task(B, A, -1)], highlights: [], baselines: [] });
+
+/** A database as this app left it before links: version 1, with records in the version 1 shape. */
+function openRaw(factory: IDBFactory, name: string, version: number, upgrade?: (db: IDBDatabase) => void): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = factory.open(name, version);
+    request.onupgradeneeded = () => upgrade?.(request.result);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function versionOneDatabase(factory: IDBFactory, name: string, projectIds: string[]): Promise<IDBDatabase> {
+  const db = await openRaw(factory, name, 1, (created) => {
+    created.createObjectStore("workspace");
+    created.createObjectStore("projects", { keyPath: "id" });
+  });
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(["workspace", "projects"], "readwrite");
+    tx.objectStore("workspace").put({ ...emptyWorkspace(), version: 1 }, "workspace");
+    for (const id of projectIds) tx.objectStore("projects").put(v1Project(id));
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+  return db;
+}
+
+function readAll(db: IDBDatabase): Promise<{ workspace: unknown; projects: unknown[] }> {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(["workspace", "projects"], "readonly");
+    const workspace = tx.objectStore("workspace").get("workspace");
+    const projects = tx.objectStore("projects").getAll();
+    tx.oncomplete = () => resolve({ workspace: workspace.result, projects: projects.result });
+    tx.onerror = () => reject(tx.error);
+  });
+}
 
 describe("the workspace in IndexedDB", () => {
   it("is there again on the next visit (a new store on the same database)", async () => {
@@ -37,5 +84,48 @@ describe("the workspace in IndexedDB", () => {
     expect((await new IndexedDbStore("test", factory).load()).projects.map((project) => project.id)).toEqual([keep.id]);
     await source.clear();
     expect(await new IndexedDbStore("test", factory).load()).toMatchObject({ projects: [], workspace: { team: [] } });
+  });
+
+  it("opening a version-1 database upgrades its projects to links", async () => {
+    const factory = new IDBFactory();
+    (await versionOneDatabase(factory, "old", ["p1", "p2"])).close();
+    await new IndexedDbStore("old", factory).load();
+    // Written back in the upgrade itself, not on the next save: the stored records are version 2.
+    const db = await openRaw(factory, "old", 2);
+    const { workspace, projects } = await readAll(db);
+    db.close();
+    expect(workspace).toMatchObject({ version: WORKSPACE_VERSION });
+    expect(projects).toHaveLength(2);
+    for (const project of projects as client.ProjectRecord[]) {
+      expect(project.links).toEqual([{ predecessorId: A, followerId: B, kind: "FS", lag: -1 }]);
+      for (const row of project.rows) expect(row).not.toHaveProperty("predecessorId");
+    }
+  });
+
+  it("an open older connection is closed when the upgrade starts", async () => {
+    const factory = new IDBFactory();
+    const older = await versionOneDatabase(factory, "tabs", ["p1"]);
+    const versionChange = vi.fn(() => older.close());
+    older.onversionchange = versionChange;
+    expect((await new IndexedDbStore("tabs", factory).load()).projects).toHaveLength(1);
+    expect(versionChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("a failed upgrade leaves the version-1 data", async () => {
+    const factory = new IDBFactory();
+    (await versionOneDatabase(factory, "failing", ["p1", "p2"])).close();
+    const { upgradeProjectRecord } = await vi.importActual<typeof client>("@ganttlines/client");
+    // The first project upgrades, the second throws: neither is left changed.
+    vi.mocked(client.upgradeProjectRecord)
+      .mockImplementationOnce(upgradeProjectRecord)
+      .mockImplementationOnce(() => {
+        throw new Error("unreadable project");
+      });
+    await expect(new IndexedDbStore("failing", factory).load()).rejects.toThrow();
+    const db = await openRaw(factory, "failing", 1);
+    const { workspace, projects } = await readAll(db);
+    db.close();
+    expect(workspace).toMatchObject({ version: 1 });
+    expect(projects).toEqual([v1Project("p1"), v1Project("p2")]);
   });
 });

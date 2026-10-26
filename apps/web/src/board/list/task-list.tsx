@@ -82,13 +82,14 @@ export function ListHeader({ query, onQuery }: { query: string; onQuery: (query:
   );
 }
 
-/** Planned working days (a task's own; parents and sections: working days across their dates) and actual work days. */
+/** Planned working days (a task's own; parents and sections: the days their tasks are worked) and actual work days. */
 export function durations(entry: BoardRow, calendar: Calendar): { working: string; actual: string } {
   const { row, span } = entry;
   const actual = entry.actualDays === null ? "" : formatDays(entry.actualDays);
   if (row.kind === "task" && !entry.isParent && !entry.fromBaseline) return { working: formatDays(row.duration), actual };
   if (!span) return { working: "–", actual };
   if (entry.kind === "milestone") return { working: "0", actual };
+  if (entry.workedDays !== null) return { working: String(entry.workedDays), actual };
   // Across its dates: the baseline's for a task (its person's days, in halves), team days for the rest.
   const resourceId = row.kind === "task" && !entry.isParent ? row.resourceId : null;
   let working = 0;

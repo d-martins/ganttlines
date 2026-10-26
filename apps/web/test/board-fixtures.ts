@@ -14,8 +14,8 @@ export function section(id: string, fields: Partial<SectionRow> = {}): SectionRo
 export const PROJECT_ID = "11111111-1111-4111-8111-111111111111";
 export const BASELINE_ID = "22222222-2222-4222-8222-222222222222";
 
-export function projectState(rows: ProjectStateDto["rows"], version = 5): ProjectStateDto {
-  return { project: { id: PROJECT_ID, name: "Launch", version, archived: false }, rows };
+export function projectState(rows: ProjectStateDto["rows"], version = 5, links: ProjectStateDto["links"] = []): ProjectStateDto {
+  return { project: { id: PROJECT_ID, name: "Launch", version, archived: false }, rows, links };
 }
 
 export const ANA: ResourceDto = { id: "r-ana", name: "Ana Silva", avatarColor: "#e0569b", inactive: false, userId: "u-admin", locationId: null };

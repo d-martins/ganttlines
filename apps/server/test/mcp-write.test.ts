@@ -1,3 +1,4 @@
+import { MAX_LAG } from "@ganttlines/engine";
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProjectService } from "../src/projects/project-service";
@@ -18,6 +19,9 @@ async function editorsApp() {
   return { admin, ed, projectId, client: await mcpClient(t.app, tokens.access_token) };
 }
 
+/** A predecessor (or follower) entry of a task, by the other task's title. */
+const on = (title: string, extra: Record<string, unknown> = {}) => expect.objectContaining({ task: expect.objectContaining({ title }), ...extra });
+
 const rowsOf = async (projectId: string, cookie: string) =>
   (await t.app.inject({ url: `/api/projects/${projectId}/state`, headers: { cookie } })).json().rows as { id: string; title: string; parentId: string | null }[];
 
@@ -37,7 +41,7 @@ describe("AI access: editing plans", () => {
     expect(result["added"]).toEqual([
       expect.objectContaining({ title: "Phase 1", type: "section" }),
       expect.objectContaining({ title: "Design", start: "2026-10-05", end: "2026-10-07", assignee: expect.objectContaining({ name: "Ana" }) }),
-      expect.objectContaining({ title: "Build", start: "2026-10-08", end: "2026-10-12", endsMidday: true, predecessor: expect.objectContaining({ title: "Design" }) }),
+      expect.objectContaining({ title: "Build", start: "2026-10-08", end: "2026-10-12", endsMidday: true, predecessors: [on("Design", { kind: "FS", lagDays: 0 })] }),
       expect.objectContaining({ title: "Release", type: "milestone", start: "2026-10-12" }),
     ]);
     // It's an ordinary change on the board, credited to Ed "via" the app.
@@ -60,7 +64,7 @@ describe("AI access: editing plans", () => {
       ],
     });
     const updated = await call(client, "update_task", { project: "Launch", task: "build", predecessor: "Design", lagDays: 1, title: "Build it", half: "afternoon", start: "2026-10-05" });
-    expect(updated["task"]).toMatchObject({ title: "Build it", start: "2026-10-08", startsAfternoon: true, predecessor: { title: "Design", lagDays: 1.5 } });
+    expect(updated["task"]).toMatchObject({ title: "Build it", start: "2026-10-08", startsAfternoon: true, predecessors: [on("Design", { kind: "FS", lagDays: 1.5 })] });
 
     await call(client, "move_tasks", { project: "Launch", tasks: ["Build it"], parent: "Later" });
     const later = (await rowsOf(projectId, ed.cookie)).find((row) => row.title === "Later")!;
@@ -87,15 +91,15 @@ describe("AI access: editing plans", () => {
     expect(added["error"]).toBeUndefined();
     const byTitle = (rows: unknown) => Object.fromEntries((rows as { title: string }[]).map((row) => [row.title, row]));
     // Added with an earlier start: still follows Design, placed after it.
-    expect(byTitle(added["added"])["QA"]).toMatchObject({ predecessor: { title: "Design" }, start: "2026-10-14" });
-    expect(byTitle(added["added"])["Design"]).toMatchObject({ predecessor: null, start: "2026-10-12" });
+    expect(byTitle(added["added"])["QA"]).toMatchObject({ predecessors: [on("Design")], start: "2026-10-14" });
+    expect(byTitle(added["added"])["Design"]).toMatchObject({ predecessors: [], start: "2026-10-12" });
 
     // Linked later, while starting a week earlier: Build follows Design, not the other way round.
     const updated = await call(client, "update_task", { project: "Launch", task: "Build", predecessor: "Design" });
     expect(updated["error"]).toBeUndefined();
-    expect(updated["task"]).toMatchObject({ title: "Build", predecessor: { title: "Design" }, start: "2026-10-14" });
+    expect(updated["task"]).toMatchObject({ title: "Build", predecessors: [on("Design")], start: "2026-10-14" });
     const board = byTitle((await call(client, "get_project", { project: "Launch" }))["rows"]);
-    expect(board["Design"]).toMatchObject({ predecessor: null, start: "2026-10-12" });
+    expect(board["Design"]).toMatchObject({ predecessors: [], followers: expect.arrayContaining([on("QA"), on("Build")]), start: "2026-10-12" });
     await client.close();
   });
 
@@ -116,8 +120,8 @@ describe("AI access: editing plans", () => {
     // A start the predecessor and lag don't allow: placed where they say, and the answer says so.
     const asked = await call(client, "update_task", { project: "Launch", task: "F", start: "2026-10-13", half: "afternoon", lagDays: 0 });
     expect(asked["error"]).toBeUndefined();
-    expect(asked["task"]).toMatchObject({ start: "2026-10-15", predecessor: { title: "P" } });
-    expect(asked["notes"]).toEqual(["“F” was asked to start 2026-10-13 (afternoon) but starts 2026-10-15 (afternoon): its predecessor and lag, or the calendar, place it there."]);
+    expect(asked["task"]).toMatchObject({ start: "2026-10-15", predecessors: [on("P")] });
+    expect(asked["notes"]).toEqual(["“F” was asked to start 2026-10-13 (afternoon) but starts 2026-10-15 (afternoon): the tasks it waits on and their lags, or the calendar, place it there."]);
     // Stored as asked: no note.
     const solo = await call(client, "update_task", { project: "Launch", task: "Solo", start: "2026-10-08", half: "afternoon" });
     expect(solo["task"]).toMatchObject({ start: "2026-10-08", startsAfternoon: true });
@@ -150,12 +154,53 @@ describe("AI access: editing plans", () => {
       ],
     });
     const later = await call(client, "update_task", { project: "Launch", task: "F", half: "afternoon" });
-    expect(later["task"]).toMatchObject({ predecessor: { title: "P", lagDays: 2.5 }, startsAfternoon: true });
+    expect(later["task"]).toMatchObject({ predecessors: [on("P", { kind: "FS", lagDays: 2.5 })], startsAfternoon: true });
     // Still follows: P one day longer pushes F one day too.
     const moved = await call(client, "update_task", { project: "Launch", task: "P", durationDays: 2 });
     expect(moved["error"]).toBeUndefined();
     const board = (await call(client, "get_project", { project: "Launch" }))["rows"] as { title: string; start: string }[];
     expect(board.find((row) => row.title === "F")).toMatchObject({ start: "2026-10-16" });
+    await client.close();
+  });
+
+  it("refuses a lag given while removing the predecessor", async () => {
+    const { client } = await editorsApp();
+    await call(client, "add_tasks", { project: "Launch", tasks: [{ title: "P", start: "2026-10-12" }, { title: "F", predecessor: "P", lagDays: 1 }] });
+    const refused = await call(client, "update_task", { project: "Launch", task: "F", predecessor: null, lagDays: 2 });
+    expect(refused).toEqual({ error: "“F”: lagDays needs a predecessor — it can't be set while removing it." });
+    const board = (await call(client, "get_project", { project: "Launch" }))["rows"] as { title: string; predecessors?: unknown[] }[];
+    expect(board.find((row) => row.title === "F")!.predecessors).toEqual([on("P", { lagDays: 1 })]);
+    await client.close();
+  });
+
+  it("moves the bar to set the half day when the lag can't move half a day further", async () => {
+    const { client } = await editorsApp();
+    await call(client, "add_tasks", { project: "Launch", tasks: [{ title: "P", start: "2026-10-12" }, { title: "F", predecessor: "P", lagDays: MAX_LAG }] });
+    const later = await call(client, "update_task", { project: "Launch", task: "F", half: "afternoon" });
+    expect(later["error"]).toBeUndefined();
+    expect(later["task"]).toMatchObject({ startsAfternoon: true, predecessors: [on("P", { lagDays: MAX_LAG })] });
+    await client.close();
+  });
+
+  it("moves the bar to set the half day of a follower dated later than its link allows", async () => {
+    const { client } = await editorsApp();
+    // P is Mon 12; F's own date, Thu 15, is later than the link's Tue 13.
+    await call(client, "add_tasks", { project: "Launch", tasks: [{ title: "P", start: "2026-10-12" }, { title: "F", start: "2026-10-15", predecessor: "P" }] });
+    const later = await call(client, "update_task", { project: "Launch", task: "F", half: "afternoon" });
+    expect(later["error"]).toBeUndefined();
+    expect(later["task"]).toMatchObject({ start: "2026-10-15", startsAfternoon: true, predecessors: [on("P", { lagDays: 0 })] });
+    expect(later["notes"]).toBeUndefined();
+    await client.close();
+  });
+
+  it("says so when a follower at its link's overlap floor can't move half a day earlier", async () => {
+    const { client } = await editorsApp();
+    // P takes Mon 12's morning; F follows that afternoon, as early as its link allows.
+    await call(client, "add_tasks", { project: "Launch", tasks: [{ title: "P", start: "2026-10-12", durationDays: 0.5 }, { title: "F", predecessor: "P" }] });
+    const earlier = await call(client, "update_task", { project: "Launch", task: "F", half: "morning" });
+    expect(earlier["error"]).toBeUndefined();
+    expect(earlier["task"]).toMatchObject({ start: "2026-10-12", startsAfternoon: true, predecessors: [on("P", { lagDays: 0 })] });
+    expect(earlier["notes"]).toEqual(["“F” was asked to start 2026-10-12 but starts 2026-10-12 (afternoon): the tasks it waits on and their lags, or the calendar, place it there."]);
     await client.close();
   });
 
@@ -226,7 +271,166 @@ describe("AI access: editing plans", () => {
     await call(client, "add_tasks", { project: "Launch", tasks: [{ title: "P", start: "2026-10-12", durationDays: 3 }, { title: "L", start: "2026-10-13" }] });
     await call(client, "update_task", { project: "Launch", task: "L", locked: true });
     const linked = await call(client, "update_task", { project: "Launch", task: "L", predecessor: "P" });
-    expect(linked["notes"]).toEqual([expect.stringMatching(/^“L” is locked and starts before its predecessor allows/)]);
+    expect(linked["notes"]).toEqual(["“L” is locked and starts too early for its link to “P” (after it finishes), shown in red on the board: unlock it, or move it later."]);
+    await client.close();
+  });
+
+  it("startsTooEarly notes only the violated link", async () => {
+    const { client } = await editorsApp();
+    await call(client, "add_tasks", {
+      project: "Launch",
+      tasks: [
+        { title: "A", start: "2026-10-05", durationDays: 2 },
+        { title: "C", start: "2026-10-12", durationDays: 5 },
+        { title: "L", start: "2026-10-12", durationDays: 1 },
+      ],
+    });
+    await call(client, "update_task", { project: "Launch", task: "L", locked: true });
+    // L starts after A finishes (fine) but finishes on Mon 12, before C does on Fri 16.
+    const linked = await call(client, "update_task", { project: "Launch", task: "L", predecessors: [{ task: "A" }, { task: "C", kind: "FF" }] });
+    expect(linked["error"]).toBeUndefined();
+    expect(linked["notes"]).toEqual(["“L” is locked and starts too early for its link to “C” (can't finish before it), shown in red on the board: unlock it, or move it later."]);
+    const task = linked["task"] as { startsTooEarly?: boolean; predecessors: { task: { title: string }; startsTooEarly?: boolean }[] };
+    expect(task.startsTooEarly).toBe(true);
+    expect(task.predecessors.find((entry) => entry.task.title === "C")).toMatchObject({ kind: "FF", startsTooEarly: true });
+    expect(task.predecessors.find((entry) => entry.task.title === "A")!.startsTooEarly).toBeUndefined();
+    await client.close();
+  });
+
+  it("update_task predecessors replaces the links (one removed, one kept with a new lag, one added SS)", async () => {
+    const { client } = await editorsApp();
+    const added = await call(client, "add_tasks", {
+      project: "Launch",
+      tasks: [
+        { title: "A", start: "2026-10-05", durationDays: 1 },
+        { title: "B", start: "2026-10-05", durationDays: 2 },
+        { title: "C", start: "2026-10-05", durationDays: 1 },
+        { title: "F", durationDays: 1, predecessors: [{ task: "A" }, { task: "B" }] },
+      ],
+    });
+    expect(added["error"]).toBeUndefined();
+    expect((added["added"] as unknown[])[3]).toMatchObject({ start: "2026-10-07" });
+    expect(((added["added"] as unknown[])[3] as { predecessors: unknown[] }).predecessors).toEqual(expect.arrayContaining([on("A", { kind: "FS" }), on("B", { kind: "FS" })]));
+
+    const updated = await call(client, "update_task", { project: "Launch", task: "F", predecessors: [{ task: "B", lagDays: 2 }, { task: "C", kind: "SS" }] });
+    expect(updated["error"]).toBeUndefined();
+    const task = updated["task"] as { start: string; predecessors: unknown[] };
+    expect(task.predecessors).toHaveLength(2);
+    expect(task.predecessors).toEqual(expect.arrayContaining([on("B", { kind: "FS", kindInWords: "after it finishes", lagDays: 2 }), on("C", { kind: "SS", kindInWords: "once it starts", lagDays: 0 })]));
+    // Two working days after B ends on Tue 6.
+    expect(task.start).toBe("2026-10-09");
+    const board = (await call(client, "get_project", { project: "Launch" }))["rows"] as { title: string }[];
+    expect(board.find((row) => row.title === "A")).toMatchObject({ followers: [] });
+
+    // One call, one undo: A and B are back as they were.
+    await call(client, "undo");
+    const before = (await call(client, "get_project", { project: "Launch" }))["rows"] as { title: string; predecessors?: unknown[] }[];
+    const restored = before.find((row) => row.title === "F")!.predecessors;
+    expect(restored).toHaveLength(2);
+    expect(restored).toEqual(expect.arrayContaining([on("A", { lagDays: 0 }), on("B", { lagDays: 0 })]));
+    await client.close();
+  });
+
+  it("predecessor shorthand on a task with two links is refused and changes nothing", async () => {
+    const { client } = await editorsApp();
+    await call(client, "add_tasks", {
+      project: "Launch",
+      tasks: [
+        { title: "A", start: "2026-10-05", durationDays: 1 },
+        { title: "B", start: "2026-10-05", durationDays: 1 },
+        { title: "C", start: "2026-10-05", durationDays: 1 },
+        { title: "F", durationDays: 1, predecessors: [{ task: "A" }, { task: "B" }] },
+      ],
+    });
+    const refused = "“F” waits on several tasks: use predecessors to change its links.";
+    expect(await call(client, "update_task", { project: "Launch", task: "F", title: "F2", predecessor: "C" })).toEqual({ error: refused });
+    expect(await call(client, "update_task", { project: "Launch", task: "F", lagDays: 1 })).toEqual({ error: refused });
+    expect(await call(client, "update_task", { project: "Launch", task: "F", predecessor: null })).toEqual({ error: refused });
+    expect(await call(client, "update_task", { project: "Launch", task: "F", predecessor: "C", predecessors: [{ task: "C" }] })).toEqual({
+      error: expect.stringContaining("not both"),
+    });
+    const board = (await call(client, "get_project", { project: "Launch" }))["rows"] as { title: string; predecessors?: unknown[] }[];
+    expect(board.map((row) => row.title)).toContain("F");
+    expect(board.find((row) => row.title === "F")!.predecessors).toHaveLength(2);
+    await client.close();
+  });
+
+  it("the predecessor shorthand replaces or removes a task's one link", async () => {
+    const { client } = await editorsApp();
+    await call(client, "add_tasks", {
+      project: "Launch",
+      tasks: [
+        { title: "A", start: "2026-10-05", durationDays: 1 },
+        { title: "B", start: "2026-10-05", durationDays: 3 },
+        { title: "F", durationDays: 1, predecessors: [{ task: "A", kind: "SS", lagDays: 1 }] },
+      ],
+    });
+    const lagged = await call(client, "update_task", { project: "Launch", task: "F", lagDays: 2 });
+    expect(lagged["task"]).toMatchObject({ predecessors: [on("A", { kind: "SS", lagDays: 2 })] });
+    const swapped = await call(client, "update_task", { project: "Launch", task: "F", predecessor: "B" });
+    expect(swapped["task"]).toMatchObject({ predecessors: [on("B", { kind: "FS", lagDays: 0 })], start: "2026-10-08" });
+    const removed = await call(client, "update_task", { project: "Launch", task: "F", predecessor: null });
+    expect(removed["task"]).toMatchObject({ predecessors: [] });
+    await client.close();
+  });
+
+  it("replacing a late predecessor with an earlier one moves the task earlier", async () => {
+    const { client } = await editorsApp();
+    await call(client, "add_tasks", {
+      project: "Launch",
+      tasks: [
+        { title: "Late", start: "2026-10-05", durationDays: 5 }, // Mon 5 – Fri 9
+        { title: "Early", start: "2026-10-05", durationDays: 1 }, // Mon 5
+        { title: "F", durationDays: 1, predecessor: "Late" }, // its own date Mon 5, shown Mon 12
+        { title: "G", durationDays: 1, predecessors: [{ task: "Late" }] },
+      ],
+    });
+    const swapped = await call(client, "update_task", { project: "Launch", task: "F", predecessor: "Early" });
+    expect(swapped["task"]).toMatchObject({ predecessors: [on("Early", { kind: "FS", lagDays: 0 })], start: "2026-10-06" });
+    const replaced = await call(client, "update_task", { project: "Launch", task: "G", predecessors: [{ task: "Early" }] });
+    expect(replaced["task"]).toMatchObject({ predecessors: [on("Early", { kind: "FS", lagDays: 0 })], start: "2026-10-06" });
+    // An asked start the new link doesn't allow is still placed by it, and the answer says so.
+    const asked = await call(client, "update_task", { project: "Launch", task: "F", start: "2026-10-05", predecessor: "Late" });
+    expect(asked["task"]).toMatchObject({ start: "2026-10-12" });
+    expect(asked["notes"]).toEqual(["“F” was asked to start 2026-10-05 but starts 2026-10-12: the tasks it waits on and their lags, or the calendar, place it there."]);
+    await client.close();
+  });
+
+  it("an invalid link in predecessors rolls back the whole call", async () => {
+    const { client } = await editorsApp();
+    await call(client, "add_tasks", {
+      project: "Launch",
+      tasks: [
+        { title: "A", start: "2026-10-05", durationDays: 1 },
+        { title: "B", start: "2026-10-05", durationDays: 1 },
+        { title: "Parent", start: "2026-10-12" },
+        { title: "Kid", parent: "Parent", start: "2026-10-05", durationDays: 1, predecessor: "A", lagDays: 1 }, // Wed 7
+      ],
+    });
+    // Before failing, the call has already moved Kid to Mon 12 (four days after B).
+    const result = await call(client, "update_task", { project: "Launch", task: "Kid", title: "Kid 2", predecessors: [{ task: "B", lagDays: 4 }, { task: "Parent" }] });
+    expect(result).toEqual({ error: "“Kid”: A task can't link to its own parent or subtask. Nothing was changed." });
+    const board = (await call(client, "get_project", { project: "Launch" }))["rows"] as { title: string; predecessors?: unknown[] }[];
+    expect(board.find((row) => row.title === "Kid")).toMatchObject({ start: "2026-10-07", predecessors: [on("A", { kind: "FS", lagDays: 1 })] });
+    expect(board.find((row) => row.title === "B")).toMatchObject({ followers: [] });
+    await client.close();
+  });
+
+  it("refuses predecessors that list the same task twice with the same kind, and changes nothing", async () => {
+    const { client } = await editorsApp();
+    await call(client, "add_tasks", {
+      project: "Launch",
+      tasks: [
+        { title: "A", start: "2026-10-05", durationDays: 1 },
+        { title: "B", start: "2026-10-05", durationDays: 1 },
+        { title: "F", durationDays: 1, predecessor: "B" },
+      ],
+    });
+    const result = await call(client, "update_task", { project: "Launch", task: "F", title: "F2", predecessors: [{ task: "A" }, { task: "A", kind: "FS", lagDays: 1 }] });
+    expect(result).toEqual({ error: "“F”: predecessors lists “A” twice with the same kind. Nothing was changed." });
+    const board = (await call(client, "get_project", { project: "Launch" }))["rows"] as { title: string; predecessors?: unknown[] }[];
+    expect(board.map((row) => row.title)).toEqual(["A", "B", "F"]);
+    expect(board.find((row) => row.title === "F")).toMatchObject({ start: "2026-10-06", predecessors: [on("B", { kind: "FS", lagDays: 0 })] });
     await client.close();
   });
 

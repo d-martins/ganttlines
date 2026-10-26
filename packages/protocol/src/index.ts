@@ -38,7 +38,7 @@ export {
 } from "./calendar";
 export type { ChangeEntryDto, ChangesDto, CommandResultDto } from "./changes";
 export { COMMAND_LIMITS, CommandSchema, ProjectCommandBody, toEngineCommand, UndoBody } from "./commands";
-export { ClientMessage, type ServerMessage, type Viewer } from "./realtime";
+export { ClientMessage, PROTOCOL_VERSION, type ServerMessage, type Viewer } from "./realtime";
 export {
   CreateShareLinkBody,
   LINK_ACCESS,
@@ -80,4 +80,4 @@ export {
   type McpSettingsDto,
   type OAuthRequestDto,
 } from "./mcp";
-export { WorkspaceFile } from "./workspace-file";
+export { WorkspaceFile, WorkspaceFileV1 } from "./workspace-file";

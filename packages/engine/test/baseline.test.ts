@@ -7,7 +7,7 @@ const rows: Row[] = [
   { ...TASK_DEFAULTS, id: "a", kind: "task", title: "Design", parentId: "s", position: "a0", userStart: "2026-10-05", duration: 2 },
   { ...TASK_DEFAULTS, id: "m", kind: "task", title: "Go", parentId: "s", position: "a1", userStart: "2026-10-09", duration: 0 },
 ];
-const state: ProjectState = { rows: Object.fromEntries(rows.map((row) => [row.id, row])) };
+const state: ProjectState = { rows: Object.fromEntries(rows.map((row) => [row.id, row])), links: {} };
 
 describe("baselineTasks", () => {
   it("saves every scheduled task's dates and shape, leaving sections out", () => {

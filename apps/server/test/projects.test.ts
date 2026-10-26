@@ -61,7 +61,7 @@ describe("projects", () => {
     await t.db.row.createMany({ data: rows.map((row) => ({ ...toDbColumns(row), projectId: project.id })) });
     const state = await t.app.inject({ url: `/api/projects/${project.id}/state`, headers: { cookie: admin } });
     expect(state.statusCode).toBe(200);
-    expect(state.json()).toEqual({ project, rows: expect.arrayContaining(rows) });
+    expect(state.json()).toEqual({ project, rows: expect.arrayContaining(rows), links: [] });
   });
 
   it("refuses to serve a project with corrupted parent links", async () => {
@@ -113,7 +113,7 @@ describe("deleting projects", () => {
     expect((await remove(viewer.cookie)).statusCode).toBe(403);
 
     const board = await connect(t.app, viewer.cookie);
-    board.send({ type: "join", projectId: id, version: 0 });
+    board.send({ type: "join", projectId: id, version: 0, protocol: 2 });
     await board.next("joined");
     expect((await remove(editor.cookie)).statusCode).toBe(204);
     expect(await board.closed).toBe(CLOSE_PROJECT_DELETED);

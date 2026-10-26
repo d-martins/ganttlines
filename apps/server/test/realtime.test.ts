@@ -32,10 +32,10 @@ describe("project rooms", () => {
   it("joins a project and announces who is viewing", async () => {
     const { ana, rudy, projectId } = await team();
     const a = await connect(t.app, ana.cookie);
-    a.send({ type: "join", projectId, version: 0 });
+    a.send({ type: "join", projectId, version: 0, protocol: 2 });
     expect(await a.next("joined")).toMatchObject({ projectId, version: 0, viewers: [{ name: "Ana" }] });
     const r = await connect(t.app, rudy.cookie);
-    r.send({ type: "join", projectId, version: 0 });
+    r.send({ type: "join", projectId, version: 0, protocol: 2 });
     await r.next("joined");
     expect((await a.next("presence", (m) => m.viewers.length === 2)).viewers.map((v) => v.name)).toEqual(["Ana", "Rudy"]);
     r.send({ type: "leave" });
@@ -46,7 +46,7 @@ describe("project rooms", () => {
     const { ana, rudy, projectId } = await team();
     const [a, r] = [await connect(t.app, ana.cookie), await connect(t.app, rudy.cookie)];
     for (const c of [a, r]) {
-      c.send({ type: "join", projectId, version: 0 });
+      c.send({ type: "join", projectId, version: 0, protocol: 2 });
       await c.next("joined");
     }
     const commandId = randomUUID();
@@ -61,7 +61,7 @@ describe("project rooms", () => {
   it("pushes changes made over REST", async () => {
     const { ana, rudy, projectId } = await team();
     const r = await connect(t.app, rudy.cookie);
-    r.send({ type: "join", projectId, version: 0 });
+    r.send({ type: "join", projectId, version: 0, protocol: 2 });
     await r.next("joined");
     await t.app.inject({
       method: "POST",
@@ -83,7 +83,7 @@ describe("project rooms", () => {
       });
     }
     const a = await connect(t.app, ana.cookie);
-    a.send({ type: "join", projectId, version: 1 });
+    a.send({ type: "join", projectId, version: 1, protocol: 2 });
     expect((await a.next("patch")).version).toBe(2);
     expect((await a.next("patch")).version).toBe(3);
     expect(await a.next("joined")).toMatchObject({ version: 3 });
@@ -95,7 +95,7 @@ describe("project rooms", () => {
     a.send({ type: "command", commandId: randomUUID(), command: createTask(randomUUID()) });
     expect(await a.next("reject")).toMatchObject({ error: "invalid" });
     const v = await connect(t.app, vi.cookie);
-    v.send({ type: "join", projectId, version: 0 });
+    v.send({ type: "join", projectId, version: 0, protocol: 2 });
     await v.next("joined");
     v.send({ type: "command", commandId: randomUUID(), command: createTask(randomUUID()) });
     expect(await v.next("reject")).toMatchObject({ error: "forbidden" });
@@ -104,18 +104,32 @@ describe("project rooms", () => {
   it("reports engine rejections and malformed messages", async () => {
     const { ana, projectId } = await team();
     const a = await connect(t.app, ana.cookie);
-    a.send({ type: "join", projectId, version: 0 });
+    a.send({ type: "join", projectId, version: 0, protocol: 2 });
     await a.next("joined");
     a.send({ type: "command", commandId: randomUUID(), command: { type: "indent", id: randomUUID() } });
     expect(await a.next("reject")).toMatchObject({ error: "not_found" });
     a.ws.send("not json");
     expect(await a.next("error")).toMatchObject({ message: "Messages must be JSON" });
+    a.send({ type: "bogus" });
+    expect(await a.next("error")).toMatchObject({ message: "Unknown or malformed message" });
+    a.send({ type: "join", projectId: "not-an-id", version: 0, protocol: 2 });
+    expect(await a.next("error")).toMatchObject({ message: "Unknown or malformed message" });
+  });
+
+  it("a join without protocol 2 is closed with 1008", async () => {
+    const { ana, projectId } = await team();
+    for (const join of [{ type: "join", projectId, version: 0 }, { type: "join", projectId, version: 0, protocol: 1 }]) {
+      const a = await connect(t.app, ana.cookie);
+      a.send(join);
+      expect(await a.closed).toBe(1008);
+      expect(a.inbox.filter((m) => m.type === "joined")).toEqual([]);
+    }
   });
 
   it("undoes over the socket", async () => {
     const { ana, projectId } = await team();
     const a = await connect(t.app, ana.cookie);
-    a.send({ type: "join", projectId, version: 0 });
+    a.send({ type: "join", projectId, version: 0, protocol: 2 });
     await a.next("joined");
     a.send({ type: "command", commandId: randomUUID(), command: createTask(randomUUID()) });
     await a.next("ack");
@@ -129,7 +143,7 @@ describe("other live updates", () => {
   it("announces renames to the room and calendar changes to everyone", async () => {
     const { ana, rudy, projectId } = await team();
     const a = await connect(t.app, ana.cookie);
-    a.send({ type: "join", projectId, version: 0 });
+    a.send({ type: "join", projectId, version: 0, protocol: 2 });
     await a.next("joined");
     const r = await connect(t.app, rudy.cookie); // not in any room
     await t.app.inject({ method: "PATCH", url: `/api/projects/${projectId}`, headers: { cookie: rudy.cookie }, payload: { name: "Launch v2" } });
@@ -149,7 +163,7 @@ describe("closing connections", () => {
   it("drops queued messages once a user's access changes", async () => {
     const { admin, ana, projectId } = await team();
     const a = await connect(t.app, ana.cookie);
-    a.send({ type: "join", projectId, version: 0 });
+    a.send({ type: "join", projectId, version: 0, protocol: 2 });
     await a.next("joined");
     for (let i = 0; i < 90; i++) a.send({ type: "command", commandId: randomUUID(), command: createTask(randomUUID(), `T${i}`) });
     await a.next("ack"); // the queue is being worked through
@@ -164,7 +178,7 @@ describe("closing connections", () => {
   it("closes connections that flood the server", async () => {
     const { ana, projectId } = await team();
     const a = await connect(t.app, ana.cookie);
-    a.send({ type: "join", projectId, version: 0 });
+    a.send({ type: "join", projectId, version: 0, protocol: 2 });
     await a.next("joined");
     for (let i = 0; i < 150; i++) a.send({ type: "command", commandId: randomUUID(), command: createTask(randomUUID()) });
     expect(await a.closed).toBe(1008);
@@ -194,7 +208,7 @@ describe("closing connections", () => {
     const admin = await setupAdmin(app);
     const projectId = (await app.inject({ method: "POST", url: "/api/projects", headers: { cookie: admin }, payload: { name: "Launch" } })).json().project.id;
     for (const client of await Promise.all([connect(app, admin), connect(app, admin)])) {
-      client.send({ type: "join", projectId, version: 0 });
+      client.send({ type: "join", projectId, version: 0, protocol: 2 });
       await client.next("joined");
     }
     await app.close();

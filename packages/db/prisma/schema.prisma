@@ -105,6 +105,7 @@ model Project {
   archivedAt DateTime?
   createdAt  DateTime  @default(now())
   rows       Row[]
+  links      Link[]
   commands   CommandLog[]
   shareLinks ShareLink[]
   comments   Comment[]
@@ -133,12 +134,29 @@ model Row {
   resourceId    String? @db.Uuid
   color         String  @default("blue")
   locked        Boolean @default(false)
-  predecessorId String? @db.Uuid
-  /// working days in half-day steps
-  offset        Float   @default(0)
   description   String  @default("")
+  linksIn       Link[]  @relation("LinkFollower")
+  linksOut      Link[]  @relation("LinkPredecessor")
 
   @@index([projectId])
+}
+
+/// A dependency: `follower` waits on `predecessor` as `kind` says. Identified by its three ids.
+model Link {
+  projectId     String  @db.Uuid
+  project       Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  predecessorId String  @db.Uuid
+  predecessor   Row     @relation("LinkPredecessor", fields: [predecessorId], references: [id], onDelete: Cascade)
+  followerId    String  @db.Uuid
+  follower      Row     @relation("LinkFollower", fields: [followerId], references: [id], onDelete: Cascade)
+  /// FS | SS | FF
+  kind          String
+  /// working days in half-day steps (negative = overlap, finish-to-start only)
+  lag           Float   @default(0)
+
+  @@id([followerId, predecessorId, kind])
+  @@index([projectId])
+  @@index([predecessorId])
 }
 
 /// Singleton (id = 1): instance-wide calendar settings and the instance-scope version counter.

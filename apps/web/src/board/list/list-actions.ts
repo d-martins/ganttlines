@@ -55,19 +55,6 @@ export function deleteRow(board: Board, row: Row): void {
   toast(`Deleted “${row.title || "Untitled"}”${extra}`, { action: { label: "Undo", run: () => board.sync.requestHistory("undo") } });
 }
 
-/**
- * Sets (or removes, with null) a task's predecessor; the task then starts after it (moving later if
- * needed). Offsets are never shown or typed: dragging a linked task records them.
- */
-export function setPredecessor(board: Board, task: TaskRow, predecessorId: RowId | null): void {
-  if (predecessorId === task.predecessorId) return;
-  if (predecessorId === null) {
-    runCommand(board, { type: "removePredecessor", id: task.id });
-    return;
-  }
-  runCommand(board, { type: "linkTasks", fromId: predecessorId, toId: task.id });
-}
-
 /** "2.5" or "2,5" → 2.5; "" → null; NaN when unreadable. */
 export function parseDays(text: string): number | null {
   const trimmed = text.trim().replace(",", ".");

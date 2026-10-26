@@ -1,4 +1,4 @@
-import { fromDay, TASK_COLORS, type Command } from "@ganttlines/engine";
+import { fromDay, halfDay, linkRequirement, MAX_LAG, MAX_LINKS_PER_TASK, spanStart as firstHalf, TASK_COLORS, type Command, type LinkKind } from "@ganttlines/engine";
 import type { Project } from "@ganttlines/db";
 import { CommandSchema, CreateProjectBody, toEngineCommand } from "@ganttlines/protocol";
 import { randomUUID } from "node:crypto";
@@ -14,6 +14,7 @@ import { answer, guarded, type ToolContext, type ToolGroup } from "./tools";
 const ISO_DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "a date as YYYY-MM-DD");
 const HALF = z.enum(["morning", "afternoon"]).describe("start in the morning (default) or the afternoon of that day");
 const DAYS = z.number().min(0).max(3660).multipleOf(0.5);
+const LAG = z.number().min(-MAX_LAG).max(MAX_LAG).multipleOf(0.5);
 const MAX_TASKS_PER_CALL = 100;
 
 /** The last tool call's board commands, kept on the connection so `undo` can revert exactly those. */
@@ -60,6 +61,10 @@ class BoardEdit {
 
   row(id: string) {
     return this.rows.find((entry) => entry.row.id === id);
+  }
+
+  async calendar() {
+    return (await this.tools.context.instance.current()).calendar;
   }
 
   /** Records what this call changed on the connection (replacing the previous call's). */
@@ -138,15 +143,27 @@ async function editProject(tools: ToolContext, ref: string): Promise<BoardEdit> 
   return edit;
 }
 
+const Predecessor = z.object({
+  task: z.string().min(1).describe("the task (id or title) this one waits on"),
+  kind: z.enum(["FS", "SS", "FF"]).optional().describe("FS: starts after it finishes (default); SS: starts once it starts; FF: can't finish before it"),
+  lagDays: LAG.optional().describe("working days of delay (default 0, or as it was); negative overlaps, FS only"),
+});
+type Predecessor = z.infer<typeof Predecessor>;
+
 const TaskFields = {
   description: z.string().max(20_000).optional().describe("Markdown"),
   color: z.enum(TASK_COLORS).optional(),
-  start: ISO_DATE.optional().describe("the day it starts (tasks with a predecessor are placed after it instead)"),
+  start: ISO_DATE.optional().describe("the day it starts (tasks waiting on others are placed where their links allow instead)"),
   half: HALF.optional(),
   durationDays: DAYS.optional().describe("working days, in half-day steps (default 1)"),
   assignee: z.string().nullable().optional().describe("a team member's id or name; null for nobody"),
-  predecessor: z.string().nullable().optional().describe("the task (id or title) this one follows; null for none"),
-  lagDays: z.number().min(-3660).max(3660).multipleOf(0.5).optional().describe("working days after the predecessor ends (negative overlaps)"),
+  predecessors: z
+    .array(Predecessor)
+    .max(MAX_LINKS_PER_TASK)
+    .optional()
+    .describe("every task this one waits on, replacing its links ([] for none)"),
+  predecessor: z.string().nullable().optional().describe("shorthand for a task with at most one link: the task (id or title) it starts after; null for none"),
+  lagDays: LAG.optional().describe("with the shorthand: working days of delay on its one link (negative overlaps)"),
   milestone: z.boolean().optional().describe("a milestone (zero length)"),
 };
 
@@ -191,7 +208,7 @@ export const writePlans: ToolGroup = (server, tools) => {
       title: "Add tasks",
       description:
         "Adds sections, tasks and milestones to a project, in order. Each can go in a section or under a parent task (by id or title — " +
-        "including ones added earlier in the same call), start on a date or follow a predecessor, and have a duration in working days " +
+        "including ones added earlier in the same call), start on a date or wait on other tasks (predecessors), and have a duration in working days " +
         "and an assignee. Tasks are scheduled around weekends, holidays and the assignee's time off. Returns the added rows with their computed dates.",
       inputSchema: z.object({
         project: z.string().min(1).describe("the project's id or name"),
@@ -211,6 +228,10 @@ export const writePlans: ToolGroup = (server, tools) => {
     },
     ({ project: ref, tasks }) =>
       guarded(async () => {
+        for (const item of tasks) {
+          const problem = shorthandProblem(item, item.title, 0);
+          if (problem) throw new ToolProblem(problem);
+        }
         const edit = await editProject(tools, ref);
         const team = await people();
         const added: { id: string; title: string }[] = [];
@@ -222,8 +243,9 @@ export const writePlans: ToolGroup = (server, tools) => {
             const siblings = edit.rows.filter((entry) => entry.row.parentId === parentId);
             const afterId = item.after ? edit.find(item.after, "any", added).id : (siblings[siblings.length - 1]?.row.id ?? null);
             const id = randomUUID();
-            const predecessor = kind === "task" && item.predecessor ? edit.find(item.predecessor, "task", added) : null;
-            // Linking needs both tasks scheduled: a follower starts wherever its predecessor does, then the link places it.
+            const firstPredecessor = kind === "task" ? (item.predecessors?.[0]?.task ?? item.predecessor) : null;
+            const predecessor = firstPredecessor ? edit.find(firstPredecessor, "task", added) : null;
+            // Linking needs both tasks scheduled: a follower starts wherever its (first) predecessor does, then the links place it.
             const start = item.start ?? (predecessor ? (spanStart(edit, predecessor.id) ?? undefined) : undefined);
             await edit.run({ type: "createRow", id, kind, parentId, afterId, title: item.title, ...(start ? { start } : {}) });
             added.push({ id, title: item.title });
@@ -248,7 +270,8 @@ export const writePlans: ToolGroup = (server, tools) => {
     {
       title: "Change a task",
       description:
-        "Changes one task: title, description, colour, assignee, start (and half day), duration, milestone, lock, predecessor and lag, " +
+        "Changes one task: title, description, colour, assignee, start (and half day), duration, milestone, lock, the tasks it waits on " +
+        "(predecessors, each with a kind and lag; or the predecessor and lagDays shorthand on a task with at most one link), " +
         "or the working days it actually took. Only the fields given change. Returns the task with its new dates.",
       inputSchema: z.object({
         project: z.string().min(1).describe("the project's id or name"),
@@ -263,6 +286,8 @@ export const writePlans: ToolGroup = (server, tools) => {
       guarded(async () => {
         const edit = await editProject(tools, ref);
         const task = edit.find(taskRef, "task");
+        const problem = shorthandProblem(fields, task.title, edit.row(task.id)?.links.into.length ?? 0);
+        if (problem) throw new ToolProblem(problem);
         edit.about = task.title;
         await edit.steps(async () => {
           if (fields.title !== undefined) await edit.run({ type: "updateTitle", id: task.id, title: fields.title });
@@ -363,22 +388,28 @@ export const writePlans: ToolGroup = (server, tools) => {
 };
 
 /**
- * Where a task asked to start on a date ended up elsewhere (its predecessor and lag, or the
+ * Where a task asked to start on a date ended up elsewhere (the tasks it waits on, or the
  * calendar, decide), says so — instead of reporting success as if it were stored as asked.
  */
 function placementNotes(entries: { title: string; asked: { start?: string | undefined; half?: "morning" | "afternoon" | undefined }; row: unknown }[]): string[] {
   const notes: string[] = [];
   for (const { title, asked, row } of entries) {
-    const placed = row as { start?: string | null; startsAfternoon?: boolean; startsTooEarly?: boolean } | undefined;
+    const placed = row as
+      | { start?: string | null; startsAfternoon?: boolean; startsTooEarly?: boolean; predecessors?: { task: { title: string }; kindInWords: string; startsTooEarly?: boolean }[] }
+      | undefined;
     if (placed?.startsTooEarly) {
-      notes.push(`“${title}” is locked and starts before its predecessor allows (shown in red on the board): unlock it, or move it later.`);
+      const late = (placed.predecessors ?? []).filter((entry) => entry.startsTooEarly).map((entry) => `“${entry.task.title}” (${entry.kindInWords})`);
+      const which = late.length === 0 ? "its links" : `its ${late.length === 1 ? "link" : "links"} to ${late.length > 1 ? `${late.slice(0, -1).join(", ")} and ${late.at(-1)}` : late[0]}`;
+      notes.push(`“${title}” is locked and starts too early for ${which}, shown in red on the board: unlock it, or move it later.`);
       continue;
     }
-    if (!asked.start || !placed?.start) continue;
+    // Only a half day asked for: on the day it starts.
+    const askedDay = asked.start ?? (asked.half ? placed?.start : undefined);
+    if (!askedDay || !placed?.start) continue;
     const askedAfternoon = asked.half === "afternoon";
-    if (placed.start === asked.start && Boolean(placed.startsAfternoon) === askedAfternoon) continue;
+    if (placed.start === askedDay && Boolean(placed.startsAfternoon) === askedAfternoon) continue;
     const when = (day: string, afternoon: boolean) => `${day}${afternoon ? " (afternoon)" : ""}`;
-    notes.push(`“${title}” was asked to start ${when(asked.start, askedAfternoon)} but starts ${when(placed.start, Boolean(placed.startsAfternoon))}: its predecessor and lag, or the calendar, place it there.`);
+    notes.push(`“${title}” was asked to start ${when(askedDay, askedAfternoon)} but starts ${when(placed.start, Boolean(placed.startsAfternoon))}: the tasks it waits on and their lags, or the calendar, place it there.`);
   }
   return notes;
 }
@@ -388,7 +419,82 @@ function spanStart(edit: BoardEdit, id: string): string | null {
   return span ? fromDay(span.start) : null;
 }
 
-/** Applies the optional task fields, in an order the engine accepts (dates before links, links before lag). */
+/** Why the link fields can't be used as given (on a task waiting on `links` tasks), if they can't. */
+function shorthandProblem(fields: { predecessors?: unknown; predecessor?: unknown; lagDays?: unknown }, title: string, links: number): string | null {
+  const shorthand = fields.predecessor !== undefined || fields.lagDays !== undefined;
+  if (!shorthand) return null;
+  if (fields.predecessors !== undefined) return `“${title}”: give either predecessors, or predecessor and lagDays, not both.`;
+  if (fields.predecessor === null && fields.lagDays !== undefined) return `“${title}”: lagDays needs a predecessor — it can't be set while removing it.`;
+  if (links > 1) return `“${title}” waits on several tasks: use predecessors to change its links.`;
+  return null;
+}
+
+interface WantedLink {
+  predecessorId: string;
+  kind: LinkKind;
+  /** undefined: as it is (0 for a new link) */
+  lag: number | undefined;
+}
+
+/** The links the task should wait on after this call, or undefined to leave them as they are. */
+function wantedLinks(
+  edit: BoardEdit,
+  id: string,
+  fields: { predecessors?: Predecessor[] | undefined; predecessor?: string | null | undefined; lagDays?: number | undefined },
+  added: readonly { id: string; title: string }[],
+): WantedLink[] | undefined {
+  if (fields.predecessors !== undefined) {
+    const wanted: WantedLink[] = [];
+    for (const entry of fields.predecessors) {
+      const predecessor = edit.find(entry.task, "task", added);
+      const kind = entry.kind ?? "FS";
+      if (wanted.some((other) => other.predecessorId === predecessor.id && other.kind === kind)) {
+        throw new ToolProblem(`predecessors lists “${predecessor.title}” twice with the same kind.`);
+      }
+      wanted.push({ predecessorId: predecessor.id, kind, lag: entry.lagDays });
+    }
+    return wanted;
+  }
+  // The shorthand: the task's one link, as a link to a task "after it finishes".
+  if (fields.predecessor === null) return [];
+  if (fields.predecessor !== undefined) return [{ predecessorId: edit.find(fields.predecessor, "task", added).id, kind: "FS", lag: fields.lagDays }];
+  if (fields.lagDays !== undefined) {
+    const [link] = edit.row(id)?.links.into ?? [];
+    if (!link) throw new ToolProblem("This task has no predecessor.");
+    return [{ predecessorId: link.predecessorId, kind: link.kind, lag: fields.lagDays }];
+  }
+  return undefined;
+}
+
+/** Makes the task wait on exactly `wanted`: removes the links not listed, changes the lags asked for, adds the new ones. */
+async function setLinks(edit: BoardEdit, id: string, wanted: readonly WantedLink[]): Promise<void> {
+  await edit.load();
+  const current = edit.row(id)?.links.into ?? [];
+  const same = (link: { predecessorId: string; kind: LinkKind }, other: { predecessorId: string; kind: LinkKind }) =>
+    link.predecessorId === other.predecessorId && link.kind === other.kind;
+  // A replaced link doesn't pin the task: it goes where its remaining links and its own date put it.
+  for (const link of current) {
+    if (!wanted.some((other) => same(link, other))) await edit.run({ type: "removeLink", predecessorId: link.predecessorId, followerId: id, kind: link.kind, keepPlace: false });
+  }
+  for (const link of wanted) {
+    const existing = current.find((other) => same(link, other));
+    if (existing) {
+      if (link.lag !== undefined && link.lag !== existing.lag) {
+        await edit.run({ type: "updateLink", predecessorId: link.predecessorId, followerId: id, kind: link.kind, lag: link.lag });
+      }
+      continue;
+    }
+    await edit.load();
+    if (!edit.row(id)?.span) {
+      // An unscheduled task can't be linked yet: place it where its predecessor starts first.
+      const start = spanStart(edit, link.predecessorId);
+      if (start) await edit.run({ type: "moveTask", id, start });
+    }
+    await edit.run({ type: "addLink", predecessorId: link.predecessorId, followerId: id, kind: link.kind, ...(link.lag !== undefined ? { lag: link.lag } : {}) });
+  }
+}
+
+/** Applies the optional task fields, in an order the engine accepts (dates before links, links before the half day). */
 async function applyTaskFields(
   edit: BoardEdit,
   id: string,
@@ -399,6 +505,7 @@ async function applyTaskFields(
     half?: "morning" | "afternoon" | undefined;
     durationDays?: number | undefined;
     assignee?: string | null | undefined;
+    predecessors?: Predecessor[] | undefined;
     predecessor?: string | null | undefined;
     lagDays?: number | undefined;
     milestone?: boolean | undefined;
@@ -416,30 +523,31 @@ async function applyTaskFields(
   if (fields.assignee !== undefined) {
     await edit.run({ type: "setAssignee", id, resourceId: fields.assignee === null ? null : pickPerson(team, fields.assignee).id });
   }
-  if (fields.predecessor === null) {
-    await edit.run({ type: "removePredecessor", id });
-  } else if (fields.predecessor !== undefined) {
-    const predecessor = edit.find(fields.predecessor, "task", added);
-    await edit.load();
-    if (!edit.row(id)?.span) {
-      // An unscheduled task can't be linked yet: place it where its predecessor starts first.
-      const start = spanStart(edit, predecessor.id);
-      if (start) await edit.run({ type: "moveTask", id, start });
-    }
-    await edit.run({ type: "linkTasks", fromId: predecessor.id, toId: id });
-  }
-  if (fields.lagDays !== undefined) await edit.run({ type: "setOffset", id, offset: fields.lagDays });
-  if (fields.half !== undefined && (fields.start === undefined || fields.predecessor || fields.lagDays !== undefined)) {
-    // The half day last, on whichever day the task now starts (a link or lag places it in whole days).
+  await edit.load();
+  const wanted = wantedLinks(edit, id, fields, added);
+  if (wanted) await setLinks(edit, id, wanted);
+  if (fields.half !== undefined && (fields.start === undefined || wanted)) {
+    // The half day last, on whichever day the task now starts (links place it in whole days).
     await edit.load();
     const entry = edit.row(id);
     if (!entry?.span) throw new ToolProblem("This task has no start date yet: give `start` along with `half`.");
     const afternoon = fields.half === "afternoon";
     if (entry.span.startsAfternoon !== afternoon) {
-      const row = entry.row as { predecessorId?: string | null; offset?: number; locked?: boolean };
-      if (row.predecessorId && !row.locked) {
+      const [link, ...others] = entry.links.into;
+      const { row } = entry;
+      const lag = (link?.lag ?? 0) + (afternoon ? 0.5 : -0.5);
+      const predecessor = link ? edit.row(link.predecessorId)?.span : null;
+      let followsByLag = false;
+      // Only a lone FS link (SS and FF can't go below 0) on an unlocked leaf, within MAX_LAG.
+      if (link?.kind === "FS" && predecessor && others.length === 0 && Math.abs(lag) <= MAX_LAG && !entry.isParent && row.kind === "task" && !row.locked) {
+        // It must decide the start now, and the moved lag must put it on the asked half (not held at the overlap floor).
+        const calendar = await edit.calendar();
+        const startWith = (withLag: number) => calendar.snapHalf(linkRequirement(calendar, row, { ...link, lag: withLag }, predecessor), row.resourceId);
+        followsByLag = startWith(link.lag) === firstHalf(entry.span) && startWith(lag) === halfDay(entry.span.start, afternoon);
+      }
+      if (link && followsByLag) {
         // A follower keeps following: its lag moves by half a day (moving the bar would pin its date).
-        await edit.run({ type: "setOffset", id, offset: (row.offset ?? 0) + (afternoon ? 0.5 : -0.5) });
+        await edit.run({ type: "updateLink", predecessorId: link.predecessorId, followerId: id, kind: "FS", lag });
       } else {
         await edit.run({ type: "moveTask", id, start: fromDay(entry.span.start), half: fields.half });
       }

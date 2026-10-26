@@ -121,11 +121,19 @@ test("AI access: tasks an app adds show up live on an open board, credited to th
 
   await page.goto(`/p/${projectId}`);
   await expect(listRow(page, "Design")).toBeVisible();
-  const added = await callTool(token, "add_tasks", { project: "Launch", tasks: [{ title: "Build", predecessor: "Design", durationDays: 2 }, { title: "Ship", predecessor: "Build" }] });
+  const added = await callTool(token, "add_tasks", { project: "Launch", tasks: [{ title: "Build", predecessor: "Design", durationDays: 2 }, { title: "Ship", predecessors: [{ task: "Build", kind: "FS" }] }] });
   expect(added.isError).toBeFalsy();
   await expect(listRow(page, "Build")).toBeVisible();
   await expect(listRow(page, "Ship")).toBeVisible();
   await expect(page.getByRole("button", { name: /^Build, Oct 8 – Oct 9/ })).toBeVisible(); // after Design (Mon 5 – Wed 7)
+
+  // The app reads the links back: what each task waits on (kind, words, delay) and what waits on it.
+  const board = await callTool(token, "get_project", { project: "Launch" });
+  const build = (board.structuredContent as { rows: { title: string }[] }).rows.find((row) => row.title === "Build");
+  expect(build).toMatchObject({
+    predecessors: [{ task: { title: "Design" }, kind: "FS", kindInWords: "after it finishes", lagDays: 0 }],
+    followers: [{ task: { title: "Ship" }, kind: "FS", kindInWords: "after it finishes" }],
+  });
 
   // The task's history credits the person, via the app.
   await listRow(page, "Build").getByRole("button", { name: /Open details/ }).click();

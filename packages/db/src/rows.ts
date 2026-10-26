@@ -21,8 +21,6 @@ export function toEngineRow(row: DbRow): Row {
     resourceId: row.resourceId,
     color: row.color as TaskColor,
     locked: row.locked,
-    predecessorId: row.predecessorId,
-    offset: row.offset,
     description: row.description,
     actualDuration: row.actualDuration,
   };
@@ -46,8 +44,6 @@ export function toDbColumns(row: Row): Omit<DbRow, "projectId"> {
       resourceId: null,
       color: "blue",
       locked: false,
-      predecessorId: null,
-      offset: 0,
       description: "",
       actualDuration: null,
     };
@@ -60,8 +56,6 @@ export function toDbColumns(row: Row): Omit<DbRow, "projectId"> {
     resourceId: row.resourceId,
     color: row.color,
     locked: row.locked,
-    predecessorId: row.predecessorId,
-    offset: row.offset,
     description: row.description,
     actualDuration: row.actualDuration,
   };

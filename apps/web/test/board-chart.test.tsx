@@ -1,8 +1,10 @@
-import type { Command } from "@ganttlines/engine";
+import type { Command, Link } from "@ganttlines/engine";
 import { toDay } from "@ganttlines/engine";
 import type { ProjectStateDto } from "@ganttlines/protocol";
 import { fireEvent, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { toolsLeft } from "../src/board/chart/chart-rows";
+import { linkPath } from "../src/board/chart/dependencies";
 import { formatDay } from "../src/board/format";
 import { useBoardView } from "../src/board/view-store";
 import { ANA, CALENDAR, FakeWebSocket, PROJECT_ID, projectState, section, task } from "./board-fixtures";
@@ -18,11 +20,11 @@ const ROWS = [
   task("idea", { parentId: "x", position: "a2", duration: 2 }),
 ];
 
-async function chartBoard(rows: ProjectStateDto["rows"] = ROWS, user = ADMIN) {
+async function chartBoard(rows: ProjectStateDto["rows"] = ROWS, user = ADMIN, links: Link[] = []) {
   FakeWebSocket.instances = [];
   vi.stubGlobal("WebSocket", FakeWebSocket);
   const api = signedIn(user, [project(PROJECT_ID, "Launch")]);
-  api.on(`GET /api/projects/${PROJECT_ID}/state`, () => ({ body: projectState(rows) }));
+  api.on(`GET /api/projects/${PROJECT_ID}/state`, () => ({ body: projectState(rows, 5, links) }));
   api.on("GET /api/calendar", () => ({ body: CALENDAR }));
   api.on("GET /api/resources", () => ({ body: { resources: [ANA] } }));
   api.on(`GET /api/projects/${PROJECT_ID}/highlights`, () => ({ body: { highlights: [] } }));
@@ -72,6 +74,9 @@ describe("chart editing", () => {
     const tools = screen.getByRole("button", { name: "Options for “ui”" }).closest("[data-bar-tools]") as HTMLElement;
     expect(tools.className).toContain("sticky");
     expect(tools.style.left).toBe("calc(var(--list-width) + 4px)");
+    // Clear of the start dot: its right edge (two 20 px buttons, 4 px apart) 4 px or more left of the dot.
+    const dot = within(bar(/^ui,/).parentElement!).getByTitle("Drag from the start onto another task to link them");
+    expect(parseFloat(tools.style.marginLeft) + 44).toBeLessThanOrEqual(parseFloat(dot.style.left) - 4);
   });
 
   it("shows sections as dividers across the chart, without dates", async () => {
@@ -129,7 +134,108 @@ describe("chart editing", () => {
     const bullet = within(bar(/^ui,/).parentElement!).getByTitle("Drag onto another task to link them");
     // rows are 30 px tall: hooks is the third row (index 2)
     drag(bullet, 500, 600, 2 * 30 + 15);
-    expect(sentCommands()).toEqual([{ type: "linkTasks", fromId: "ui", toId: "hooks" }]);
+    expect(sentCommands()).toEqual([{ type: "addLink", predecessorId: "ui", followerId: "hooks", kind: "FS" }]);
+  });
+
+  // hooks spans Oct 12–13: chart x 1344 → 1408 (the chart starts Mon Aug 31; days are 32 px), its middle at 1376.
+  const HOOKS_LEFT_HALF = 1350;
+  const HOOKS_RIGHT_HALF = 1400;
+  const HOOKS_Y = 2 * 30 + 15;
+  const startDot = () => within(bar(/^ui,/).parentElement!).getByTitle("Drag from the start onto another task to link them");
+  const endDot = () => within(bar(/^ui,/).parentElement!).getByTitle("Drag onto another task to link them");
+
+  it("dragging from the end dot onto the left half of a bar sends FS; onto the right half sends FF", async () => {
+    await chartBoard();
+    drag(endDot(), 500, HOOKS_LEFT_HALF, HOOKS_Y);
+    drag(endDot(), 500, HOOKS_RIGHT_HALF, HOOKS_Y);
+    expect(sentCommands()).toEqual([
+      { type: "addLink", predecessorId: "ui", followerId: "hooks", kind: "FS" },
+      { type: "addLink", predecessorId: "ui", followerId: "hooks", kind: "FF" },
+    ]);
+  });
+
+  it("dragging from the start dot onto the left half sends SS", async () => {
+    await chartBoard();
+    drag(startDot(), 500, HOOKS_LEFT_HALF, HOOKS_Y);
+    expect(sentCommands()).toEqual([{ type: "addLink", predecessorId: "ui", followerId: "hooks", kind: "SS" }]);
+  });
+
+  it("start dot onto a right half sends nothing", async () => {
+    await chartBoard();
+    const dot = startDot();
+    fireEvent.pointerDown(dot, { button: 0, clientX: 500, clientY: 0 });
+    fireEvent.pointerMove(window, { clientX: HOOKS_RIGHT_HALF, clientY: HOOKS_Y });
+    const hooksStrip = document.querySelector('[data-chart-body] [data-row="2"]')!;
+    expect(hooksStrip.className).not.toContain("bg-accent-soft"); // no target highlight
+    fireEvent.pointerUp(window, { clientX: HOOKS_RIGHT_HALF, clientY: HOOKS_Y });
+    expect(sentCommands()).toEqual([]);
+  });
+
+  /** Presses `dot` and moves the pointer to (x, y) without dropping. */
+  const hoverLink = (dot: HTMLElement, x: number, y: number) => {
+    fireEvent.pointerDown(dot, { button: 0, clientX: 500, clientY: 0 });
+    fireEvent.pointerMove(window, { clientX: x, clientY: y });
+  };
+  const targetMarker = () => document.querySelector('[data-testid="link-target-end"]');
+  const kindLabel = () => document.querySelector('[data-testid="link-kind"]');
+
+  it("while linking, marks the end of the target it would tie to and says the kind", async () => {
+    await chartBoard();
+    hoverLink(endDot(), HOOKS_LEFT_HALF, HOOKS_Y);
+    expect(targetMarker()).toHaveAttribute("data-end", "start");
+    expect(targetMarker()).toHaveAttribute("cx", "1344");
+    expect(kindLabel()).toHaveTextContent("after it finishes");
+    fireEvent.pointerMove(window, { clientX: HOOKS_RIGHT_HALF, clientY: HOOKS_Y });
+    expect(targetMarker()).toHaveAttribute("data-end", "end");
+    expect(targetMarker()).toHaveAttribute("cx", "1408");
+    expect(kindLabel()).toHaveTextContent("can't finish before it");
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(targetMarker()).toBeNull();
+    expect(kindLabel()).toBeNull();
+  });
+
+  it("while linking from the start dot onto a right half, shows neither marker nor kind", async () => {
+    await chartBoard();
+    hoverLink(startDot(), HOOKS_RIGHT_HALF, HOOKS_Y);
+    expect(targetMarker()).toBeNull();
+    expect(kindLabel()).toBeNull();
+    fireEvent.keyDown(window, { key: "Escape" });
+  });
+
+  const WITH_API = [...ROWS, task("api", { parentId: "x", position: "a3", userStart: "2026-09-28", duration: 2 })];
+  const fs = (predecessorId: string, followerId: string): Link => ({ predecessorId, followerId, kind: "FS", lag: 0 });
+  const arrows = () => [...document.querySelectorAll('[data-testid="dependency"]')];
+
+  it("each link draws one arrow; two links into one task draw two", async () => {
+    // Two links into hooks, and a second (SS) link between ui and hooks: three arrows.
+    await chartBoard(WITH_API, ADMIN, [fs("ui", "hooks"), fs("api", "hooks"), { ...fs("ui", "hooks"), kind: "SS" }]);
+    expect(arrows()).toHaveLength(3);
+    expect(new Set(arrows().map((arrow) => arrow.getAttribute("d"))).size).toBe(3);
+  });
+
+  it("SS arrows point right into the follower's start; FF arrows point left into its end", async () => {
+    await chartBoard(ROWS, ADMIN, [{ ...fs("ui", "hooks"), kind: "SS" }, { ...fs("ui", "hooks"), kind: "FF" }]);
+    // hooks spans chart x 1344 → 1408; the arrowhead follows the direction of the last segment.
+    const lastSegment = (d: string) => {
+      const xs = [...d.matchAll(/[MH](-?[\d.]+)/g)].map((match) => Number(match[1]));
+      return { from: xs.at(-2)!, to: xs.at(-1)! };
+    };
+    const [ss, ff] = arrows().map((arrow) => ({ ...lastSegment(arrow.getAttribute("d")!), marker: arrow.getAttribute("marker-end") }));
+    expect(ss).toMatchObject({ to: 1344, marker: "url(#dep-arrow)" });
+    expect(ss!.to).toBeGreaterThan(ss!.from);
+    expect(ff).toMatchObject({ to: 1408, marker: "url(#dep-arrow)" });
+    expect(ff!.to).toBeLessThan(ff!.from);
+  });
+
+  it("only the violated link's arrow is red", async () => {
+    // hooks is locked to Oct 1, before ui (ending Oct 8) finishes; api finishes Sep 29.
+    const rows = WITH_API.map((row) => (row.id === "hooks" ? task("hooks", { parentId: "x", position: "a1", userStart: "2026-10-01", duration: 2, locked: true }) : row));
+    await chartBoard(rows, ADMIN, [fs("ui", "hooks"), fs("api", "hooks")]);
+    const [red, plain] = [arrows().filter((arrow) => arrow.hasAttribute("data-violation")), arrows().filter((arrow) => !arrow.hasAttribute("data-violation"))];
+    expect(red).toHaveLength(1);
+    expect(plain).toHaveLength(1);
+    expect(red[0]).toHaveAttribute("stroke", "var(--violation)");
+    expect(plain[0]).toHaveAttribute("stroke", "var(--dependency)");
   });
 
   it("works from the keyboard: arrows move or resize, Enter opens the options", async () => {
@@ -201,8 +307,37 @@ describe("chart editing", () => {
     await chartBoard(ROWS, VIEWER);
     expect(screen.getByRole("img", { name: /^hooks,/ })).toBeInTheDocument();
     expect(screen.queryByTitle("Drag onto another task to link them")).not.toBeInTheDocument();
+    expect(screen.queryByTitle("Drag from the start onto another task to link them")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Options for/ })).not.toBeInTheDocument();
     fireEvent.contextMenu(document.querySelector("[data-chart-body]")!, { clientX: 100, clientY: 5 });
     expect(screen.queryByRole("menuitem", { name: "Highlight this day…" })).not.toBeInTheDocument();
+  });
+});
+
+describe("toolsLeft", () => {
+  it("puts a bar's quick tools left of its start dot, 4 px clear, or past its end dot when the chart's edge leaves no room", () => {
+    expect(toolsLeft({ left: 200, right: 300 })).toBe(136); // tools 136–180, start dot 186–196
+    expect(toolsLeft({ left: 62, right: 300 })).toBe(0); // just fits: tools 0–44, start dot 48–58
+    expect(toolsLeft({ left: 40, right: 100 })).toBe(118); // end dot 104–114, tools from 118
+  });
+});
+
+describe("linkPath", () => {
+  const from = { left: 40, right: 100, y: 15, half: 7 };
+  const to = { left: 60, right: 140, y: 45 };
+
+  it("FS is the elbow into the follower's left side", () => {
+    expect(linkPath("FS", from, { ...to, left: 140 }, 30)).toBe("M92,22 V45 H140");
+  });
+
+  it("linkPath SS/FF snapshots", () => {
+    // SS: out of the predecessor's left edge (the bar itself, so the line never looks detached; the
+    // start dot covers it on hover), round the leftmost, into the follower's left side (pointing right).
+    expect(linkPath("SS", from, to, 30)).toBe("M40,15 H32 V45 H60");
+    expect(linkPath("SS", { ...from, y: 45 }, { ...to, left: 20, y: 15 }, 30)).toBe("M40,45 H12 V15 H20");
+    expect(linkPath("SS", from, to, 30).startsWith(`M${from.left},${from.y} `)).toBe(true);
+    // FF: out of the right edges, round the rightmost, into the follower's right side (pointing left).
+    expect(linkPath("FF", from, to, 30)).toBe("M100,15 H148 V45 H140");
+    expect(linkPath("FF", from, { ...to, right: 80 }, 30)).toBe("M100,15 H108 V45 H80");
   });
 });

@@ -1,5 +1,6 @@
 import type { Calendar, ResourceId } from "./calendar";
 import { dayOf, halfDay, isAfternoon, toDay, type DayNum, type HalfDay } from "./date";
+import { linkKey, type Link, type LinkKey } from "./links";
 import type { ProjectState, Row, RowId, TaskRow } from "./model";
 import { buildTree, childrenOf, isParentTask } from "./tree";
 
@@ -40,9 +41,20 @@ export class CycleError extends Error {
   }
 }
 
-interface Constraint {
-  predecessorId: RowId;
-  offset: number;
+export type FollowerIndex = ReadonlyMap<RowId, readonly Link[]>;
+
+/** Every task's incoming links, each list ordered by key. */
+export function indexByFollower(state: ProjectState): FollowerIndex {
+  const keyed = Object.values(state.links ?? {})
+    .map((link) => [linkKey(link), link] as const)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  const index = new Map<RowId, Link[]>();
+  for (const [, link] of keyed) {
+    const links = index.get(link.followerId);
+    if (links) links.push(link);
+    else index.set(link.followerId, [link]);
+  }
+  return index;
 }
 
 /**
@@ -51,8 +63,11 @@ interface Constraint {
  */
 export function computeSchedule(state: ProjectState, calendar: Calendar): Schedule {
   const tree = buildTree(state);
+  const into = indexByFollower(state);
   const results = new Map<RowId, Computed>();
   const inProgress = new Set<RowId>();
+  // Links whose predecessor no longer exists are ignored.
+  const existing = (links: readonly Link[]) => links.filter(({ predecessorId }) => state.rows[predecessorId] !== undefined);
 
   const compute = (id: RowId): Computed => {
     const done = results.get(id);
@@ -61,25 +76,34 @@ export function computeSchedule(state: ProjectState, calendar: Calendar): Schedu
     const row = state.rows[id];
     if (!row) throw new RangeError(`Unknown row ${id}`);
     inProgress.add(id);
-    const result =
-      row.kind === "section" || isParentTask(tree, row)
-        ? { span: rollUp(childrenOf(tree, id).map((child) => compute(child.id).span)), violation: false }
-        : computeLeaf(row);
+    const result = row.kind === "section" || isParentTask(tree, row) ? computeContainer(row) : computeLeaf(row);
     inProgress.delete(id);
     results.set(id, result);
     return result;
   };
 
+  const computeContainer = (row: Row): Computed => {
+    let span = rollUp(childrenOf(tree, row.id).map((child) => compute(child.id).span));
+    if (row.kind !== "task") return { span, violation: false };
+    // An FF link into a parent stretches its end; its subtasks keep their dates.
+    for (const link of existing(into.get(row.id) ?? [])) {
+      if (link.kind !== "FF") continue;
+      const predecessor = compute(link.predecessorId).span;
+      if (!span || !predecessor) continue;
+      const end = finishFloor(calendar, predecessor, link.lag, null);
+      if (end > spanEnd(span)) span = spanOfHalves(spanStart(span), end);
+    }
+    return { span, violation: false };
+  };
+
   const computeLeaf = (task: TaskRow): Computed => {
     const resource = task.resourceId;
     // Visit predecessors before anything else — even for unscheduled tasks — so that every
-    // dependency cycle is detected. Predecessors that no longer exist are ignored.
-    const predecessors = constraintsFor(state, task)
-      .filter(({ predecessorId }) => state.rows[predecessorId] !== undefined)
-      .map(({ predecessorId, offset }) => ({ span: compute(predecessorId).span, offset }));
+    // dependency cycle is detected.
+    const constraints = existing(collectConstraints(state, task, true, into)).map((link) => ({ link, span: compute(link.predecessorId).span }));
     if (task.userStart === null) return { span: null, violation: false };
 
-    const required = requiredStart(calendar, resource, predecessors);
+    const required = requiredStart(calendar, task, constraints);
     const userStart = halfDay(toDay(task.userStart), task.startsAfternoon);
     const start = calendar.snapHalf(task.locked ? userStart : Math.max(userStart, required), resource);
     const violation = task.locked && start < required;
@@ -106,35 +130,89 @@ export function floorStart(calendar: Calendar, span: Span, resourceId: ResourceI
   return Math.min(halfDay(calendar.nextAfter(span.start, resourceId)), naturalStart(calendar, span, resourceId));
 }
 
-/**
- * The earliest start (a half day) the constraints allow on `resourceId`'s calendar: for each
- * scheduled predecessor, `max(natural + offset, floor)`. -Infinity when no constraint applies.
- */
+/** The last half day an FF follower of `span` may end on: the predecessor's end plus `lag`. */
+function finishFloor(calendar: Calendar, span: Span, lag: number, resourceId: ResourceId | null): HalfDay {
+  return calendar.addWorkingHalves(calendar.snapHalf(spanEnd(span), resourceId), lag * 2, resourceId);
+}
+
+/** The earliest start (half day) `link` allows `follower`, given the predecessor's span; -Infinity if unscheduled. */
+export function linkRequirement(
+  calendar: Calendar,
+  follower: Pick<TaskRow, "resourceId" | "duration">,
+  link: Link,
+  predecessor: Span | null,
+): HalfDay {
+  if (!predecessor) return -Infinity;
+  const resource = follower.resourceId;
+  switch (link.kind) {
+    case "FS": {
+      const natural = naturalStart(calendar, predecessor, resource);
+      return Math.max(calendar.addWorkingHalves(natural, link.lag * 2, resource), floorStart(calendar, predecessor, resource));
+    }
+    case "SS":
+      return calendar.addWorkingHalves(calendar.snapHalf(spanStart(predecessor), resource), link.lag * 2, resource);
+    case "FF": {
+      const end = finishFloor(calendar, predecessor, link.lag, resource);
+      // A milestone sits on the day it may end; other tasks start early enough to end on it.
+      if (follower.duration === 0) return halfDay(dayOf(end));
+      return calendar.addWorkingHalves(end, -(follower.duration * 2 - 1), resource);
+    }
+  }
+}
+
+/** The lowest start a drag may reach against `link` (lag at its floor). */
+export function linkFloor(calendar: Calendar, follower: Pick<TaskRow, "resourceId" | "duration">, link: Link, predecessor: Span): HalfDay {
+  if (link.kind === "FS") return floorStart(calendar, predecessor, follower.resourceId);
+  return linkRequirement(calendar, follower, { ...link, lag: 0 }, predecessor);
+}
+
+/** The earliest start (a half day) the constraints allow `follower`: the strictest link wins. -Infinity when none applies. */
 export function requiredStart(
   calendar: Calendar,
-  resourceId: ResourceId | null,
-  constraints: readonly { span: Span | null; offset: number }[],
+  follower: Pick<TaskRow, "resourceId" | "duration">,
+  constraints: readonly { link: Link; span: Span | null }[],
 ): HalfDay {
   let required = -Infinity;
-  for (const { span, offset } of constraints) {
-    if (!span) continue;
-    const natural = naturalStart(calendar, span, resourceId);
-    required = Math.max(required, calendar.addWorkingHalves(natural, offset * 2, resourceId), floorStart(calendar, span, resourceId));
-  }
+  for (const { link, span } of constraints) required = Math.max(required, linkRequirement(calendar, follower, link, span));
   return required;
 }
 
-/** The task's own predecessor plus those of every ancestor task (parents push their children). */
-export function constraintsFor(state: ProjectState, task: TaskRow): Constraint[] {
-  const constraints: Constraint[] = [];
+/**
+ * A leaf's own links plus its ancestors' FS and SS links (FF onto a parent stretches it instead);
+ * `own: false` leaves out the task's own links. Pass `into` (from `indexByFollower(state)`) when
+ * asking for many tasks of one state.
+ */
+export function constraintsFor(state: ProjectState, task: TaskRow, own = true, into: FollowerIndex = indexByFollower(state)): Link[] {
+  return collectConstraints(state, task, own, into);
+}
+
+function collectConstraints(state: ProjectState, task: TaskRow, own: boolean, into: FollowerIndex): Link[] {
+  const constraints: Link[] = [];
   // Bounded by the row count so corrupted parent links can never loop forever.
   let steps = Object.keys(state.rows).length + 1;
   for (let row: Row | undefined = task; row && steps > 0; row = row.parentId === null ? undefined : state.rows[row.parentId], steps--) {
-    if (row.kind === "task" && row.predecessorId !== null) {
-      constraints.push({ predecessorId: row.predecessorId, offset: row.offset });
+    if (row.kind !== "task" || (!own && row === task)) continue;
+    for (const link of into.get(row.id) ?? []) {
+      if (row === task || link.kind !== "FF") constraints.push(link);
     }
   }
   return constraints;
+}
+
+/** Keys of links a locked follower starts too early for. */
+export function violatedLinks(state: ProjectState, calendar: Calendar, schedule: Schedule): Set<LinkKey> {
+  const tree = buildTree(state);
+  const into = indexByFollower(state);
+  const violated = new Set<LinkKey>();
+  for (const row of Object.values(state.rows)) {
+    if (row.kind !== "task" || !row.locked || isParentTask(tree, row)) continue;
+    const span = schedule.get(row.id)?.span;
+    if (!span) continue;
+    for (const link of collectConstraints(state, row, true, into)) {
+      if (spanStart(span) < linkRequirement(calendar, row, link, schedule.get(link.predecessorId)?.span ?? null)) violated.add(linkKey(link));
+    }
+  }
+  return violated;
 }
 
 export function hasCycle(state: ProjectState, calendar: Calendar): boolean {

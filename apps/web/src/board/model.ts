@@ -4,12 +4,17 @@ import {
   computeSchedule,
   CycleError,
   halfDay,
+  linkKey,
   spanEnd,
   spanOfHalves,
   spanStart,
   toDay,
   TASK_DEFAULTS,
+  violatedLinks,
+  workedDaysOfAll,
   type Calendar,
+  type Link,
+  type LinkKey,
   type ProjectState,
   type RowId,
   type Span,
@@ -30,12 +35,14 @@ export interface BoardRow extends ListRow {
   /** dates to draw (the baseline's own when viewing one) */
   span: Span | null;
   kind: DrawKind;
-  /** a locked task starts before its predecessor allows */
+  /** a locked task starts before one of its links allows */
   violation: boolean;
   /** the baseline's dates under the live bar (overlay mode) */
   ghost: Ghost | null;
   /** working days it really took (a task's own; parents and sections add up their subtasks'); null when none recorded */
   actualDays: number | null;
+  /** parents and sections: the days their tasks are worked (null when switched to a baseline, or no dates) */
+  workedDays: number | null;
   /** single tasks with actual days: the span those days cover from its start, and how they compare with the plan */
   actual: { span: Span; versusPlan: "over" | "under" | "even" } | null;
   /** drawn from a baseline (switched to it): its dates, not today's plan */
@@ -61,6 +68,8 @@ export function actualDaysOf(state: ProjectState, tree: Tree, id: RowId): number
 export interface BoardModel {
   rows: BoardRow[];
   numbers: ReadonlyMap<RowId, number>;
+  /** links between rows shown; `violation`: a locked follower starts before this link allows */
+  links: { link: Link; violation: boolean }[];
   /** the stored rows form a dependency cycle (the server prevents this; shown as an error) */
   cycle: boolean;
 }
@@ -96,6 +105,8 @@ export function boardModel(
   const sectionSpans = switched ? rollUpSections(state, saved) : null;
 
   const tree = buildTree(state);
+  // Every parent's and section's worked days (leaf tasks have none).
+  const worked = schedule && !switched ? workedDaysOfAll(state, schedule, calendar, tree) : null;
   const rows = visible.map((entry): BoardRow => {
     const { row } = entry;
     const actualDays = actualDaysOf(state, tree, row.id);
@@ -104,7 +115,7 @@ export function boardModel(
     if (switched) {
       const ghost = saved.get(row.id);
       const span = row.kind === "section" ? (sectionSpans!.get(row.id) ?? null) : (ghost?.span ?? null);
-      return { ...entry, span, kind: ghost?.kind ?? liveKind, violation: false, ghost: null, actualDays, actual: null, fromBaseline: true };
+      return { ...entry, span, kind: ghost?.kind ?? liveKind, violation: false, ghost: null, actualDays, workedDays: null, actual: null, fromBaseline: true };
     }
     const span = computed?.span ?? null;
     const single = row.kind === "task" && liveKind === "task";
@@ -122,6 +133,7 @@ export function boardModel(
       violation: computed?.violation ?? false,
       ghost: saved.get(row.id) ?? null,
       actualDays,
+      workedDays: span ? (worked?.get(row.id) ?? null) : null,
       actual,
     };
   });
@@ -142,13 +154,19 @@ export function boardModel(
         violation: false,
         ghost: null,
         actualDays: null,
+        workedDays: null,
         actual: null,
         fromBaseline: true,
         deletedSince: true,
       });
     }
   }
-  return { rows, numbers, cycle: schedule === null };
+  const shown = new Set(rows.map((entry) => entry.row.id));
+  const violated = schedule && !switched ? violatedLinks(state, calendar, schedule) : new Set<LinkKey>();
+  const links = Object.values(state.links)
+    .filter((link) => shown.has(link.predecessorId) && shown.has(link.followerId))
+    .map((link) => ({ link, violation: violated.has(linkKey(link)) }));
+  return { rows, numbers, links, cycle: schedule === null };
 }
 
 /** A section's span in a baseline: from the earliest to the latest saved task inside it. */

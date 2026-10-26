@@ -2,14 +2,13 @@ import { buildTree, childrenOf, computeSchedule, CycleError, fromDay, isParentTa
 import { COMMAND_LIMITS } from "@ganttlines/protocol/constants";
 import { useQuery } from "@tanstack/react-query";
 import { Lock, Plus, Trash2, UserRound, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type InputHTMLAttributes, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { currentUser } from "../../api/queries";
 import { Avatar } from "../../ui/avatar";
 import { RichTextEditor } from "../../ui/rich-text";
 import { toast } from "../../ui/toast";
 import { IconButton } from "../../ui/button";
 import { AssigneePicker } from "../assignee-picker";
-import { PredecessorPicker } from "../predecessor-picker";
 import { useBoard, useRun } from "../board-context";
 import { formatDay, taskColors } from "../format";
 import { formatDays } from "../chart/bars";
@@ -17,40 +16,10 @@ import { addSubtask, deleteRow, parseDays, setActualDays, setWorkingDays } from 
 import { actualDaysOf } from "../model";
 import { useSelection } from "../selection";
 import { Activity } from "./activity";
+import { CommitInput, INPUT } from "./commit-input";
+import { LinksSection } from "./links-section";
 import { Comments } from "./comments";
 import { useCapabilities } from "../../workspace";
-
-const INPUT = "w-full rounded-md border border-border-strong bg-bg px-2 py-1 text-sm text-text disabled:border-border disabled:text-muted";
-
-/**
- * A text box for a stored value: shows the latest value (including other people's edits) until
- * you start typing, then commits on Enter or when it loses focus; Escape puts the value back.
- */
-function CommitInput({ value, onCommit, ...props }: Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange"> & { value: string; onCommit: (value: string) => void }) {
-  const [draft, setDraft] = useState<string | null>(null);
-  const commit = () => {
-    if (draft !== null && draft !== value) onCommit(draft);
-    setDraft(null);
-  };
-  return (
-    <input
-      {...props}
-      value={draft ?? value}
-      onChange={(event) => setDraft(event.target.value)}
-      onBlur={commit}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") {
-          event.preventDefault();
-          commit();
-        } else if (event.key === "Escape" && draft !== null) {
-          event.stopPropagation();
-          setDraft(null);
-        }
-      }}
-      className={`${INPUT} ${props.className ?? ""}`}
-    />
-  );
-}
 
 /**
  * Morning or afternoon for a start or end date (AM / PM). An end in the morning means the task
@@ -245,6 +214,11 @@ export function DetailsPanel({ numbers }: { numbers: ReadonlyMap<RowId, number> 
         {row.kind === "task" ? <Description task={row} maxHeight={halfHeight} /> : null}
         {row.kind === "task" ? <TaskFields task={row} isParent={isParent} schedule={schedule} numbers={numbers} /> : null}
       </div>
+      {row.kind === "task" ? (
+        <Section title="Links">
+          <LinksSection task={row} state={state} numbers={numbers} canEdit={board.canEdit} run={run} schedule={schedule} />
+        </Section>
+      ) : null}
       <Section title={row.kind === "section" ? "Tasks" : "Subtasks"}>
         <ul className="flex flex-col gap-1 text-sm">
           {children.map((child) => (
@@ -298,8 +272,6 @@ function TaskFields({ task, isParent, schedule, numbers }: { task: TaskRow; isPa
   const actualSum = isParent ? actualDaysOf(state, buildTree(state), task.id) : null;
   const milestone = leaf && task.duration === 0;
   const datesLocked = leaf && task.locked;
-  const predecessor = task.predecessorId ? state.rows[task.predecessorId] : undefined;
-  const predecessorLabel = predecessor ? `#${numbers.get(predecessor.id)} ${predecessor.title || "Untitled"}` : "None";
 
   return (
     <div className="flex flex-col gap-2">
@@ -400,23 +372,6 @@ function TaskFields({ task, isParent, schedule, numbers }: { task: TaskRow; isPa
           <span className="text-muted">{formatDays(actualSum)} (from its subtasks)</span>
         </Field>
       ) : null}
-      <Field label="Predecessor">
-        {canEdit ? (
-          <PredecessorPicker
-            task={task}
-            state={state}
-            schedule={schedule}
-            numbers={numbers}
-            trigger={
-              <button type="button" aria-label={`Predecessor: ${predecessorLabel}`} className={`${INPUT} truncate text-left`}>
-                {predecessorLabel}
-              </button>
-            }
-          />
-        ) : (
-          <span>{predecessorLabel}</span>
-        )}
-      </Field>
       <Field label="Color">
         <div role="radiogroup" aria-label="Color" className="flex flex-wrap gap-1">
           {TASK_COLORS.map((color) => (

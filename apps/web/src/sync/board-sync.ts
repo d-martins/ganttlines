@@ -1,5 +1,6 @@
-import { applyChanges, type Command, type ProjectState, type Row } from "@ganttlines/engine";
+import { applyChanges, linkKey, type Command, type Link, type ProjectState, type Row } from "@ganttlines/engine";
 import type { ProjectDto, ProjectStateDto, ServerMessage, Viewer } from "@ganttlines/protocol";
+import { PROTOCOL_VERSION } from "@ganttlines/protocol/constants";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import type { BoardConnection, SocketLike } from "@ganttlines/client";
 
@@ -94,7 +95,7 @@ export class BoardSync {
       loadError: null,
       joinError: null,
       project: null,
-      confirmed: { rows: {} },
+      confirmed: { rows: {}, links: {} },
       version: 0,
       viewers: [],
       pending: [],
@@ -159,7 +160,9 @@ export class BoardSync {
   private adopt(dto: ProjectStateDto): void {
     const rows: Record<string, Row> = {};
     for (const row of dto.rows) rows[row.id] = row;
-    this.store.setState({ project: dto.project, confirmed: { rows }, version: dto.project.version });
+    const links: Record<string, Link> = {};
+    for (const link of dto.links) links[linkKey(link)] = link;
+    this.store.setState({ project: dto.project, confirmed: { rows, links }, version: dto.project.version });
     this.drain();
   }
 
@@ -197,7 +200,7 @@ export class BoardSync {
 
   private join(): void {
     this.joined = false;
-    this.send({ type: "join", projectId: this.options.projectId, version: this.state.version });
+    this.send({ type: "join", projectId: this.options.projectId, version: this.state.version, protocol: PROTOCOL_VERSION });
   }
 
   private send(message: unknown): void {

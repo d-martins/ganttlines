@@ -1,8 +1,11 @@
-import type { RowChange } from "@ganttlines/engine";
+import type { Change } from "@ganttlines/engine";
 import { z } from "zod";
 import type { ProjectDto } from "./api";
 import type { BaselineDto, CommentDto, HighlightDto } from "./board";
 import { CommandSchema } from "./commands";
+import { PROTOCOL_VERSION } from "./constants";
+
+export { PROTOCOL_VERSION };
 
 const id = z.uuid();
 
@@ -11,7 +14,7 @@ const id = z.uuid();
  * `join` switches to it and catches up from `version`; commands and undo/redo apply to the joined project.
  */
 export const ClientMessage = z.discriminatedUnion("type", [
-  z.strictObject({ type: z.literal("join"), projectId: id, version: z.int().min(0) }),
+  z.strictObject({ type: z.literal("join"), projectId: id, version: z.int().min(0), protocol: z.literal(PROTOCOL_VERSION) }),
   z.strictObject({ type: z.literal("leave") }),
   z.strictObject({ type: z.literal("command"), commandId: id, command: CommandSchema }),
   z.strictObject({ type: z.literal("undo"), commandId: id }),
@@ -37,7 +40,7 @@ export interface Viewer {
 export type ServerMessage =
   | { type: "joined"; projectId: string; version: number; instanceVersion: number; viewers: Viewer[] }
   | { type: "reload"; projectId: string }
-  | { type: "patch"; projectId: string; version: number; commandId: string; actor: { userId: string | null; label: string }; changes: RowChange[] }
+  | { type: "patch"; projectId: string; version: number; commandId: string; actor: { userId: string | null; label: string }; changes: Change[] }
   | { type: "ack"; commandId: string; version: number; skipped?: number }
   | { type: "reject"; commandId: string; error: string; message: string }
   | { type: "presence"; projectId: string; viewers: Viewer[] }

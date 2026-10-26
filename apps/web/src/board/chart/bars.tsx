@@ -12,6 +12,10 @@ import type { Timeline } from "./timeline";
 export const ROW_HEIGHT: Record<BarStyle, number> = { compact: 30, roomy: 40 };
 export const BAR_HEIGHT: Record<BarStyle, number> = { compact: 14, roomy: 28 };
 const DIAMOND: Record<BarStyle, number> = { compact: 12, roomy: 16 };
+/** A bar's link dots: 10 px wide, 4 px clear of its ends; the start dot's outer edge is `DOT_REACH` left of the bar. */
+export const DOT_SIZE = 10;
+export const DOT_GAP = 4;
+export const DOT_REACH = DOT_SIZE + DOT_GAP;
 
 /** Horizontal extent of a drawn row: bars span their days; a milestone is a diamond on its day. */
 export function extent(kind: DrawKind | Ghost["kind"], span: Span, timeline: Timeline, style: BarStyle): { left: number; right: number } {

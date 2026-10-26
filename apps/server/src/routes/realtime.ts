@@ -1,4 +1,4 @@
-import { ClientMessage, toEngineCommand } from "@ganttlines/protocol";
+import { ClientMessage, PROTOCOL_VERSION, toEngineCommand } from "@ganttlines/protocol";
 import type { FastifyInstance } from "fastify";
 import type { RawData } from "ws";
 import type { ProjectAccess } from "../auth/access";
@@ -95,7 +95,11 @@ export function realtimeRoutes(app: FastifyInstance, context: RouteContext, { re
       return hub.send(connection, { type: "error", message: "Messages must be JSON" });
     }
     const parsed = ClientMessage.safeParse(json);
-    if (!parsed.success) return hub.send(connection, { type: "error", message: "Unknown or malformed message" });
+    if (!parsed.success) {
+      // A board opened before an update speaks an older protocol: it reloads to get the new one.
+      if (isOutdatedJoin(json)) return hub.close(connection, CLOSE_POLICY_VIOLATION, "Reload to use the updated GanttLines");
+      return hub.send(connection, { type: "error", message: "Unknown or malformed message" });
+    }
     const message = parsed.data;
 
     if (message.type === "leave") return leave(connection);
@@ -198,6 +202,13 @@ export function realtimeRoutes(app: FastifyInstance, context: RouteContext, { re
       });
     },
   );
+}
+
+/** A join from a client built for an older protocol (or one from before protocols were numbered). */
+function isOutdatedJoin(json: unknown): boolean {
+  if (typeof json !== "object" || json === null || (json as { type?: unknown }).type !== "join") return false;
+  const protocol = (json as { protocol?: unknown }).protocol;
+  return typeof protocol !== "number" || protocol < PROTOCOL_VERSION;
 }
 
 function shareTokenOf(query: unknown): string | null {

@@ -1,10 +1,16 @@
+import { Calendar, computeSchedule, fromDay, linkKey } from "@ganttlines/engine";
 import { describe, expect, it } from "vitest";
+import { PROTOCOL_VERSION } from "@ganttlines/protocol";
 import { LocalSource } from "../src/local/local-source";
 import { MemoryStore } from "../src/local/store";
 import { MAX_FILE_BYTES, readWorkspaceFile } from "../src/local/workspace-file";
 
 const A = "11111111-1111-4111-8111-111111111111";
 const B = "22222222-2222-4222-8222-222222222222";
+const C = "33333333-3333-4333-8333-333333333333";
+const D = "44444444-4444-4444-8444-444444444444";
+const E = "55555555-5555-4555-8555-555555555555";
+const P = "66666666-6666-4666-8666-666666666666";
 const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
 
 async function filledSource() {
@@ -14,7 +20,7 @@ async function filledSource() {
   await source.saveTimeOff({ resourceId: ana.id, startDate: "2026-10-12", endDate: "2026-10-12", note: "" });
   const link = source.openBoard(project.id).openLink();
   await settle();
-  link.send(JSON.stringify({ type: "join", projectId: project.id, version: 0 }));
+  link.send(JSON.stringify({ type: "join", projectId: project.id, version: 0, protocol: PROTOCOL_VERSION }));
   link.send(JSON.stringify({ type: "command", commandId: B, command: { type: "createRow", id: A, kind: "task", parentId: null, afterId: null, title: "Design", start: "2026-10-05" } }));
   await settle();
   await source.saveHighlight(project.id, { date: "2026-10-09", label: "Demo", color: "#e5892f" });
@@ -45,6 +51,59 @@ describe("the workspace file", () => {
     await expect(readWorkspaceFile(JSON.stringify(file))).resolves.toMatchObject({ projects: [expect.objectContaining({ name: "x".repeat(200) })] });
   });
 
+  it("export writes version 2 with links", async () => {
+    const { source, project } = await filledSource();
+    const link = source.openBoard(project.id).openLink();
+    await settle();
+    link.send(JSON.stringify({ type: "join", projectId: project.id, version: 1, protocol: PROTOCOL_VERSION }));
+    link.send(JSON.stringify({ type: "command", commandId: C, command: { type: "createRow", id: D, kind: "task", parentId: null, afterId: A, title: "Build", start: "2026-10-12" } }));
+    link.send(JSON.stringify({ type: "command", commandId: E, command: { type: "addLink", predecessorId: A, followerId: D, kind: "SS", lag: 1 } }));
+    await settle();
+    const file = source.exportFile();
+    expect(file.version).toBe(2);
+    expect(file.projects[0]?.links).toEqual([{ predecessorId: A, followerId: D, kind: "SS", lag: 1 }]);
+    for (const row of file.projects[0]!.rows) expect(row).not.toHaveProperty("predecessorId");
+    expect((await readWorkspaceFile(JSON.stringify(file))).projects[0]?.links).toEqual(file.projects[0]?.links);
+  });
+
+  it("importing a v1 file with a chain and negative offsets gives the same dates", async () => {
+    // A → B (1 day overlap) → C (1.5 days overlap) → D (2 days later); E names a task that isn't there.
+    const ids = { a: A, b: B, c: C, d: D, e: E };
+    const row = (key: keyof typeof ids, userStart: string, duration: number, predecessor: keyof typeof ids | null, offset: number) => ({
+      id: ids[key], kind: "task", title: key, parentId: null, position: `a${Object.keys(ids).indexOf(key)}`, userStart, startsAfternoon: false, duration, actualDuration: null,
+      resourceId: null, color: "blue", locked: false, description: "", predecessorId: predecessor ? ids[predecessor] : null, offset,
+    });
+    const rows = [row("a", "2026-10-05", 3, null, 0), row("b", "2026-10-01", 2, "a", -1), row("c", "2026-10-01", 2.5, "b", -1.5), row("d", "2026-10-01", 1, "c", 2), row("e", "2026-10-20", 1, null, 0)];
+    rows[4]!.predecessorId = "99999999-9999-4999-8999-999999999999";
+    const v1 = {
+      format: "ganttlines-workspace", version: 1, exportedAt: "2026-10-01T00:00:00.000Z", workingWeekdays: [1, 2, 3, 4, 5], team: [], locations: [], holidays: [], timeOff: [],
+      projects: [{ id: P, name: "Launch", archived: false, createdAt: "2026-10-01T00:00:00.000Z", version: 4, rows, highlights: [], baselines: [] }],
+    };
+    // The dates the previous version of GanttLines scheduled for these rows.
+    const before = {
+      a: ["2026-10-05", false, "2026-10-07", false],
+      b: ["2026-10-07", false, "2026-10-08", false],
+      c: ["2026-10-08", false, "2026-10-12", true],
+      d: ["2026-10-14", true, "2026-10-15", true],
+      e: ["2026-10-20", false, "2026-10-20", false],
+    };
+    const file = await readWorkspaceFile(JSON.stringify(v1));
+    expect(file.version).toBe(2);
+    const source = await LocalSource.open(new MemoryStore());
+    await source.replaceWith(file);
+    const board = await source.openBoard(P).load();
+    expect(board.links).toHaveLength(3);
+    const state = { rows: Object.fromEntries(board.rows.map((entry) => [entry.id, entry])), links: Object.fromEntries(board.links.map((entry) => [linkKey(entry), entry])) };
+    const schedule = computeSchedule(state, new Calendar({ workingWeekdays: [1, 2, 3, 4, 5], holidays: [], timeOff: [] }));
+    const after = Object.fromEntries(
+      Object.entries(ids).map(([key, id]) => {
+        const span = schedule.get(id)!.span!;
+        return [key, [fromDay(span.start), span.startsAfternoon, fromDay(span.end), span.endsMidday]];
+      }),
+    );
+    expect(after).toEqual(before);
+  });
+
   it("clears the workspace", async () => {
     const { source } = await filledSource();
     await source.clear();
@@ -62,7 +121,7 @@ describe("the workspace file", () => {
 
     it("from a newer GanttLines", async () => {
       const file = await base();
-      await expect(readWorkspaceFile(JSON.stringify({ ...file, version: 2 }))).rejects.toMatchObject({ code: "newer_version" });
+      await expect(readWorkspaceFile(JSON.stringify({ ...file, version: 3 }))).rejects.toMatchObject({ code: "newer_version" });
     });
 
     it("too big", async () => {
@@ -80,8 +139,8 @@ describe("the workspace file", () => {
       ghost.projects[0].rows[0].resourceId = "99999999-9999-4999-8999-999999999999";
       await expect(readWorkspaceFile(JSON.stringify(ghost))).rejects.toMatchObject({ code: "invalid_file", message: expect.stringMatching(/team member/) });
       const orphan = await base();
-      orphan.projects[0].rows[0].predecessorId = "99999999-9999-4999-8999-999999999999";
-      await expect(readWorkspaceFile(JSON.stringify(orphan))).rejects.toMatchObject({ code: "invalid_file", message: expect.stringMatching(/predecessor/) });
+      orphan.projects[0].links.push({ predecessorId: "99999999-9999-4999-8999-999999999999", followerId: A, kind: "FS", lag: 0 });
+      await expect(readWorkspaceFile(JSON.stringify(orphan))).rejects.toMatchObject({ code: "invalid_file", message: expect.stringMatching(/missing task/) });
     });
 
     it("with calendar entries the app would never accept", async () => {
@@ -100,6 +159,23 @@ describe("the workspace file", () => {
       const twice = await base();
       twice.workingWeekdays = [1, 1, 2];
       await expect(readWorkspaceFile(JSON.stringify(twice))).rejects.toMatchObject({ code: "invalid_file" });
+    });
+
+    it("with links the app would never make", async () => {
+      const file = await base();
+      file.projects[0].rows.push({ ...file.projects[0].rows[0], id: B, position: "a1" });
+      file.projects[0].links.push({ predecessorId: A, followerId: B, kind: "SS", lag: -1 });
+      await expect(readWorkspaceFile(JSON.stringify(file))).rejects.toMatchObject({ code: "invalid_file", message: expect.stringMatching(/lag/) });
+      const twice = await base();
+      twice.projects[0].rows.push({ ...twice.projects[0].rows[0], id: B, position: "a1" });
+      twice.projects[0].links.push({ predecessorId: A, followerId: B, kind: "FS", lag: 0 }, { predecessorId: A, followerId: B, kind: "FS", lag: 1 });
+      await expect(readWorkspaceFile(JSON.stringify(twice))).rejects.toMatchObject({ code: "invalid_file", message: expect.stringMatching(/twice/) });
+      const dangling = await base();
+      dangling.projects[0].links.push({ predecessorId: A, followerId: "99999999-9999-4999-8999-999999999999", kind: "SS", lag: 0 });
+      await expect(readWorkspaceFile(JSON.stringify(dangling))).rejects.toMatchObject({
+        code: "invalid_file",
+        message: `This file can't be opened: project “Launch”: link 99999999-9999-4999-8999-999999999999|${A}|SS has a missing task 99999999-9999-4999-8999-999999999999`,
+      });
     });
 
     it("with the same id twice", async () => {
@@ -130,9 +206,8 @@ describe("the workspace file", () => {
     it("with tasks that depend on each other in a loop", async () => {
       const file = await base();
       const first = file.projects[0].rows[0];
-      const second = { ...first, id: B, position: "a1", predecessorId: first.id };
-      first.predecessorId = B;
-      file.projects[0].rows.push(second);
+      file.projects[0].rows.push({ ...first, id: B, position: "a1" });
+      file.projects[0].links.push({ predecessorId: first.id, followerId: B, kind: "FS", lag: 0 }, { predecessorId: B, followerId: first.id, kind: "SS", lag: 0 });
       await expect(readWorkspaceFile(JSON.stringify(file))).rejects.toMatchObject({ code: "invalid_file", message: expect.stringMatching(/loop/) });
     });
   });

@@ -1,13 +1,85 @@
-import { toDay, weekday } from "@ganttlines/engine";
+import { Calendar, linkKey, toDay, weekday, type Change, type Link } from "@ganttlines/engine";
+import type { ActivityEntryDto } from "@ganttlines/protocol";
 import { describe, expect, it } from "vitest";
 import { elbow } from "../src/board/chart/dependencies";
+import { describeChange, describeEntry } from "../src/board/panel/activity";
 import { chartRange, Timeline } from "../src/board/chart/timeline";
 import { dropMove } from "../src/board/list/list-actions";
+import { durations } from "../src/board/list/task-list";
+import { boardModel } from "../src/board/model";
 import { outline } from "../src/board/rows";
-import { section, task } from "./board-fixtures";
+import { ANA, CALENDAR, section, task } from "./board-fixtures";
 
 const FRI = toDay("2026-10-09");
 const weekend = (day: number) => weekday(day) === 0 || weekday(day) === 6;
+
+describe("history of links", () => {
+  const names = { state: { rows: { p: task("p", { title: "Design" }), f: task("f", { title: "Build" }) }, links: {} }, resources: new Map() };
+  const ref = { predecessorId: "p", followerId: "f", kind: "FS" as const };
+  const created = (lag: number, kind: Link["kind"] = "FS") => ({ link: { ...ref, kind }, field: "*" as const, before: null, after: { ...ref, kind, lag } });
+  const removed = { link: ref, field: "*" as const, before: { ...ref, lag: 0 }, after: null };
+  const lag = { link: ref, field: "lag" as const, before: 0, after: 3 };
+
+  it("describeChange phrases for follower and predecessor", () => {
+    expect(describeChange(created(0), names, "f")).toBe("now waits on “Design”, after it finishes");
+    expect(describeChange(created(2), names, "f")).toBe("now waits on “Design”, after it finishes, 2 days later");
+    expect(describeChange(created(-1.5), names, "f")).toBe("now waits on “Design”, after it finishes, overlapping 1.5 days");
+    expect(describeChange(created(0, "SS"), names, "f")).toBe("now waits on “Design”, once it starts");
+    expect(describeChange(removed, names, "f")).toBe("no longer waits on “Design”");
+    expect(describeChange(lag, names, "f")).toBe("changed the delay after “Design” to 3 days");
+    expect(describeChange(created(2, "FF"), names, "p")).toBe("“Build” now waits on it, can't finish before it");
+    expect(describeChange(removed, names, "p")).toBe("“Build” no longer waits on it");
+    expect(describeChange(lag, names, "p")).toBe("changed the delay of “Build”'s link to 3 days");
+    expect(describeChange({ ...lag, after: -2 }, names, "f")).toBe("now overlaps “Design” by 2 days");
+    expect(describeChange({ ...lag, after: -2 }, names, "p")).toBe("“Build” now overlaps it by 2 days");
+    expect(describeChange({ ...lag, after: 0 }, names, "f")).toBe("now starts right after “Design”");
+    expect(describeChange({ ...lag, after: 0 }, names, "p")).toBe("“Build” now starts right after it");
+    const ssLag = { ...lag, link: { ...ref, kind: "SS" as const }, after: 0 };
+    expect(describeChange(ssLag, names, "f")).toBe("changed the delay after “Design” to none");
+    expect(describeChange(ssLag, names, "p")).toBe("changed the delay of “Build”'s link to none");
+    const gone = { ...names, state: { rows: { f: names.state.rows.f }, links: {} } };
+    expect(describeChange(removed, gone, "f")).toBe("no longer waits on a deleted task");
+  });
+
+  it("a kind change reads as one phrase", () => {
+    const toSS = [removed, created(0, "SS")];
+    const entry = (changes: Change[], name = "updateLink") => ({ version: 1, name, actor: { label: "Ana" }, createdAt: "2026-10-01T00:00:00Z", changes }) as ActivityEntryDto;
+    expect(describeEntry(entry(toSS), names, "f")).toBe("changed the link with “Design” to “once it starts” (was “after it finishes”)");
+    expect(describeEntry(entry(toSS), names, "p")).toBe("“Build”'s link to it is now “once it starts”");
+    // Created first, deleted second (as an undo may log it): still one kind change.
+    expect(describeEntry(entry([...toSS].reverse(), "undo"), names, "f")).toBe("undid a change (changed the link with “Design” to “once it starts” (was “after it finishes”))");
+  });
+});
+
+describe("durations", () => {
+  const calendar = new Calendar(CALENDAR);
+  // Ana works Tue 6, Thu 8, Fri 9 (Wed 7 off): the parent's and section's dates cover 4 team days.
+  const state = {
+    rows: {
+      s: section("s"),
+      p: task("p", { parentId: "s" }),
+      c: task("c", { parentId: "p", resourceId: ANA.id, userStart: "2026-10-06", duration: 3 }),
+    },
+    links: {},
+  };
+  const working = (model: ReturnType<typeof boardModel>, id: string) => durations(model.rows.find((entry) => entry.row.id === id)!, calendar).working;
+
+  it("parents and sections count only the days their tasks are worked", () => {
+    const model = boardModel(state, calendar, null);
+    expect(working(model, "p")).toBe("3");
+    expect(working(model, "s")).toBe("3");
+    expect(working(model, "c")).toBe("3");
+  });
+
+  it("a baseline's parent keeps counting across its saved dates", () => {
+    const tasks = [
+      { rowId: "p", kind: "parent" as const, title: "p", start: "2026-10-06", end: "2026-10-09" },
+      { rowId: "c", kind: "task" as const, title: "c", start: "2026-10-06", end: "2026-10-09" },
+    ];
+    const model = boardModel(state, calendar, { mode: "switch", tasks });
+    expect(working(model, "p")).toBe("4");
+  });
+});
 
 describe("Timeline", () => {
   it("maps days to pixels, inclusive of the end day", () => {
@@ -51,6 +123,7 @@ describe("outline", () => {
           b: task("b", { position: "b0" }),
           c: task("c", { parentId: "b", position: "a0" }),
         },
+        links: {},
       },
       undefined,
       new Set(["s"]),
@@ -63,6 +136,33 @@ describe("outline", () => {
     expect(numbers.get("a")).toBe(2);
     expect(visible[0]!.collapsed).toBe(true);
     expect(visible[1]!.isParent).toBe(true);
+  });
+});
+
+describe("board model", () => {
+  it("boardModel lists links between shown rows and marks the violated one", () => {
+    const fs: Link = { predecessorId: "a", followerId: "b", kind: "FS", lag: 0 };
+    // Locked to start the day after "a" starts, before it finishes: the FS link is broken, the SS one holds.
+    const ss: Link = { predecessorId: "a", followerId: "b", kind: "SS", lag: 0 };
+    const hidden: Link = { predecessorId: "a", followerId: "c", kind: "FS", lag: 0 };
+    const state = {
+      rows: {
+        a: task("a", { position: "a0", userStart: "2026-10-12", duration: 3 }),
+        b: task("b", { position: "a1", userStart: "2026-10-13", duration: 1, locked: true }),
+        s: section("s", { position: "a2" }),
+        c: task("c", { parentId: "s", position: "a0", userStart: "2026-10-20" }),
+      },
+      links: Object.fromEntries([fs, ss, hidden].map((link) => [linkKey(link), link])),
+    };
+    const model = boardModel(state, new Calendar(CALENDAR), null, "", new Set(["s"]));
+    expect(model.rows.map((entry) => entry.row.id)).toEqual(["a", "b", "s"]);
+    expect(model.links).toEqual(
+      expect.arrayContaining([
+        { link: fs, violation: true },
+        { link: ss, violation: false },
+      ]),
+    );
+    expect(model.links).toHaveLength(2); // "c" is collapsed away: its link isn't drawn
   });
 });
 
@@ -98,6 +198,7 @@ describe("list edits", () => {
         b: task("b", { parentId: "s", position: "a1" }),
         c: task("c", { position: "b0" }),
       },
+      links: {},
     };
     expect(dropMove(state, "c", state.rows.b, "before")).toEqual({ parentId: "s", afterId: "a" });
     expect(dropMove(state, "c", state.rows.a, "before")).toEqual({ parentId: "s", afterId: null });
@@ -105,7 +206,7 @@ describe("list edits", () => {
     expect(dropMove(state, "a", state.rows.c, "after")).toEqual({ parentId: null, afterId: "c" });
     expect(dropMove(state, "s", state.rows.a, "inside")).toBeNull(); // into itself
     expect(dropMove(state, "b", state.rows.a, "after")).toBeNull(); // already there
-    const withSection = { rows: { ...state.rows, t: section("t", { position: "c0" }) } };
+    const withSection = { rows: { ...state.rows, t: section("t", { position: "c0" }) }, links: {} };
     expect(dropMove(withSection, "t", withSection.rows.a, "inside")).toEqual({ parentId: "s", afterId: "a" }); // sections never go inside tasks: lands after it
   });
 });
