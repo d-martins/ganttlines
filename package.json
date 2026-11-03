@@ -1,5 +1,6 @@
 {
   "name": "ganttlines",
+  "version": "0.6.2",
   "private": true,
   "license": "MIT",
   "packageManager": "yarn@4.12.0",

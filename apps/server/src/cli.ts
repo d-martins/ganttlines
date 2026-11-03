@@ -4,6 +4,7 @@ import { backup, migrate, migrationStatus, restore } from "./maintenance/mainten
 import { waitForDatabase } from "./maintenance/postgres";
 import { withStartupLock } from "./maintenance/startup-lock";
 import { startServer } from "./server";
+import { appVersion } from "./version";
 
 /**
  * The image's entry point:
@@ -13,7 +14,7 @@ import { startServer } from "./server";
  *   migrate          apply pending migrations only
  *   version          print the version
  */
-const VERSION = process.env["APP_VERSION"] || "dev";
+const VERSION = appVersion(process.env);
 const BACKUP_DIR = process.env["BACKUP_DIR"] || "/backups";
 const log = (message: string) => console.log(`[ganttlines] ${message}`);
 

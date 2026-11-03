@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { appVersion } from "./version";
 import { InitialAdminSettings } from "@ganttlines/protocol";
 import type { InitialAdmin } from "./auth/first-run";
 import { oidcSettings, type OidcSettings } from "./auth/oidc";
@@ -28,7 +29,7 @@ export interface Config {
   initialAdmin: InitialAdmin | null;
   /** ADMIN_EMAIL without a password (single sign-on only): whoever first signs in with it becomes the admin */
   firstAdminEmail: string | null;
-  /** The running version (the image's APP_VERSION; "dev" otherwise) */
+  /** The running version (APP_VERSION, else the root package.json's; "dev" otherwise) */
   version: string;
   /** How long a stopping server keeps answering (health says 503) before closing, so load balancers notice */
   shutdownDelayMs: number;
@@ -56,7 +57,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     bind: env["BIND"] ?? "127.0.0.1",
     trustProxy: parseTrustProxy(env["TRUST_PROXY"]),
     webDir: webDir(env["WEB_DIR"]),
-    version: env["APP_VERSION"] || "dev",
+    version: appVersion(env),
     ...admins(env, oidc),
     oidc,
     smtp: smtpSettings(env),
