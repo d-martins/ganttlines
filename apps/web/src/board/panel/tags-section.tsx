@@ -29,9 +29,10 @@ function moveTag(tags: readonly string[], from: number, to: number): string[] {
 /**
  * A task's tags: chips in its order (× removes one, the handle drags it to another place) and an
  * "Add tag" box that offers the workspace's matching tags, then creating a new one. Every change
- * sends the whole list. Viewers see the chips only.
+ * sends the whole list. Viewers see the chips only. `inlineList` puts the suggestions in the flow on
+ * their own line, growing whatever holds this instead of floating over what's below.
  */
-export function TagsSection({ task }: { task: TaskRow }) {
+export function TagsSection({ task, inlineList = false }: { task: TaskRow; inlineList?: boolean }) {
   const board = useBoard();
   const run = useRun();
   const { canEdit, state } = board;
@@ -166,7 +167,7 @@ export function TagsSection({ task }: { task: TaskRow }) {
         </ul>
       ) : null}
       {canEdit ? (
-        <div className="relative min-w-28 flex-1">
+        <div className={`relative min-w-28 flex-1 ${inlineList && showList ? "basis-full" : ""}`}>
           <input
             role="combobox"
             aria-label="Add tag"
@@ -187,7 +188,7 @@ export function TagsSection({ task }: { task: TaskRow }) {
             className="w-full rounded-md border border-transparent bg-transparent px-0 py-0.5 text-sm text-text outline-none transition-[padding,border-color] duration-200 ease-out placeholder:text-muted focus:border-border-strong focus:bg-bg focus:px-2 motion-reduce:transition-none"
           />
           {showList ? (
-            <ul id={listId} role="listbox" aria-label="Tags to add" className="absolute top-full left-0 z-20 mt-1 max-h-72 w-56 overflow-y-auto rounded-md border border-border bg-bg p-1 text-sm shadow-lg">
+            <ul id={listId} role="listbox" aria-label="Tags to add" className={`overflow-y-auto rounded-md border border-border bg-bg p-1 text-sm ${inlineList ? "mt-1 max-h-48" : "absolute top-full left-0 z-20 mt-1 max-h-72 w-56 shadow-lg"}`}>
               {choices[0] && !choices[0].create ? (
                 <li role="presentation" className="px-2 pt-0.5 pb-1 text-[10px] font-semibold tracking-wide text-muted uppercase">
                   Recent

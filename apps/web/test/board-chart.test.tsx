@@ -379,6 +379,208 @@ describe("tags on the chart", () => {
   });
 });
 
+describe("tags in the bar's menu", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 8, 29, 12));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const TAGGED = [
+    section("x", { position: "a0" }),
+    task("ui", { parentId: "x", position: "a0", userStart: "2026-09-30", duration: 5, tags: ["UI", "BE"] }),
+    task("hooks", { parentId: "x", position: "a1", userStart: "2026-10-12", duration: 2, tags: ["release"] }),
+    task("kid", { parentId: "hooks", position: "a0", userStart: "2026-10-12", duration: 2 }),
+    task("idle", { parentId: "x", position: "a2", userStart: "2026-10-20", duration: 2, locked: true, tags: ["frozen"] }),
+  ];
+
+  async function openMenu(name = "ui") {
+    const app = await chartBoard(TAGGED);
+    await app.user.click(screen.getByRole("button", { name: `Options for “${name}”` }));
+    const menu = await screen.findByRole("menu");
+    const input = within(menu).getByRole("combobox", { name: "Add tag" }) as HTMLInputElement;
+    return { ...app, menu, input };
+  }
+  const chips = (menu: HTMLElement) => within(menu).queryAllByRole("listitem").flatMap((item) => item.querySelector("[data-tag]")?.textContent ?? []);
+  const setTags = () => sentCommands().filter((command) => command.type === "setTags");
+
+  it("sits under Color, above the actions, and the menu doesn't open into the box", async () => {
+    const { menu, input } = await openMenu();
+    const labels = within(menu).getAllByText(/^(Color|Tags)$/).map((label) => label.textContent);
+    expect(labels).toEqual(["Color", "Tags"]);
+    expect(chips(menu)).toEqual(["UI", "BE"]);
+    const lock = within(menu).getByRole("menuitem", { name: "Lock dates" });
+    expect(input.compareDocumentPosition(lock) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(menu).getByText("Tags").className).toBe(within(menu).getByText("Color").className);
+    expect(input).not.toHaveFocus();
+    expect(input.className).toContain("border-transparent");
+  });
+
+  it("shows for a parent too, between single separators", async () => {
+    const { menu } = await openMenu("hooks");
+    expect(chips(menu)).toEqual(["release"]);
+    expect(within(menu).queryByRole("menuitem", { name: "Duplicate" })).not.toBeInTheDocument();
+    const separators = within(menu).getAllByRole("separator");
+    expect(separators).toHaveLength(2);
+    expect(separators[1]!.nextElementSibling).toBe(within(menu).getByRole("menuitem", { name: "Delete" }));
+  });
+
+  it("adds what's typed on Enter: one setTags with the full list, and the menu stays open", async () => {
+    const { user, menu, input } = await openMenu();
+    await user.click(input);
+    await user.keyboard("new one{Enter}");
+    expect(setTags()).toEqual([{ type: "setTags", id: "ui", tags: ["UI", "BE", "new one"] }]);
+    expect(screen.getByRole("menu")).toBe(menu);
+    expect(chips(menu)).toEqual(["UI", "BE", "new one"]);
+    expect(input).toHaveFocus();
+    expect(input).toHaveValue("");
+  });
+
+  it("keeps the box focused while typing: no typeahead, no closing on Space", async () => {
+    const { user, menu, input } = await openMenu();
+    await user.click(input);
+    await user.keyboard("lock dates");
+    expect(input).toHaveFocus();
+    expect(input).toHaveValue("lock dates");
+    expect(screen.getByRole("menu")).toBe(menu);
+    expect(sentCommands().filter((command) => command.type === "setLocked")).toEqual([]);
+  });
+
+  it("arrow keys in the box move through the suggestions, not the menu", async () => {
+    const { user, input, menu } = await openMenu();
+    await user.click(input);
+    await user.keyboard("re");
+    const options = within(menu).getAllByRole("option");
+    expect(options.map((option) => option.textContent)).toEqual(["release", '+ Create "re"']);
+    await user.keyboard("{ArrowDown}");
+    expect(input).toHaveFocus();
+    expect(options[1]).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("× removes a tag and Backspace in the empty box the last one; the menu stays open", async () => {
+    const { user, menu, input } = await openMenu();
+    await user.click(within(menu).getByRole("button", { name: "Remove the tag “UI”" }));
+    expect(setTags().at(-1)).toEqual({ type: "setTags", id: "ui", tags: ["BE"] });
+    expect(screen.getByRole("menu")).toBe(menu);
+    expect(input).toHaveFocus(); // not lost with the chip, nor on a swatch
+    await user.keyboard("{Backspace}");
+    expect(setTags().at(-1)).toEqual({ type: "setTags", id: "ui", tags: [] });
+    expect(screen.getByRole("menu")).toBe(menu);
+  });
+
+  it("clicking a suggestion adds it and keeps the menu open, the list growing the menu rather than covering it", async () => {
+    const { user, menu, input } = await openMenu();
+    await user.click(input);
+    await user.keyboard("re");
+    const list = within(menu).getByRole("listbox", { name: "Tags to add" });
+    expect(list.className).not.toContain("absolute");
+    await user.click(within(list).getByRole("option", { name: "release" }));
+    expect(setTags()).toEqual([{ type: "setTags", id: "ui", tags: ["UI", "BE", "release"] }]);
+    expect(screen.getByRole("menu")).toBe(menu);
+    expect(input).toHaveFocus();
+  });
+
+  it("reorders by dragging a chip's handle, and the menu stays open", async () => {
+    const { menu } = await openMenu();
+    const handle = within(menu).getByRole("button", { name: "Move the tag “BE”" });
+    fireEvent.pointerDown(handle, { button: 0 });
+    // jsdom has no layout: every chip is a 0×0 box at the origin, so y = 0, x = -1 is "before the first".
+    fireEvent.pointerMove(window, { clientX: -1, clientY: 0 });
+    fireEvent.pointerUp(window);
+    expect(setTags()).toEqual([{ type: "setTags", id: "ui", tags: ["BE", "UI"] }]);
+    expect(screen.getByRole("menu")).toBe(menu);
+  });
+
+  it("Escape closes the suggestions only while they show, and the menu otherwise", async () => {
+    const { user, menu, input } = await openMenu();
+    await user.click(input);
+    await user.keyboard("re");
+    expect(within(menu).getByRole("listbox")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("menu")).toBe(menu);
+    expect(within(menu).queryByRole("listbox")).not.toBeInTheDocument();
+    expect(input).toHaveFocus();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+  });
+
+  it("Escape closes the menu when what's typed offers nothing", async () => {
+    const { user, input } = await openMenu();
+    await user.click(input);
+    await user.keyboard("UI"); // already on the task
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+  });
+
+  it("arrow keys still walk the swatches and items when the focus isn't in the box", async () => {
+    const { user, menu } = await chartBoard(TAGGED).then(async (app) => {
+      const trigger = screen.getByRole("button", { name: "Options for “ui”" });
+      trigger.focus();
+      await app.user.keyboard("{Enter}");
+      return { ...app, menu: await screen.findByRole("menu") };
+    });
+    const swatches = within(menu).getAllByRole("menuitemradio");
+    await waitFor(() => expect(swatches[0]).toHaveFocus());
+    await user.keyboard("{ArrowDown}");
+    expect(swatches[1]).toHaveFocus();
+    await user.keyboard("{ArrowUp}");
+    expect(swatches[0]).toHaveFocus();
+    await user.keyboard("{End}{ArrowUp}");
+    expect(within(menu).getByRole("menuitem", { name: "Duplicate" })).toHaveFocus();
+    for (let step = 0; step < 3; step++) await user.keyboard("{ArrowUp}");
+    expect(swatches.at(-1)).toHaveFocus(); // the arrows pass over the tag box
+  });
+
+  it("Tab goes from the menu's items to the box and back", async () => {
+    const { user, menu, input } = await openMenu();
+    await user.keyboard("{Tab}");
+    expect(input).toHaveFocus();
+    await user.keyboard("{Tab}");
+    expect(input).not.toHaveFocus();
+    expect(menu.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).toHaveAttribute("role", "menuitemradio");
+    await user.keyboard("{Shift>}{Tab}{/Shift}");
+    expect(input).toHaveFocus();
+    expect(screen.getByRole("menu")).toBe(menu);
+  });
+
+  it("the mouse passing over the items leaves the focus in the box", async () => {
+    const { user, menu, input } = await openMenu();
+    await user.click(input);
+    await user.keyboard("re");
+    const lock = within(menu).getByRole("menuitem", { name: "Lock dates" });
+    await user.hover(lock);
+    expect(input).toHaveFocus();
+    await user.hover(menu);
+    expect(input).toHaveFocus();
+    await user.keyboard("d");
+    expect(input).toHaveValue("red");
+  });
+
+  it("the items take the focus on hover as ever when the box hasn't got it", async () => {
+    const { user, menu } = await openMenu();
+    const lock = within(menu).getByRole("menuitem", { name: "Lock dates" });
+    await user.hover(lock);
+    expect(lock).toHaveFocus();
+  });
+
+  it("a locked task's tags stay editable", async () => {
+    const { user, menu, input } = await openMenu("idle");
+    expect(within(menu).getByRole("menuitem", { name: "Unlock dates" })).toBeInTheDocument();
+    await user.click(input);
+    await user.keyboard("thaw{Enter}");
+    expect(setTags()).toEqual([{ type: "setTags", id: "idle", tags: ["frozen", "thaw"] }]);
+  });
+
+  it("the items still work after typing", async () => {
+    const { user, menu, input } = await openMenu();
+    await user.click(input);
+    await user.click(within(menu).getByRole("menuitem", { name: "Duplicate" }));
+    expect(sentCommands().at(-1)).toMatchObject({ type: "duplicateTask", id: "ui" });
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+  });
+});
+
 describe("toolsLeft", () => {
   it("puts a bar's quick tools left of its start dot, 4 px clear, or past its end dot when the chart's edge leaves no room", () => {
     expect(toolsLeft({ left: 200, right: 300 })).toBe(136); // tools 136–180, start dot 186–196
