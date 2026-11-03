@@ -69,10 +69,11 @@ export function TagsSection({ task }: { task: TaskRow }) {
 
   const send = (tags: string[]) => run({ type: "setTags", id: task.id, tags });
   const add = (choice: Choice) => {
+    // A refused tag stays in the box, so what was typed isn't lost.
+    if (task.tags.length >= MAX_TAGS_PER_TASK) return toast(`A task has at most ${MAX_TAGS_PER_TASK} tags`, { tone: "error" });
+    if (!send([...task.tags, ...canonicalTags([choice.tag], known)])) return;
     setText("");
     setHighlight(0);
-    if (task.tags.length >= MAX_TAGS_PER_TASK) return toast(`A task has at most ${MAX_TAGS_PER_TASK} tags`, { tone: "error" });
-    send([...task.tags, ...canonicalTags([choice.tag], known)]);
   };
 
   const onKey = (event: KeyboardEvent<HTMLInputElement>) => {

@@ -374,14 +374,14 @@ export function Board({
               ) : null}
               <div aria-hidden className="absolute top-0 w-0.5 bg-[var(--today)]" style={{ left: timeline.x(todayDay) + timeline.dayWidth / 2 - 1, height: bodyHeight }} />
               <Dependencies rows={model.rows} links={model.links} firstRow={firstRow} lastRow={lastRow} timeline={timeline} style={barStyle} />
-              <ChartRows rows={shown} allRows={model.rows} firstRow={firstRow} timeline={timeline} style={barStyle} visibleLeft={viewport.left} tagFilter={tagFilter} />
+              <ChartRows rows={shown} allRows={model.rows} firstRow={firstRow} timeline={timeline} style={barStyle} visibleLeft={viewport.left} tagFilter={tagFilter} filtering={model.filtering} />
             </div>
             </DayMenu>
           </div>
         </div>
         {model.rows.length === 0 ? <p className="absolute top-16 left-4 text-sm text-muted">No tasks yet.</p> : null}
       </div>
-      {DetailsPanel ? <DetailsPanel numbers={model.numbers} /> : null}
+      {DetailsPanel ? <DetailsPanel numbers={model.numbers} filtering={model.filtering} /> : null}
     </div>
   );
 }

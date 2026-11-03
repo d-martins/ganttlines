@@ -126,7 +126,7 @@ function ConversationTabs({ comments, history }: { comments: ReactNode; history:
  * (edited through the same checked commands as the list and chart), description, subtasks,
  * comments and history. Selecting another row retargets it; Escape or × closes it.
  */
-export function DetailsPanel({ numbers }: { numbers: ReadonlyMap<RowId, number> }) {
+export function DetailsPanel({ numbers, filtering }: { numbers: ReadonlyMap<RowId, number>; filtering: boolean }) {
   const capabilities = useCapabilities();
   const board = useBoard();
   const { state, calendar, sync } = board;
@@ -254,7 +254,7 @@ export function DetailsPanel({ numbers }: { numbers: ReadonlyMap<RowId, number> 
           ))}
         </ul>
         {children.length === 0 ? <p className="text-sm text-muted">None.</p> : null}
-        {board.canEdit ? (
+        {board.canEdit && !filtering ? (
           <button type="button" className="flex items-center gap-1 self-start rounded px-1 py-0.5 text-xs text-muted hover:bg-surface-2 hover:text-text" onClick={() => addSubtask(board, state, row)}>
             <Plus size={13} /> Add {row.kind === "section" ? "a task" : "a subtask"}
           </button>

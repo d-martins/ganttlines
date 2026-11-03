@@ -63,6 +63,23 @@ describe("comments", () => {
     expect(response.statusCode).toBe(409);
   });
 
+  it("words the comment limit so it fits a section as well as a task", async () => {
+    const { ana, vi, projectId } = await board();
+    const sectionId = randomUUID();
+    await t.app.inject({
+      method: "POST",
+      url: `/api/projects/${projectId}/commands`,
+      headers: { cookie: ana },
+      payload: { commandId: randomUUID(), command: { type: "createRow", id: sectionId, kind: "section", parentId: null, afterId: null, title: "Phase 1" } },
+    });
+    await t.db.comment.createMany({
+      data: Array.from({ length: BOARD_LIMITS.commentsPerTask }, () => ({ projectId, taskId: sectionId, authorUserId: null, authorLabel: "Bot", body: "spam" })),
+    });
+    const response = await t.app.inject({ method: "POST", url: `/api/projects/${projectId}/comments`, headers: { cookie: vi }, payload: { taskId: sectionId, body: "one more" } });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().message).toBe(`Comments are limited to ${BOARD_LIMITS.commentsPerTask} per task or section — delete some first`);
+  });
+
   it("counts each task's comments (not deleted ones), for the task list", async () => {
     const { vi, projectId, taskId } = await board();
     const post = (body: string) => t.app.inject({ method: "POST", url: `/api/projects/${projectId}/comments`, headers: { cookie: vi }, payload: { taskId, body } });

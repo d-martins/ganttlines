@@ -20,7 +20,7 @@ const ROWS = [
   task("idea", { parentId: "x", position: "a2", duration: 2 }),
 ];
 
-async function chartBoard(rows: ProjectStateDto["rows"] = ROWS, user = ADMIN, links: Link[] = []) {
+async function chartBoard(rows: ProjectStateDto["rows"] = ROWS, user = ADMIN, links: Link[] = [], search = "") {
   FakeWebSocket.instances = [];
   vi.stubGlobal("WebSocket", FakeWebSocket);
   const api = signedIn(user, [project(PROJECT_ID, "Launch")]);
@@ -29,7 +29,7 @@ async function chartBoard(rows: ProjectStateDto["rows"] = ROWS, user = ADMIN, li
   api.on("GET /api/resources", () => ({ body: { resources: [ANA] } }));
   api.on(`GET /api/projects/${PROJECT_ID}/highlights`, () => ({ body: { highlights: [] } }));
   api.on(`GET /api/projects/${PROJECT_ID}/baselines`, () => ({ body: { baselines: [] } }));
-  const app = renderApp(`/p/${PROJECT_ID}`);
+  const app = renderApp(`/p/${PROJECT_ID}${search}`);
   await screen.findByRole("treegrid", { name: "Tasks" });
   await waitFor(() => expect(FakeWebSocket.last.sent).toHaveLength(1));
   FakeWebSocket.last.deliver({ type: "joined", projectId: PROJECT_ID, version: 5, instanceVersion: 1, viewers: [] });
@@ -275,6 +275,12 @@ describe("chart editing", () => {
     expect(sentCommands().at(-1)).toMatchObject({ type: "createRow", kind: "task", parentId: null, afterId: "x", start: "2026-10-07" });
     expect(await screen.findByRole("textbox", { name: "Title" })).toHaveFocus();
     await user.keyboard("{Escape}");
+  });
+
+  it("has no blank row to add a task from while filtering", async () => {
+    await chartBoard(ROWS, ADMIN, [], "?q=hooks");
+    expect(document.querySelector("[data-chart-body] [data-row]")).not.toBeNull();
+    expect(document.querySelector("[data-chart-body] .cursor-copy")).toBeNull();
   });
 
   it("highlights a day from the right-click menu", async () => {

@@ -101,7 +101,7 @@ export async function postComment(context: RouteContext, projectId: string, acto
   await assertNotArchived(context.db, projectId);
   if (!(await context.projects.hasCommentableRow(projectId, taskId))) throw new HttpError(404, "not_found", "That task or section doesn't exist");
   if ((await context.db.comment.count({ where: { projectId, taskId, deletedAt: null } })) >= BOARD_LIMITS.commentsPerTask) {
-    throw conflict(`A task can have at most ${BOARD_LIMITS.commentsPerTask} comments — delete some first`);
+    throw conflict(`Comments are limited to ${BOARD_LIMITS.commentsPerTask} per task or section — delete some first`);
   }
   const comment = await context.db.comment.create({
     data: { projectId, taskId, authorUserId: actor.userId, authorVisitorId: actor.visitorId ?? null, authorLabel: actor.label, body },

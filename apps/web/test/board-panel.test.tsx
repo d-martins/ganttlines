@@ -31,7 +31,7 @@ const comment = (id: string, fields: Partial<CommentDto> = {}): CommentDto => ({
   ...fields,
 });
 
-async function panelBoard(rows: ProjectStateDto["rows"] = ROWS, user = ADMIN, comments: CommentDto[] = [], links: ProjectStateDto["links"] = []) {
+async function panelBoard(rows: ProjectStateDto["rows"] = ROWS, user = ADMIN, comments: CommentDto[] = [], links: ProjectStateDto["links"] = [], search = "") {
   FakeWebSocket.instances = [];
   vi.stubGlobal("WebSocket", FakeWebSocket);
   const api = signedIn(user, [project(PROJECT_ID, "Launch")]);
@@ -57,7 +57,7 @@ async function panelBoard(rows: ProjectStateDto["rows"] = ROWS, user = ADMIN, co
       nextBefore: null,
     },
   }));
-  const app = renderApp(`/p/${PROJECT_ID}`);
+  const app = renderApp(`/p/${PROJECT_ID}${search}`);
   await screen.findByRole("treegrid", { name: "Tasks" });
   await waitFor(() => expect(FakeWebSocket.last.sent).toHaveLength(1));
   FakeWebSocket.last.deliver({ type: "joined", projectId: PROJECT_ID, version: 5, instanceVersion: 1, viewers: [] });
@@ -549,12 +549,40 @@ describe("details panel", () => {
       expect(tagRequests).not.toHaveBeenCalled();
     });
 
+    it("keeps the typed text when a task is at the tag limit, and says why", async () => {
+      const full = Array.from({ length: 50 }, (_, index) => `tag ${index}`);
+      const { user } = await tagsBoard(full);
+      await user.type(tagInput(), "one more{Enter}");
+      expect(await screen.findByText("A task has at most 50 tags")).toBeInTheDocument();
+      expect(tagInput()).toHaveValue("one more");
+      expect(sentCommands().filter((command) => command.type === "setTags")).toEqual([]);
+    });
+
     it("sections have no Tags section", async () => {
       const { user } = await panelBoard();
       await user.dblClick(rowOf("x").querySelector('[aria-label^="Row "]')!);
       await screen.findByRole("complementary", { name: /^Details of/ });
       expect(within(panel()).queryByRole("heading", { name: "Tags" })).not.toBeInTheDocument();
     });
+  });
+
+  it("offers Add a subtask, and for a section Add a task, unless the board is filtered", async () => {
+    const { user } = await panelBoard();
+    await selectRow(user, "hooks");
+    expect(within(panel()).getByRole("button", { name: "Add a subtask" })).toBeInTheDocument();
+  });
+
+  it("offers no Add a subtask / Add a task while filtering", async () => {
+    const { user } = await panelBoard(ROWS, ADMIN, [], [], "?q=hooks");
+    await selectRow(user, "hooks");
+    expect(within(panel()).queryByRole("button", { name: /^Add a/ })).not.toBeInTheDocument();
+  });
+
+  it("offers no Add a task on a section while filtering", async () => {
+    const { user } = await panelBoard(ROWS, ADMIN, [], [], "?q=hooks");
+    await user.dblClick(rowOf("x").querySelector('[aria-label^="Row "]')!);
+    await screen.findByRole("complementary", { name: /^Details of/ });
+    expect(within(panel()).queryByRole("button", { name: /^Add a/ })).not.toBeInTheDocument();
   });
 
   describe("sections and the More actions menu", () => {

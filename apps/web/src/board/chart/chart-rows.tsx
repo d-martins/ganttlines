@@ -53,6 +53,7 @@ export function ChartRows({
   style,
   visibleLeft,
   tagFilter,
+  filtering,
 }: {
   /** the rendered window (already showing any drag preview) */
   rows: readonly BoardRow[];
@@ -65,6 +66,8 @@ export function ChartRows({
   visibleLeft: number;
   /** what a click on a task's tag does: toggles it in the board's filter */
   tagFilter: TagFilter;
+  /** the board is filtered: no rows are added from the chart */
+  filtering: boolean;
 }) {
   const board = useBoard();
   const { state, resources, resourceMap, canEdit, canCreateResources } = board;
@@ -338,7 +341,7 @@ export function ChartRows({
           </div>
         );
       })}
-      {canEdit ? (
+      {canEdit && !filtering ? (
         // The blank row under the last task: click a day to add a task starting there.
         <div
           className="absolute right-0 left-0 cursor-copy"
