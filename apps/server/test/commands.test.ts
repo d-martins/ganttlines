@@ -352,6 +352,40 @@ describe("tags", () => {
     expect(row.tags).toEqual(["UI", "new", "Back end"]);
   });
 
+  it("matches spellings only within the board for share-link editors, so other projects' tags stay hidden", async () => {
+    const { admin, editor, projectId } = await editorWithProject();
+    const secret = (await t.app.inject({ method: "POST", url: "/api/projects", headers: { cookie: editor }, payload: { name: "Secret" } })).json().project.id as string;
+    const hidden = randomUUID();
+    await send(editor, secret, createTask(hidden));
+    await send(editor, secret, { type: "setTags", id: hidden, tags: ["Secret Launch"] });
+    const id = randomUUID();
+    await send(editor, projectId, createTask(id));
+    await send(editor, projectId, { type: "setTags", id, tags: ["Board tag"] });
+    const tagsOf = async () => (await reload(editor, projectId)).rows.find((r: { id: string }) => r.id === id).tags;
+    const viaLink = (headers: Record<string, string>, tags: string[]) =>
+      t.app.inject({ method: "POST", url: `/api/projects/${projectId}/commands`, headers, payload: { commandId: randomUUID(), command: { type: "setTags", id, tags } } });
+
+    // An anonymous visitor on a collaborative link.
+    const anonymous = (await t.app.inject({ method: "POST", url: `/api/projects/${projectId}/share-links`, headers: { cookie: admin }, payload: { access: "anonymous", collaboration: true } })).json().token as string;
+    const visit = await t.app.inject({ method: "POST", url: `/api/share/${anonymous}/visitor`, payload: { name: "Rudy" } });
+    const visitor = { "x-share-token": anonymous, cookie: `gp_visitor=${visit.cookies.find((c) => c.name === "gp_visitor")!.value}` };
+    expect((await viaLink(visitor, ["secret launch", "board TAG"])).statusCode).toBe(200);
+    expect(await tagsOf()).toEqual(["secret launch", "Board tag"]);
+
+    // Signed-in guests and viewers who edit through a collaborative link: the board's own spelling, never the other project's.
+    const signedIn = (await t.app.inject({ method: "POST", url: `/api/projects/${projectId}/share-links`, headers: { cookie: admin }, payload: { access: "authenticated", collaboration: true } })).json().token as string;
+    for (const role of ["guest", "viewer"] as const) {
+      const user = await createUser(t.app, admin, { email: `${role}@example.com`, name: role, role });
+      expect((await viaLink({ "x-share-token": signedIn, cookie: user.cookie }, ["SECRET launch", role])).statusCode, role).toBe(200);
+      expect(await tagsOf(), role).toEqual(["secret launch", role]);
+    }
+
+    // An editor sees the whole workspace anyway (once this board no longer spells it its own way).
+    await send(editor, projectId, { type: "setTags", id, tags: [] });
+    await send(editor, projectId, { type: "setTags", id, tags: ["secret launch"] });
+    expect(await tagsOf()).toEqual(["Secret Launch"]);
+  });
+
   it("refuses tags on sections, and keeps a section's description", async () => {
     const { editor, projectId } = await editorWithProject();
     const id = randomUUID();

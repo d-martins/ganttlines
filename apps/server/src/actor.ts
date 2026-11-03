@@ -10,15 +10,22 @@ export interface Actor {
   linkId?: string | null;
   /** the AI app connection the action came through (MCP), if any */
   connectionId?: string | null;
+  /** the signed-in user's role (not recorded or shown to anyone) */
+  role?: User["role"];
 }
 
 export function actorOf(user: User): Actor {
-  return { userId: user.id, label: user.name };
+  return { userId: user.id, label: user.name, role: user.role };
+}
+
+/** Whether the actor may see every project's data: a signed-in editor or admin acting without a share link. */
+export function seesWorkspace(actor: Actor): boolean {
+  return actor.userId !== null && !actor.linkId && (actor.role === "editor" || actor.role === "admin");
 }
 
 /** A person acting through an AI app they connected: "Ana via Claude". */
 export function aiActorOf(user: User, app: string, connectionId: string): Actor {
-  return { userId: user.id, label: `${user.name} via ${app}`, connectionId };
+  return { userId: user.id, label: `${user.name} via ${app}`, connectionId, role: user.role };
 }
 
 /**

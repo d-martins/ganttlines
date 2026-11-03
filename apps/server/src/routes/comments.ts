@@ -4,7 +4,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { actorKey, type Actor } from "../actor";
 import { requireProjectAccess } from "../auth/request-access";
-import { badRequest, conflict, forbidden, notFound } from "../errors";
+import { badRequest, conflict, forbidden, HttpError, notFound } from "../errors";
 import { parseBody, parseId } from "../validation";
 import { assertNotArchived } from "./board-helpers";
 import type { RouteContext } from "./context";
@@ -99,7 +99,7 @@ export function commentRoutes(app: FastifyInstance, context: RouteContext): void
 /** Adds a comment to a task or section (of a live project) and shows it to everyone with the board open. */
 export async function postComment(context: RouteContext, projectId: string, actor: Actor, taskId: string, body: string): Promise<Comment> {
   await assertNotArchived(context.db, projectId);
-  if (!(await context.projects.hasCommentableRow(projectId, taskId))) throw notFound("Task");
+  if (!(await context.projects.hasCommentableRow(projectId, taskId))) throw new HttpError(404, "not_found", "That task or section doesn't exist");
   if ((await context.db.comment.count({ where: { projectId, taskId, deletedAt: null } })) >= BOARD_LIMITS.commentsPerTask) {
     throw conflict(`A task can have at most ${BOARD_LIMITS.commentsPerTask} comments — delete some first`);
   }

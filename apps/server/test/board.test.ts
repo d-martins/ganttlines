@@ -99,6 +99,7 @@ describe("comments", () => {
     const other = (await t.app.inject({ method: "POST", url: "/api/projects", headers: { cookie: ana }, payload: { name: "Other" } })).json().project.id;
     const elsewhere = await t.app.inject({ method: "POST", url: `/api/projects/${other}/comments`, headers: { cookie: vi }, payload: { taskId: sectionId, body: "?" } });
     expect(elsewhere.statusCode).toBe(404);
+    expect(elsewhere.json().message).toBe("That task or section doesn't exist");
   });
 
   it("lets link visitors read comments, and comment only on collaborative links", async () => {

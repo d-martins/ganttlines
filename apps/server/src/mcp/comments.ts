@@ -8,12 +8,13 @@ import { answer, guarded, type ToolGroup } from "./tools";
 export const comments: ToolGroup = (server, tools) => {
   const { context, caller } = tools;
 
-  async function taskOf(projectRef: string, taskRef: string | undefined, includeArchived: boolean) {
+  /** The project, and the task or section (by id or title) when one is named. */
+  async function rowOf(projectRef: string, rowRef: string | undefined, includeArchived: boolean) {
     const project = pickProject(await context.db.project.findMany({ where: includeArchived ? {} : { archivedAt: null } }), projectRef);
     const { rows } = await context.projects.outline(project.id);
-    const tasks = rows.map((entry) => ({ id: entry.row.id, title: entry.row.title }));
-    const task = taskRef ? pickOne(tasks, taskRef, (row) => row.id, (row) => row.title, "task or section") : null;
-    return { project, task, titles: new Map(tasks.map((row) => [row.id, row.title])) };
+    const commentable = rows.map((entry) => ({ id: entry.row.id, title: entry.row.title }));
+    const row = rowRef ? pickOne(commentable, rowRef, (candidate) => candidate.id, (candidate) => candidate.title, "task or section") : null;
+    return { project, row, titles: new Map(commentable.map((candidate) => [candidate.id, candidate.title])) };
   }
 
   server.registerTool(
@@ -28,29 +29,29 @@ export const comments: ToolGroup = (server, tools) => {
       }),
       annotations: { readOnlyHint: true },
     },
-    ({ project: projectRef, task: taskRef, limit = 30 }) =>
+    ({ project: projectRef, task: rowRef, limit = 30 }) =>
       guarded(async () => {
-        const { project, task, titles } = await taskOf(projectRef, taskRef, true);
+        const { project, row, titles } = await rowOf(projectRef, rowRef, true);
         const found = await context.db.comment.findMany({
-          where: { projectId: project.id, deletedAt: null, ...(task ? { taskId: task.id } : {}) },
+          where: { projectId: project.id, deletedAt: null, ...(row ? { taskId: row.id } : {}) },
           orderBy: [{ createdAt: "desc" }, { id: "desc" }],
           take: limit,
         });
         const list = found.map((comment) => ({
           id: comment.id,
-          task: titles.get(comment.taskId) ?? "(deleted task)",
+          task: titles.get(comment.taskId) ?? "(deleted)",
           by: comment.authorLabel,
           at: comment.createdAt.toISOString(),
           text: comment.body,
         }));
-        return answer(`${list.length} ${list.length === 1 ? "comment" : "comments"}${task ? ` on “${task.title}”` : ` in “${project.name}”`}.`, { comments: list });
+        return answer(`${list.length} ${list.length === 1 ? "comment" : "comments"}${row ? ` on “${row.title}”` : ` in “${project.name}”`}.`, { comments: list });
       }),
   );
 
   server.registerTool(
     "add_comment",
     {
-      title: "Comment on a task",
+      title: "Comment on a task or section",
       description: "Adds a comment to a task or section, as the person who connected this app (shown “via” the app). Markdown works.",
       inputSchema: z.object({
         project: z.string().min(1),
@@ -58,11 +59,11 @@ export const comments: ToolGroup = (server, tools) => {
         text: z.string().min(1).max(10_000),
       }),
     },
-    ({ project: projectRef, task: taskRef, text }) =>
+    ({ project: projectRef, task: rowRef, text }) =>
       guarded(async () => {
-        const { project, task } = await taskOf(projectRef, taskRef, false);
-        const comment = await postComment(context, project.id, aiActorOf(caller.user, caller.app, caller.connectionId), task!.id, text.trim());
-        return answer(`Commented on “${task!.title}”.`, { comment: { id: comment.id, task: task!.title, by: comment.authorLabel, at: comment.createdAt.toISOString() } });
+        const { project, row } = await rowOf(projectRef, rowRef, false);
+        const comment = await postComment(context, project.id, aiActorOf(caller.user, caller.app, caller.connectionId), row!.id, text.trim());
+        return answer(`Commented on “${row!.title}”.`, { comment: { id: comment.id, task: row!.title, by: comment.authorLabel, at: comment.createdAt.toISOString() } });
       }),
   );
 };
