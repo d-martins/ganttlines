@@ -4,6 +4,7 @@ import {
   applyCommand,
   baselineTasks,
   buildTree,
+  canonicalTags,
   type Change,
   childrenOf,
   type Command,
@@ -26,7 +27,7 @@ import {
 } from "@ganttlines/engine";
 import type { BaselineTaskDto, ChangesDto, CommandResultDto, ProjectDto, ProjectStateDto } from "@ganttlines/protocol";
 import { createHash } from "node:crypto";
-import { actorKey, type Actor } from "../actor";
+import { actorKey, seesWorkspace, type Actor } from "../actor";
 import type { InstanceService } from "../calendar/instance-service";
 import { NoLock } from "../cluster/local";
 import type { EventBus, ProjectLock } from "../cluster/types";
@@ -34,6 +35,7 @@ import { toProjectDto } from "../dto";
 import { conflict, HttpError, notFound } from "../errors";
 import { KeyedQueue } from "../queue";
 import { readProject, type StoredProject } from "./state";
+import { workspaceTags } from "./tags";
 import { MemoryUndoStore, type UndoStore } from "./undo-store";
 
 /** Clients further behind than this (in versions or in total changes) reload instead of replaying. */
@@ -128,7 +130,8 @@ export class ProjectService {
       return this.remember(projectId, commandId, digest, async () => {
         if (stored.meta.archivedAt) throw conflict("This project is archived");
         await this.checkReferences(stored, command);
-        const result = applyCommand(stored.state, (await this.instance.current()).calendar, command);
+        const effective = command.type === "setTags" ? { ...command, tags: canonicalTags(command.tags, await this.knownTags(stored, actor)) } : command;
+        const result = applyCommand(stored.state, (await this.instance.current()).calendar, effective);
         if (!result.ok) throw new HttpError(422, result.reason, result.message);
         if (result.changes.length === 0) return { version: stored.meta.version, changes: [] };
         const key = actorKey(actor);
@@ -179,9 +182,9 @@ export class ProjectService {
     });
   }
 
-  /** Whether `rowId` is a task of the project (for attaching comments). */
-  hasTask(projectId: string, rowId: string): Promise<boolean> {
-    return this.queue.run(projectId, async () => (await this.load(projectId)).state.rows[rowId]?.kind === "task");
+  /** Whether `rowId` is a task or section of the project (for attaching comments). */
+  hasCommentableRow(projectId: string, rowId: string): Promise<boolean> {
+    return this.queue.run(projectId, async () => (await this.load(projectId)).state.rows[rowId] !== undefined);
   }
 
   /** The current computed dates of every scheduled task (for baselines). */
@@ -497,6 +500,16 @@ export class ProjectService {
       stored.catch(() => this.cache.delete(projectId));
     }
     return stored;
+  }
+
+  /**
+   * The spellings a new tag is matched against ("ui" is stored as "UI" when that's how it's
+   * spelled already): the whole workspace's for editors and admins, but only this board's for
+   * anyone else (share links), who must not learn other projects' tags from it.
+   */
+  private async knownTags(stored: StoredProject, actor: Actor): Promise<string[]> {
+    if (seesWorkspace(actor)) return workspaceTags(this.db);
+    return Object.values(stored.state.rows).flatMap((row) => (row.kind === "task" ? row.tags : []));
   }
 
   /** New assignees must be existing, active team members (keeping the current one is always fine). */

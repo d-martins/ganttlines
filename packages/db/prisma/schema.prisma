@@ -134,11 +134,15 @@ model Row {
   resourceId    String? @db.Uuid
   color         String  @default("blue")
   locked        Boolean @default(false)
+  /// tasks and sections
   description   String  @default("")
+  /// the task's tags, in order (always empty for sections)
+  tags          String[] @default([])
   linksIn       Link[]  @relation("LinkFollower")
   linksOut      Link[]  @relation("LinkPredecessor")
 
   @@index([projectId])
+  @@index([tags], type: Gin)
 }
 
 /// A dependency: `follower` waits on `predecessor` as `kind` says. Identified by its three ids.

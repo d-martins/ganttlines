@@ -1,7 +1,7 @@
 import { TASK_COLORS, type Row, type TaskColor } from "@ganttlines/engine";
 import type { Row as DbRow } from "../generated/prisma/client";
 
-/** Stored row → engine row. Sections drop the task-only columns. */
+/** Stored row → engine row. Sections drop the task-only columns (they keep a description). */
 export function toEngineRow(row: DbRow): Row {
   const base = {
     id: row.id,
@@ -9,7 +9,7 @@ export function toEngineRow(row: DbRow): Row {
     parentId: row.parentId,
     position: row.position,
   };
-  if (row.kind === "section") return { ...base, kind: "section" };
+  if (row.kind === "section") return { ...base, kind: "section", description: row.description };
   if (row.kind !== "task") throw new Error(`Row ${row.id} has unknown kind ${row.kind}`);
   if (!(TASK_COLORS as readonly string[]).includes(row.color)) throw new Error(`Row ${row.id} has unknown color ${row.color}`);
   return {
@@ -23,6 +23,7 @@ export function toEngineRow(row: DbRow): Row {
     locked: row.locked,
     description: row.description,
     actualDuration: row.actualDuration,
+    tags: [...row.tags],
   };
 }
 
@@ -44,8 +45,9 @@ export function toDbColumns(row: Row): Omit<DbRow, "projectId"> {
       resourceId: null,
       color: "blue",
       locked: false,
-      description: "",
+      description: row.description,
       actualDuration: null,
+      tags: [],
     };
   }
   return {
@@ -58,5 +60,6 @@ export function toDbColumns(row: Row): Omit<DbRow, "projectId"> {
     locked: row.locked,
     description: row.description,
     actualDuration: row.actualDuration,
+    tags: [...row.tags],
   };
 }

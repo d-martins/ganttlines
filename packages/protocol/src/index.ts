@@ -17,6 +17,7 @@ export {
   type ApiError,
   type ProjectDto,
   type Role,
+  type TagsDto,
   type UserDto,
 } from "./api";
 export {
@@ -80,4 +81,4 @@ export {
   type McpSettingsDto,
   type OAuthRequestDto,
 } from "./mcp";
-export { WorkspaceFile, WorkspaceFileV1 } from "./workspace-file";
+export { WorkspaceFile, WorkspaceFileV1, WorkspaceFileV2 } from "./workspace-file";

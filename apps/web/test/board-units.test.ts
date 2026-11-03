@@ -1,12 +1,14 @@
 import { Calendar, linkKey, toDay, weekday, type Change, type Link } from "@ganttlines/engine";
 import type { ActivityEntryDto } from "@ganttlines/protocol";
-import { describe, expect, it } from "vitest";
+import { act } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { elbow } from "../src/board/chart/dependencies";
 import { lineOf, linkOf, type LinkLine } from "../src/board/link-phrases";
 import { describeChange, describeEntry } from "../src/board/panel/activity";
 import { chartRange, Timeline } from "../src/board/chart/timeline";
 import { dropMove } from "../src/board/list/list-actions";
 import { durations } from "../src/board/list/task-list";
+import { NO_FILTERS } from "../src/board/filters";
 import { boardModel } from "../src/board/model";
 import { outline } from "../src/board/rows";
 import { ANA, CALENDAR, section, task } from "./board-fixtures";
@@ -53,6 +55,19 @@ describe("history of links", () => {
     expect(describeEntry(entry(toSF), names, "f")).toBe("changed the link with “Design” to “can't finish before it starts” (was “after it finishes”)");
     // Created first, deleted second (as an undo may log it): still one kind change.
     expect(describeEntry(entry([...toSS].reverse(), "undo"), names, "f")).toBe("undid a change (changed the link with “Design” to “once it starts” (was “after it finishes”))");
+  });
+});
+
+describe("history of tags", () => {
+  const names = { state: { rows: {}, links: {} }, resources: new Map() };
+  const tags = (before: string[], after: string[]) => describeChange({ rowId: "t", field: "tags", before, after } as Change, names, "t");
+
+  it("names each tag added or removed; a pure reorder says so", () => {
+    expect(tags([], ["UI"])).toBe("tagged it UI");
+    expect(tags(["UI"], [])).toBe("removed the tag UI");
+    expect(tags(["UI"], ["UI", "Docs", "Back end"])).toBe("tagged it Docs, tagged it Back end");
+    expect(tags(["UI", "Docs"], ["Back end", "UI"])).toBe("tagged it Back end, removed the tag Docs");
+    expect(tags(["UI", "Docs"], ["Docs", "UI"])).toBe("reordered its tags");
   });
 });
 
@@ -200,7 +215,7 @@ describe("board model", () => {
       },
       links: Object.fromEntries([fs, ss, hidden].map((link) => [linkKey(link), link])),
     };
-    const model = boardModel(state, new Calendar(CALENDAR), null, "", new Set(["s"]));
+    const model = boardModel(state, new Calendar(CALENDAR), null, NO_FILTERS, new Set(["s"]));
     expect(model.rows.map((entry) => entry.row.id)).toEqual(["a", "b", "s"]);
     expect(model.links).toEqual(
       expect.arrayContaining([
@@ -298,5 +313,60 @@ describe("drag auto-scroll", () => {
     expect(edgePush(1000, 100, 900)).toBe(1); // past the edge: full speed forward
     expect(edgePush(120, 100, 900)).toBe(-0.5);
     expect(edgePush(0, 100, 900)).toBe(-1);
+  });
+});
+
+describe("lingering rows", () => {
+  const ids = (...list: string[]) => new Set(list);
+  const linger = async (initial: { matches: Set<string>; focused: string | null }) => {
+    const { renderHook } = await import("@testing-library/react");
+    const { useLinger } = await import("../src/board/linger");
+    return renderHook(({ matches, focused }) => useLinger(matches, focused), { initialProps: initial });
+  };
+  afterEach(() => vi.useRealTimers());
+
+  it("keeps a focused row that stops matching, until 5 s after focus leaves", async () => {
+    vi.useFakeTimers();
+    const hook = await linger({ matches: ids("a", "b"), focused: "a" });
+    hook.rerender({ matches: ids("b"), focused: "a" });
+    expect([...hook.result.current].sort()).toEqual(["a", "b"]);
+    act(() => vi.advanceTimersByTime(60_000)); // still focused: still kept
+    expect(hook.result.current.has("a")).toBe(true);
+    hook.rerender({ matches: ids("b"), focused: "b" });
+    act(() => vi.advanceTimersByTime(4_900));
+    expect(hook.result.current.has("a")).toBe(true);
+    act(() => vi.advanceTimersByTime(200));
+    expect([...hook.result.current]).toEqual(["b"]);
+  });
+
+  it("a row that matches again stays, and its first removal is called off", async () => {
+    vi.useFakeTimers();
+    const hook = await linger({ matches: ids("a"), focused: "a" });
+    hook.rerender({ matches: ids(), focused: "a" });
+    hook.rerender({ matches: ids(), focused: null }); // removal due in 5 s
+    act(() => vi.advanceTimersByTime(2_000));
+    hook.rerender({ matches: ids("a"), focused: null }); // matches again
+    expect([...hook.result.current]).toEqual(["a"]);
+    // Stops matching again while selected, then is let go: only the new 5 s count.
+    hook.rerender({ matches: ids(), focused: "a" });
+    hook.rerender({ matches: ids(), focused: null });
+    act(() => vi.advanceTimersByTime(4_900)); // past when the first removal was due
+    expect([...hook.result.current]).toEqual(["a"]);
+    act(() => vi.advanceTimersByTime(200));
+    expect([...hook.result.current]).toEqual([]);
+  });
+
+  it("a changed filter doesn't keep the focused row", async () => {
+    const { renderHook } = await import("@testing-library/react");
+    const { useLinger } = await import("../src/board/linger");
+    const hook = renderHook(({ matches, scope }) => useLinger(matches, "a", 5000, scope), { initialProps: { matches: ids("a", "b"), scope: "q=x" } });
+    hook.rerender({ matches: ids("b"), scope: "q=y" });
+    expect([...hook.result.current]).toEqual(["b"]);
+  });
+
+  it("a row that stops matching without focus leaves straight away", async () => {
+    const hook = await linger({ matches: ids("a", "b"), focused: "b" });
+    hook.rerender({ matches: ids("b"), focused: "b" });
+    expect([...hook.result.current]).toEqual(["b"]);
   });
 });

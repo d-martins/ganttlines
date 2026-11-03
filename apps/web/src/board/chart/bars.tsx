@@ -1,5 +1,5 @@
 import type { ResourceDto } from "@ganttlines/protocol";
-import type { HTMLAttributes } from "react";
+import type { HTMLAttributes, ReactNode } from "react";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { Lock } from "lucide-react";
 import { spanEnd, spanStart, type Span } from "@ganttlines/engine";
@@ -157,6 +157,7 @@ export function RowBar({
   shape,
   titleGap = 6,
   visibleLeft = -Infinity,
+  tags = null,
 }: {
   entry: BoardRow;
   span: Span;
@@ -169,6 +170,8 @@ export function RowBar({
   titleGap?: number;
   /** the chart x at the list's edge: a roomy bar's contents slide right to stay in view */
   visibleLeft?: number;
+  /** drawn after the title (the task's tags) */
+  tags?: ReactNode;
 }) {
   const { row } = entry;
   const kind = shapeOf(entry);
@@ -191,6 +194,7 @@ export function RowBar({
     <span className="pointer-events-none absolute flex items-center gap-1 whitespace-nowrap text-xs" style={{ left: right + titleGap, top: 0, height: rowHeight }}>
       {kind === "task" ? locked : null}
       <span className={kind === "parent" ? "font-semibold" : kind === "section" ? "text-muted" : ""}>{row.title}</span>
+      {tags}
     </span>
   );
 
@@ -286,7 +290,15 @@ export function RowBar({
         </Tooltip.Portal>
       </Tooltip.Root>
       {onBar}
-      {inside ? null : outsideTitle}
+      {inside ? (
+        tags ? (
+          <span className="pointer-events-none absolute flex items-center whitespace-nowrap" style={{ left: right + titleGap, top: 0, height: rowHeight }}>
+            {tags}
+          </span>
+        ) : null
+      ) : (
+        outsideTitle
+      )}
     </>
   );
 }

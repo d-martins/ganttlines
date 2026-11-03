@@ -1,13 +1,14 @@
 import { buildTree, childrenOf, computeSchedule, CycleError, fromDay, isParentTask, TASK_COLORS, type Row, type RowId, type Schedule, type TaskRow } from "@ganttlines/engine";
 import { COMMAND_LIMITS } from "@ganttlines/protocol/constants";
 import { useQuery } from "@tanstack/react-query";
-import { Lock, Plus, Trash2, UserRound, X } from "lucide-react";
+import { Lock, MoreHorizontal, Plus, Trash2, UserRound, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { currentUser } from "../../api/queries";
 import { Avatar } from "../../ui/avatar";
 import { RichTextEditor } from "../../ui/rich-text";
 import { toast } from "../../ui/toast";
 import { IconButton } from "../../ui/button";
+import { Menu, MenuItem } from "../../ui/menu";
 import { AssigneePicker } from "../assignee-picker";
 import { useBoard, useRun } from "../board-context";
 import { formatDay, taskColors } from "../format";
@@ -18,6 +19,7 @@ import { useSelection } from "../selection";
 import { Activity } from "./activity";
 import { CommitInput, INPUT } from "./commit-input";
 import { LinksSection } from "./links-section";
+import { TagsSection } from "./tags-section";
 import { Comments } from "./comments";
 import { useCapabilities } from "../../workspace";
 
@@ -71,7 +73,7 @@ const CONVERSATION_TABS = [
 ] as const;
 type ConversationTab = (typeof CONVERSATION_TABS)[number]["id"];
 
-/** A task's comments and history as two tabs (comments first). ←/→ move between the tabs. */
+/** A row's comments and history as two tabs (comments first). ←/→ move between the tabs. */
 function ConversationTabs({ comments, history }: { comments: ReactNode; history: ReactNode }) {
   const [tab, setTab] = useState<ConversationTab>("comments");
   const tabs = useRef<Record<ConversationTab, HTMLButtonElement | null>>({ comments: null, history: null });
@@ -124,7 +126,7 @@ function ConversationTabs({ comments, history }: { comments: ReactNode; history:
  * (edited through the same checked commands as the list and chart), description, subtasks,
  * comments and history. Selecting another row retargets it; Escape or × closes it.
  */
-export function DetailsPanel({ numbers }: { numbers: ReadonlyMap<RowId, number> }) {
+export function DetailsPanel({ numbers, filtering }: { numbers: ReadonlyMap<RowId, number>; filtering: boolean }) {
   const capabilities = useCapabilities();
   const board = useBoard();
   const { state, calendar, sync } = board;
@@ -197,7 +199,28 @@ export function DetailsPanel({ numbers }: { numbers: ReadonlyMap<RowId, number> 
         <span className="text-xs text-muted">
           #{numbers.get(row.id)} · {kindLabel}
         </span>
-        <IconButton label="Close details (Esc)" className="ml-auto" onClick={close}>
+        {board.canEdit ? (
+          <Menu
+            trigger={
+              <IconButton label="More actions" className="ml-auto">
+                <MoreHorizontal size={16} />
+              </IconButton>
+            }
+          >
+            <MenuItem
+              danger
+              onSelect={() => {
+                deleteRow(board, row);
+                closePanel();
+              }}
+            >
+              <span className="flex items-center gap-1.5">
+                <Trash2 size={13} aria-hidden /> Delete {row.kind === "section" ? "section" : "task"}
+              </span>
+            </MenuItem>
+          </Menu>
+        ) : null}
+        <IconButton label="Close details (Esc)" className={board.canEdit ? "" : "ml-auto"} onClick={close}>
           <X size={16} />
         </IconButton>
       </header>
@@ -211,9 +234,14 @@ export function DetailsPanel({ numbers }: { numbers: ReadonlyMap<RowId, number> 
           onCommit={(title) => run({ type: "updateTitle", id: row.id, title: title.trim() })}
           className="-ml-px border-transparent pl-0 text-base font-semibold transition-[padding,border-color] duration-200 ease-out focus:border-border-strong focus:pl-2 motion-reduce:transition-none"
         />
-        {row.kind === "task" ? <Description task={row} maxHeight={halfHeight} /> : null}
+        <Description row={row} maxHeight={halfHeight} />
         {row.kind === "task" ? <TaskFields task={row} isParent={isParent} schedule={schedule} numbers={numbers} /> : null}
       </div>
+      {row.kind === "task" ? (
+        <Section title="Tags">
+          <TagsSection key={row.id} task={row} />
+        </Section>
+      ) : null}
       {row.kind === "task" ? (
         <Section title="Links">
           <LinksSection key={row.id} task={row} state={state} numbers={numbers} canEdit={board.canEdit} run={run} calendar={calendar} schedule={schedule} />
@@ -226,30 +254,18 @@ export function DetailsPanel({ numbers }: { numbers: ReadonlyMap<RowId, number> 
           ))}
         </ul>
         {children.length === 0 ? <p className="text-sm text-muted">None.</p> : null}
-        {board.canEdit ? (
+        {board.canEdit && !filtering ? (
           <button type="button" className="flex items-center gap-1 self-start rounded px-1 py-0.5 text-xs text-muted hover:bg-surface-2 hover:text-text" onClick={() => addSubtask(board, state, row)}>
             <Plus size={13} /> Add {row.kind === "section" ? "a task" : "a subtask"}
           </button>
         ) : null}
       </Section>
-      {board.canEdit ? (
-        <button
-          type="button"
-          className="flex items-center gap-1 self-start rounded px-1 py-0.5 text-xs text-danger hover:bg-surface-2"
-          onClick={() => {
-            deleteRow(board, row);
-            closePanel();
-          }}
-        >
-          <Trash2 size={13} /> Delete {row.kind === "section" ? "section" : "task"}
-        </button>
-      ) : null}
-      {row.kind === "task" && capabilities.comments && capabilities.activity ? (
+      {capabilities.comments && capabilities.activity ? (
         <ConversationTabs
           comments={<Comments projectId={sync.projectId} taskId={row.id} canComment={board.canComment} isAdmin={me.data?.role === "admin"} maxHeight={halfHeight} />}
           history={<Activity projectId={sync.projectId} rowId={row.id} names={{ state, resources: board.resourceMap }} />}
         />
-      ) : row.kind === "task" && capabilities.comments ? (
+      ) : capabilities.comments ? (
         <Section title="Comments">
           <Comments projectId={sync.projectId} taskId={row.id} canComment={board.canComment} isAdmin={me.data?.role === "admin"} maxHeight={halfHeight} />
         </Section>
@@ -406,23 +422,23 @@ function TaskFields({ task, isParent, schedule, numbers }: { task: TaskRow; isPa
 }
 
 /**
- * The task's description, as formatted text (stored as Markdown). The box grows with its content up
+ * The row's description, as formatted text (stored as Markdown). The box grows with its content up
  * to half the panel's height, and opens to that height while it's being edited.
  */
-function Description({ task, maxHeight }: { task: TaskRow; maxHeight: number }) {
+function Description({ row, maxHeight }: { row: Row; maxHeight: number }) {
   const { canEdit } = useBoard();
   const run = useRun();
   return (
     <RichTextEditor
-      key={task.id}
-      value={task.description}
+      key={row.id}
+      value={row.description}
       label="Description"
       placeholder={canEdit ? "Add a description…" : "No description."}
       editable={canEdit}
       autoSize={{ min: 72, max: maxHeight, expandOnFocus: true }}
       onCommit={(description) => {
         if (description.length > COMMAND_LIMITS.descriptionMax) return toast(`Descriptions are limited to ${COMMAND_LIMITS.descriptionMax} characters`, { tone: "error" });
-        run({ type: "setDescription", id: task.id, description });
+        run({ type: "setDescription", id: row.id, description });
       }}
     />
   );

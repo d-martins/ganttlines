@@ -1,4 +1,4 @@
-import { MAX_DATE, MAX_DURATION, MAX_LAG, MIN_DATE, TASK_COLORS, type Command } from "@ganttlines/engine";
+import { MAX_DATE, MAX_DURATION, MAX_LAG, MAX_TAG_LENGTH, MAX_TAGS_PER_TASK, MIN_DATE, TASK_COLORS, type Command } from "@ganttlines/engine";
 import { z } from "zod";
 import { COMMAND_LIMITS } from "./constants";
 
@@ -38,6 +38,8 @@ export const CommandSchema = z.discriminatedUnion("type", [
   cmd("updateTitle", { id, title }),
   cmd("setDescription", { id, description: z.string().max(COMMAND_LIMITS.descriptionMax) }),
   cmd("setColor", { id, color: z.enum(TASK_COLORS) }),
+  /** The task's whole tag list, in order; the engine drops empty and repeated tags. */
+  cmd("setTags", { id, tags: z.array(z.string().trim().max(MAX_TAG_LENGTH)).max(MAX_TAGS_PER_TASK) }),
   cmd("setAssignee", { id, resourceId: id.nullable() }),
   cmd("moveTask", { id, start: date, half }),
   cmd("resizeTask", { id, edge: z.enum(["start", "end"]), date, half }),

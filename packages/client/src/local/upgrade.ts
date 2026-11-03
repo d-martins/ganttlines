@@ -5,15 +5,22 @@ import { WORKSPACE_VERSION, type ProjectRecord, type WorkspaceRecord } from "./r
 type RowV1 = Row & { predecessorId?: string | null; offset?: number };
 
 /**
- * A version 1 project record (task rows with `predecessorId`/`offset`) as version 2: each
- * predecessor becomes a finish-to-start link with the offset as its delay, and the rows lose those
- * fields. A predecessor that isn't in the project, or a task naming itself, is dropped. Pure; a
- * version 2 record is returned unchanged, and so is one that isn't a project record at all (it is
- * never thrown on, so one damaged record can't stop the rest of the workspace from opening).
+ * A project record from any older version at the current one. Pure: a current record is returned
+ * as it is, and so is one that isn't a project record at all (it is never thrown on, so one damaged
+ * record can't stop the rest of the workspace from opening).
  */
 export function upgradeProjectRecord(record: unknown): ProjectRecord {
-  const project = record as Omit<ProjectRecord, "rows" | "links"> & { rows: RowV1[]; links?: Link[] };
-  if (!isRecordShaped(record) || Array.isArray(project.links)) return project as ProjectRecord;
+  if (!isRecordShaped(record)) return record as ProjectRecord;
+  return withTagsAndDescriptions(withLinks(record as Omit<ProjectRecord, "rows" | "links"> & { rows: RowV1[]; links?: Link[] }));
+}
+
+/**
+ * Version 1 → 2: each task's predecessor becomes a finish-to-start link with the offset as its
+ * delay, and the rows lose those fields. A predecessor that isn't in the project, or a task naming
+ * itself, is dropped.
+ */
+function withLinks(project: Omit<ProjectRecord, "rows" | "links"> & { rows: RowV1[]; links?: Link[] }): ProjectRecord {
+  if (Array.isArray(project.links)) return project as ProjectRecord;
   const ids = new Set(project.rows.map((row) => row.id));
   const links: Link[] = [];
   const rows = project.rows.map((row): Row => {
@@ -24,6 +31,17 @@ export function upgradeProjectRecord(record: unknown): ProjectRecord {
     return rest as Row;
   });
   return { ...project, rows, links };
+}
+
+/** Version 2 → 3: tasks get an empty tag list and sections an empty description. */
+function withTagsAndDescriptions(project: ProjectRecord): ProjectRecord {
+  const outdated = (row: Row) => (row.kind === "task" ? !Array.isArray(row.tags) : typeof row.description !== "string");
+  if (!project.rows.some(outdated)) return project;
+  const rows = project.rows.map((row): Row => {
+    if (!outdated(row)) return row;
+    return row.kind === "task" ? { ...row, tags: [] } : { ...row, description: "" };
+  });
+  return { ...project, rows };
 }
 
 function isRecordShaped(record: unknown): boolean {

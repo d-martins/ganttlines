@@ -43,6 +43,8 @@ export const keys = {
   users: ["users"] as const,
   calendar: ["calendar"] as const,
   resources: ["resources"] as const,
+  /** every tag used in the workspace */
+  tags: ["tags"] as const,
   /** everything cached for one project starts with this, so it can be dropped in one go */
   project: (id: string) => ["project", id] as const,
   highlights: (id: string) => ["project", id, "highlights"] as const,
@@ -98,6 +100,8 @@ export const userList = queryOptions({
 
 export const calendar = queryOptions({ queryKey: keys.calendar, queryFn: () => workspace().calendar() });
 export const resourceList = queryOptions({ queryKey: keys.resources, queryFn: () => workspace().resources() });
+/** The workspace's tags, most used first (signed-in editors and admins only: others may not list them). */
+export const workspaceTags = (enabled: boolean) => queryOptions({ queryKey: keys.tags, queryFn: () => workspace().workspaceTags(), enabled });
 export const highlightList = (projectId: string) =>
   queryOptions({ queryKey: keys.highlights(projectId), queryFn: () => workspace().highlights(projectId) });
 export const baselineList = (projectId: string) =>

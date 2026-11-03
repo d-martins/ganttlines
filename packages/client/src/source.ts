@@ -81,6 +81,9 @@ export interface WorkspaceSource {
   createBaseline(projectId: string, name: string): Promise<BaselineDto>;
   deleteBaseline(projectId: string, baselineId: string): Promise<void>;
 
+  /** every tag on a task anywhere in the workspace, one spelling each, most used first (for suggestions while tagging) */
+  workspaceTags(): Promise<string[]>;
+
   calendar(): Promise<CalendarDto>;
   resources(): Promise<ResourceDto[]>;
   setWorkingWeekdays(workingWeekdays: number[]): Promise<CalendarDto>;

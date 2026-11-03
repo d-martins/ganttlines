@@ -76,6 +76,11 @@ export interface ProjectDto {
   archived: boolean;
 }
 
+/** GET /api/tags: every tag used in the workspace, most used first, then alphabetically. */
+export interface TagsDto {
+  tags: string[];
+}
+
 export interface ApiError {
   error: string;
   message: string;

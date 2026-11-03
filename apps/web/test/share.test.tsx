@@ -2,7 +2,7 @@ import type { ShareInfoDto, ShareLinkDto } from "@ganttlines/protocol";
 import { fireEvent, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ANA, CALENDAR, FakeWebSocket, PROJECT_ID, projectState, section, task } from "./board-fixtures";
-import { ADMIN, fakeApi, project, renderApp, screen, signedIn, VIEWER, type FakeApi } from "./utils";
+import { ADMIN, fakeApi, GUEST, project, renderApp, screen, signedIn, VIEWER, type FakeApi } from "./utils";
 
 const TOKEN = "tok_abc";
 const ROWS = [section("x", { position: "a0" }), task("ui", { parentId: "x", position: "a0", userStart: "2026-09-30", duration: 5 })];
@@ -129,6 +129,38 @@ describe("share links", () => {
     await joined();
     expect(screen.getByRole("button", { name: "Add task" })).toBeInTheDocument(); // no name asked: members act as themselves
     expect(screen.getByText(VIEWER.name)).toBeInTheDocument();
+  });
+});
+
+describe("tag suggestions on a collaborative link", () => {
+  const openTask = async (user: ReturnType<typeof renderApp>["user"]) => {
+    await screen.findByRole("treegrid", { name: "Tasks" });
+    await joined();
+    await user.dblClick(within(screen.getAllByRole("row")[2]!).getByText("2"));
+    expect(await screen.findByRole("combobox", { name: "Add tag" })).toBeInTheDocument(); // they may add tags...
+    await user.click(screen.getByRole("combobox", { name: "Add tag" }));
+    await user.keyboard("x");
+  };
+
+  it.each([
+    ["a guest", GUEST],
+    ["a viewer", VIEWER],
+  ])("%s never asks for the workspace's tags", async (_name, who) => {
+    FakeWebSocket.instances = [];
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const api = signedIn(who, [project(PROJECT_ID, "Launch")]);
+    api.on(`GET /api/share/${TOKEN}`, () => ({ body: info({ collaboration: true, visitor: { name: who.name } }) }));
+    boardEndpoints(api);
+    const { user } = renderApp(`/s/${TOKEN}`);
+    await openTask(user);
+    expect(api.calls.filter((call) => call.key === "GET /api/tags")).toEqual([]);
+  });
+
+  it("nor does an anonymous visitor", async () => {
+    const { api } = anonymousVisitor(info({ collaboration: true, visitor: { name: "Sam" } }));
+    const { user } = renderApp(`/s/${TOKEN}`);
+    await openTask(user);
+    expect(api.calls.filter((call) => call.key === "GET /api/tags")).toEqual([]);
   });
 });
 

@@ -163,11 +163,13 @@ describe("editing the task list", () => {
     const { user } = await editableBoard();
     await user.click(screen.getByRole("button", { name: "Open details of “ui”" }));
     const panel = await screen.findByRole("complementary", { name: "Details of “ui”" });
-    await user.click(within(panel).getByRole("button", { name: "Delete task" }));
+    await user.click(within(panel).getByRole("button", { name: "More actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Delete task" }));
     expect(sentCommands()).toEqual([{ type: "deleteRows", ids: ["ui"] }]);
     await waitFor(() => expect(screen.queryByRole("complementary")).not.toBeInTheDocument());
     await user.click(screen.getByRole("button", { name: "Open details of “design”" }));
-    expect(within(await screen.findByRole("complementary", { name: "Details of “design”" })).getByRole("button", { name: "Delete section" })).toBeInTheDocument();
+    await user.click(within(await screen.findByRole("complementary", { name: "Details of “design”" })).getByRole("button", { name: "More actions" }));
+    expect(await screen.findByRole("menuitem", { name: "Delete section" })).toBeInTheDocument();
   });
 
   it("keeps a picked predecessor that starts later: the task moves after it", async () => {

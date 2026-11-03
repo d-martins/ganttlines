@@ -452,6 +452,55 @@ describe("AI access: editing plans", () => {
     await client.close();
   });
 
+  it("sets tags: add_tasks and update_task replace the list, in the workspace's spelling; get_project shows them", async () => {
+    const { ed, client } = await editorsApp();
+    const elsewhere = (await t.app.inject({ method: "POST", url: "/api/projects", headers: { cookie: ed.cookie }, payload: { name: "Other" } })).json().project.id as string;
+    await call(client, "add_tasks", { project: elsewhere, tasks: [{ title: "Old", tags: ["UI", "Back end"] }] });
+
+    const added = await call(client, "add_tasks", { project: "Launch", tasks: [{ title: "Design", tags: ["ui", "Research"] }, { title: "Build" }] });
+    expect(added["error"]).toBeUndefined();
+    expect(added["added"]).toEqual([expect.objectContaining({ title: "Design", tags: ["UI", "Research"] }), expect.objectContaining({ title: "Build", tags: [] })]);
+
+    const updated = await call(client, "update_task", { project: "Launch", task: "Design", tags: ["back END", "ui"] });
+    expect(updated["task"]).toMatchObject({ tags: ["Back end", "UI"] });
+    const board = (await call(client, "get_project", { project: "Launch" }))["rows"] as { title: string; tags?: string[] }[];
+    expect(board.find((row) => row.title === "Design")!.tags).toEqual(["Back end", "UI"]);
+
+    await call(client, "update_task", { project: "Launch", task: "Design", tags: [] });
+    const cleared = (await call(client, "get_project", { project: "Launch" }))["rows"] as { title: string; tags?: string[] }[];
+    expect(cleared.find((row) => row.title === "Design")!.tags).toEqual([]);
+    await client.close();
+  });
+
+  it("refuses tags on a section, and changes nothing", async () => {
+    const { ed, projectId, client } = await editorsApp();
+    const result = await call(client, "add_tasks", { project: "Launch", tasks: [{ kind: "section", title: "Phase", tags: ["UI"] }] });
+    expect(result["error"]).toMatch(/Sections have no tags/);
+    expect(await rowsOf(projectId, ed.cookie)).toEqual([]);
+    await client.close();
+  });
+
+  it("update_task sets a section's title and description, and refuses task-only fields on it", async () => {
+    const { ed, projectId, client } = await editorsApp();
+    await call(client, "add_tasks", { project: "Launch", tasks: [{ kind: "section", title: "Phase", description: "First pass" }] });
+    const updated = await call(client, "update_task", { project: "Launch", task: "Phase", title: "Phase 1", description: "What this phase is for" });
+    expect(updated["error"]).toBeUndefined();
+    expect(updated["task"]).toMatchObject({ type: "section", title: "Phase 1", description: "What this phase is for" });
+    const rows = (await t.app.inject({ url: `/api/projects/${projectId}/state`, headers: { cookie: ed.cookie } })).json().rows;
+    expect(rows).toEqual([expect.objectContaining({ kind: "section", title: "Phase 1", description: "What this phase is for" })]);
+    const refused = await call(client, "update_task", { project: "Launch", task: "Phase 1", durationDays: 3 });
+    expect(refused["error"]).toMatch(/section/i);
+    await client.close();
+  });
+
+  it("comments on sections too", async () => {
+    const { client } = await editorsApp();
+    await call(client, "add_tasks", { project: "Launch", tasks: [{ kind: "section", title: "Phase" }] });
+    expect(await call(client, "add_comment", { project: "Launch", task: "Phase", text: "Scope?" })).toMatchObject({ comment: { task: "Phase" } });
+    expect((await call(client, "list_comments", { project: "Launch" }))["comments"]).toEqual([expect.objectContaining({ task: "Phase", text: "Scope?" })]);
+    await client.close();
+  });
+
   it("creates and renames projects", async () => {
     const { ed, client } = await editorsApp();
     const created = await call(client, "create_project", { name: "Website" });

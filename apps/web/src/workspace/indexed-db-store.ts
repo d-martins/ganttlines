@@ -2,8 +2,11 @@ import { upgradeProjectRecord, upgradeWorkspaceRecord, type LocalStore, type Pro
 
 const WORKSPACE = "workspace";
 const PROJECTS = "projects";
-/** 2: projects keep their links as records of their own (version 1 kept one predecessor on each task). */
-const VERSION = 2;
+/**
+ * 2: projects keep their links as records of their own (version 1 kept one predecessor on each task).
+ * 3: tasks have tags and sections a description.
+ */
+const VERSION = 3;
 
 /** This browser's workspace in IndexedDB: one workspace record, one record per project. */
 export class IndexedDbStore implements LocalStore {
@@ -59,7 +62,7 @@ export class IndexedDbStore implements LocalStore {
             return;
           }
           // Older tabs were told to close (`onversionchange`). Every record is rewritten in this one
-          // transaction: if any of it fails, all of it is undone and the version 1 data stays as it was.
+          // transaction: if any of it fails, all of it is undone and the older data stays as it was.
           const tx = request.transaction!;
           const fail = (error: unknown) => {
             failure = error;

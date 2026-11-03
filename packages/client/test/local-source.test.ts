@@ -5,6 +5,7 @@ import { validation } from "../src/local/validation";
 import { fillWorkspace, workspaceContract } from "../testing/contract";
 import { LocalSource } from "../src/local/local-source";
 import { PROTOCOL_VERSION, type ServerMessage } from "@ganttlines/protocol";
+import { TASK_DEFAULTS } from "@ganttlines/engine";
 
 describe("local records", () => {
   it("starts empty, with Monday–Friday working days", async () => {
@@ -25,7 +26,8 @@ describe("local records", () => {
     expect(() => checkFormat({ format: "ganttlines-workspace", version: 99 })).toThrow(expect.objectContaining({ status: 400, code: "newer_version" }));
     expect(() => checkFormat({ format: "ganttlines-workspace", version: 1 })).not.toThrow();
     expect(() => checkFormat({ format: "ganttlines-workspace", version: 2 })).not.toThrow();
-    expect(() => checkFormat({ format: "ganttlines-workspace", version: 3 })).toThrow(expect.objectContaining({ code: "newer_version" }));
+    expect(() => checkFormat({ format: "ganttlines-workspace", version: 3 })).not.toThrow();
+    expect(() => checkFormat({ format: "ganttlines-workspace", version: 4 })).toThrow(expect.objectContaining({ code: "newer_version" }));
     expect(() => checkFormat({ format: "ganttlines-workspace", version: 1.5 })).toThrow(expect.objectContaining({ code: "invalid_file" }));
   });
 
@@ -211,7 +213,8 @@ describe("local boards", () => {
     const board = await source.openBoard(project.id).load();
     expect(board.links).toEqual([{ predecessorId: TASK, followerId: BUILD, kind: "FS", lag: -0.5 }]);
     expect(board.rows[1]).not.toHaveProperty("predecessorId");
-    expect(source.exportFile().version).toBe(2);
+    expect(source.exportFile().version).toBe(3);
+    expect(board.rows.map((entry) => entry.kind === "task" && entry.tags)).toEqual([[], []]);
 
     // The next change writes the project back in the new shape.
     const link = source.openBoard(project.id).openLink();
@@ -236,5 +239,51 @@ describe("local boards", () => {
     await source.updateProject(project.id, { archived: true });
     await source.deleteProject(project.id);
     expect(await closed).toBe(4004);
+  });
+});
+
+describe("local tags", () => {
+  const OTHER = "77777777-7777-4777-8777-777777777777";
+  const row = (id: string, position: string, tags: string[] | null) =>
+    tags === null
+      ? { id, kind: "section", title: "S", parentId: null, position, description: "" }
+      : { ...TASK_DEFAULTS, id, kind: "task", title: "T", parentId: null, position, tags };
+  const project = (id: string, name: string, createdAt: string, rows: unknown[]) => ({ id, name, archived: false, createdAt, version: 1, rows, links: [], highlights: [], baselines: [] }) as unknown as ProjectRecord;
+  const ids = Array.from({ length: 8 }, (_, i) => `0000000${i}-0000-4000-8000-000000000000`);
+
+  /** The same workspace as the server's tags test: "Other" is newer, and stored "ui" before the workspace knew "UI". */
+  async function tagged() {
+    const store = new MemoryStore();
+    await store.saveWorkspace(emptyWorkspace());
+    // Saved newest first: the order records come back in mustn't matter.
+    await store.saveProject(project(OTHER, "Other", "2026-10-02T00:00:00.000Z", [row(ids[5]!, "a0", ["ui", "alpha"])]));
+    await store.saveProject(
+      project(TASK, "Launch", "2026-10-01T00:00:00.000Z", [row(ids[0]!, "a0", ["UI", "Back end"]), row(ids[1]!, "a1", ["UI"]), row(ids[2]!, "a2", ["Zeta"]), row(ids[3]!, "a3", []), row(ids[4]!, "a4", null)]),
+    );
+    return LocalSource.open(store);
+  }
+
+  it("lists every tag in the workspace like the server: most used first, then alphabetically, in the first spelling", async () => {
+    expect(await (await tagged()).workspaceTags()).toEqual(["UI", "alpha", "Back end", "Zeta"]);
+  });
+
+  it("is empty for a workspace without tags", async () => {
+    const source = await LocalSource.open(new MemoryStore());
+    expect(await source.workspaceTags()).toEqual([]);
+    await source.createProject({ name: "Launch" });
+    expect(await source.workspaceTags()).toEqual([]);
+  });
+
+  it("tagging uses the spelling already in the workspace, from any project", async () => {
+    const source = await tagged();
+    const link = source.openBoard(OTHER).openLink();
+    const received = inbox(link);
+    await settle();
+    link.send(JSON.stringify({ type: "join", projectId: OTHER, version: 1, protocol: PROTOCOL_VERSION }));
+    link.send(JSON.stringify({ type: "command", commandId: BUILD, command: { type: "setTags", id: ids[5], tags: ["back END", "zeta", "New one", "alpha"] } }));
+    await settle();
+    expect(received.filter((message) => message.type === "reject")).toEqual([]);
+    expect((await source.openBoard(OTHER).load()).rows[0]).toMatchObject({ tags: ["Back end", "Zeta", "New one", "alpha"] });
+    expect(await source.workspaceTags()).toEqual(["Back end", "UI", "Zeta", "alpha", "New one"]);
   });
 });

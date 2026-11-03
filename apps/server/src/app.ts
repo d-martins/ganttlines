@@ -49,6 +49,7 @@ import { projectRoutes } from "./routes/projects";
 import { realtimeRoutes } from "./routes/realtime";
 import { setupRoutes } from "./routes/setup";
 import { sharingRoutes } from "./routes/sharing";
+import { tagRoutes } from "./routes/tags";
 import { userRoutes } from "./routes/users";
 import { UpdateChecker } from "./updates";
 import { webRoutes } from "./web";
@@ -277,6 +278,7 @@ export async function buildApp({
   realtimeRoutes(app, context, { revalidateMs: liveRevalidateMs });
   sharingRoutes(app, context);
   commentRoutes(app, context);
+  tagRoutes(app, context);
   highlightRoutes(app, context);
   baselineRoutes(app, context);
   activityRoutes(app, context);

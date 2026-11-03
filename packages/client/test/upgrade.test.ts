@@ -49,7 +49,7 @@ describe("upgrading local records", () => {
     expect(upgraded.rows[0]).not.toHaveProperty("predecessorId");
   });
 
-  it("it leaves v2 alone", () => {
+  it("it leaves an upgraded record alone", () => {
     const v2: ProjectRecord = upgradeProjectRecord(v1Project([task(A, null, 0), task(B, A, 0)]));
     const before = structuredClone(v2);
     expect(upgradeProjectRecord(v2)).toEqual(before);
@@ -57,6 +57,33 @@ describe("upgrading local records", () => {
     const workspace = emptyWorkspace();
     expect(upgradeWorkspaceRecord(workspace)).toEqual(workspace);
     expect(upgradeWorkspaceRecord({ ...workspace, version: 1 })).toEqual(workspace);
+  });
+
+  it("a v1 record also gains tags and section descriptions", () => {
+    const upgraded = upgradeProjectRecord(v1Project([task(A, null, 0), { id: C, kind: "section", title: "S", parentId: null, position: "a2" }]));
+    expect(upgraded.rows[0]).toMatchObject({ tags: [] });
+    expect(upgraded.rows[1]).toEqual({ id: C, kind: "section", title: "S", parentId: null, position: "a2", description: "" });
+  });
+
+  it("a v2 record gains empty tags on tasks and an empty description on sections", () => {
+    const { predecessorId: _p, offset: _o, ...v2Task } = task(A, null, 0);
+    const v2 = { ...v1Project([v2Task, { id: C, kind: "section", title: "S", parentId: null, position: "a2" }]), links: [] };
+    const before = structuredClone(v2);
+    const upgraded = upgradeProjectRecord(v2);
+    expect(upgraded.rows).toEqual([{ ...v2Task, tags: [] }, { id: C, kind: "section", title: "S", parentId: null, position: "a2", description: "" }]);
+    expect(upgraded).toMatchObject({ id: "p", version: 3, links: [], highlights: [], baselines: [] });
+    expect(v2).toEqual(before);
+    const workspace = emptyWorkspace();
+    expect(upgradeWorkspaceRecord({ ...workspace, version: 2 })).toEqual(workspace);
+    expect(workspace.version).toBe(3);
+  });
+
+  it("a v3 record is unchanged", () => {
+    const { predecessorId: _p, offset: _o, ...v2Task } = task(A, null, 0);
+    const v3 = { ...v1Project([{ ...v2Task, tags: ["UI"] }, { id: C, kind: "section", title: "S", parentId: null, position: "a2", description: "Notes" }]), links: [] };
+    const before = structuredClone(v3);
+    expect(upgradeProjectRecord(v3)).toBe(v3);
+    expect(v3).toEqual(before);
   });
 
   it("it leaves a malformed record unchanged instead of throwing", () => {

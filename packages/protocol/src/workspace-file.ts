@@ -1,4 +1,4 @@
-import { MAX_DATE, MAX_DURATION, MAX_LAG, MIN_DATE, TASK_COLORS } from "@ganttlines/engine";
+import { MAX_DATE, MAX_DURATION, MAX_LAG, MAX_TAG_LENGTH, MAX_TAGS_PER_TASK, MIN_DATE, TASK_COLORS, tagKey } from "@ganttlines/engine";
 import { z } from "zod";
 import { CALENDAR_LIMITS, checkRange } from "./calendar";
 import { LIMITS } from "./api";
@@ -13,7 +13,10 @@ const halfSteps = (schema: z.ZodNumber) => schema.refine((value) => Number.isInt
 const position = z.string().min(1).max(10_000);
 const projectName = z.string().trim().min(1).max(LIMITS.projectNameMax);
 
-const SectionRow = z.strictObject({ id, kind: z.literal("section"), title: z.string().max(COMMAND_LIMITS.titleMax), parentId: id.nullable(), position });
+const sectionFields = { id, kind: z.literal("section"), title: z.string().max(COMMAND_LIMITS.titleMax), parentId: id.nullable(), position };
+const SectionRow = z.strictObject({ ...sectionFields, description: z.string().max(COMMAND_LIMITS.descriptionMax) });
+// Before v3, sections had no description and tasks no tags.
+const SectionRowV2 = z.strictObject(sectionFields);
 const taskFields = {
   id,
   kind: z.literal("task"),
@@ -29,7 +32,13 @@ const taskFields = {
   locked: z.boolean(),
   description: z.string().max(COMMAND_LIMITS.descriptionMax),
 };
-const TaskRow = z.strictObject(taskFields);
+// Stored tags are already tidy: trimmed, non-empty, one per spelling.
+const tags = z
+  .array(z.string().min(1).max(MAX_TAG_LENGTH).refine((tag) => tag === tag.trim(), "Tags have no surrounding spaces"))
+  .max(MAX_TAGS_PER_TASK)
+  .refine((list) => new Set(list.map(tagKey)).size === list.length, "A task has each tag once");
+const TaskRow = z.strictObject({ ...taskFields, tags });
+const TaskRowV2 = z.strictObject(taskFields);
 // v1 files kept a task's single predecessor and its offset on the row.
 const TaskRowV1 = z.strictObject({
   ...taskFields,
@@ -98,7 +107,7 @@ const projectFields = {
 /** A whole local workspace, as exported to (and imported from) a `.ganttlines.json` file. */
 export const WorkspaceFile = z.strictObject({
   ...workspaceFields,
-  version: z.literal(2),
+  version: z.literal(3),
   projects: z
     .array(
       z.strictObject({
@@ -111,12 +120,28 @@ export const WorkspaceFile = z.strictObject({
 });
 export type WorkspaceFile = z.infer<typeof WorkspaceFile>;
 
-/** The previous file format, still accepted on import. */
+/** The format before tags and section descriptions, still accepted on import. */
+export const WorkspaceFileV2 = z.strictObject({
+  ...workspaceFields,
+  version: z.literal(2),
+  projects: z
+    .array(
+      z.strictObject({
+        ...projectFields,
+        rows: z.array(z.discriminatedUnion("kind", [SectionRowV2, TaskRowV2])).max(20_000),
+        links: z.array(LinkRecord).max(100_000),
+      }),
+    )
+    .max(1_000),
+});
+export type WorkspaceFileV2 = z.infer<typeof WorkspaceFileV2>;
+
+/** The first file format (one predecessor kept on each task), still accepted on import. */
 export const WorkspaceFileV1 = z.strictObject({
   ...workspaceFields,
   version: z.literal(1),
   projects: z
-    .array(z.strictObject({ ...projectFields, rows: z.array(z.discriminatedUnion("kind", [SectionRow, TaskRowV1])).max(20_000) }))
+    .array(z.strictObject({ ...projectFields, rows: z.array(z.discriminatedUnion("kind", [SectionRowV2, TaskRowV1])).max(20_000) }))
     .max(1_000),
 });
 export type WorkspaceFileV1 = z.infer<typeof WorkspaceFileV1>;

@@ -1,0 +1,109 @@
+import { tagKey, type ProjectState, type Row, type RowId } from "@ganttlines/engine";
+import type { BoardSearch } from "../router";
+
+/** What the board is narrowed to. OR within one filter, AND across them; an empty one is off. */
+export interface BoardFilters {
+  /** title search, case-insensitive */
+  q: string;
+  /** resource ids; "none" = unassigned */
+  people: (string | "none")[];
+  tags: string[];
+  /** section ids: tasks anywhere under one of them */
+  sections: RowId[];
+}
+
+export const NO_FILTERS: BoardFilters = { q: "", people: [], tags: [], sections: [] };
+
+/** Whether these filters narrow anything; for what a board really filters by, pass them through knownFilters. */
+export function isFiltering(f: BoardFilters): boolean {
+  return f.q.trim() !== "" || f.people.length > 0 || f.tags.some((tag) => tagKey(tag) !== "") || f.sections.length > 0;
+}
+
+/**
+ * The filters with the people and sections this board doesn't know left out (people are known from
+ * `team` when given, else from this board's tasks), so a link naming them never empties the board.
+ * Tags are text: one nobody here uses still filters (to nothing), so it never drops out.
+ */
+export function knownFilters(state: ProjectState, f: BoardFilters, team?: ReadonlySet<string>): BoardFilters {
+  const knownPeople = team ?? new Set(Object.values(state.rows).flatMap((row) => (row.kind === "task" && row.resourceId !== null ? [row.resourceId] : [])));
+  return {
+    q: f.q,
+    people: f.people.filter((id) => id === "none" || knownPeople.has(id)),
+    tags: f.tags,
+    sections: f.sections.filter((id) => state.rows[id]?.kind === "section"),
+  };
+}
+
+/**
+ * Rows that match, plus the ancestors shown as context; null when not filtering (see knownFilters).
+ * Only tasks match. Tasks in `keep` count as matches too (rows kept on screen after they stopped).
+ */
+export function filterRows(
+  state: ProjectState,
+  f: BoardFilters,
+  team?: ReadonlySet<string>,
+  keep?: ReadonlySet<RowId>,
+): { matches: Set<RowId>; context: Set<RowId> } | null {
+  const rows = Object.values(state.rows);
+  const tasks = rows.filter((row) => row.kind === "task");
+  const known = knownFilters(state, f, team);
+  const needle = known.q.trim().toLocaleLowerCase();
+  const people = new Set(known.people);
+  const tags = new Set(known.tags.map(tagKey).filter((key) => key !== ""));
+  const sections = new Set(known.sections);
+  if (!needle && people.size === 0 && tags.size === 0 && sections.size === 0) return null;
+
+  const limit = rows.length;
+  /** ancestors, nearest first (bounded, in case stored rows loop) */
+  const ancestors = (row: Readonly<Row>): Readonly<Row>[] => {
+    const found: Readonly<Row>[] = [];
+    let parent = row.parentId === null ? undefined : state.rows[row.parentId];
+    for (let steps = limit; parent && steps > 0; steps--) {
+      found.push(parent);
+      parent = parent.parentId === null ? undefined : state.rows[parent.parentId];
+    }
+    return found;
+  };
+  const matches = new Set<RowId>();
+  for (const row of tasks) {
+    if (needle && !row.title.toLocaleLowerCase().includes(needle)) continue;
+    if (people.size > 0 && !people.has(row.resourceId ?? "none")) continue;
+    if (tags.size > 0 && !row.tags.some((tag) => tags.has(tagKey(tag)))) continue;
+    if (sections.size > 0 && !ancestors(row).some((above) => sections.has(above.id))) continue;
+    matches.add(row.id);
+  }
+  for (const id of keep ?? []) if (state.rows[id]?.kind === "task") matches.add(id);
+  const context = new Set<RowId>();
+  for (const id of matches) {
+    for (const above of ancestors(state.rows[id]!)) if (!matches.has(above.id)) context.add(above.id);
+  }
+  return { matches, context };
+}
+
+export function filtersFromSearch(search: BoardSearch): BoardFilters {
+  return { q: search.q ?? "", people: search.people ?? [], tags: search.tags ?? [], sections: search.sections ?? [] };
+}
+
+/** The address's part for these filters: empty ones are left out. */
+export function searchFromFilters(f: BoardFilters): Pick<BoardSearch, "q" | "people" | "tags" | "sections"> {
+  return {
+    ...(f.q.trim() ? { q: f.q } : {}),
+    ...(f.people.length > 0 ? { people: f.people } : {}),
+    ...(f.tags.length > 0 ? { tags: f.tags } : {}),
+    ...(f.sections.length > 0 ? { sections: f.sections } : {}),
+  };
+}
+
+/** `search` with its filters replaced by `f` (the baseline and the rest are kept). */
+export function withFilters(search: BoardSearch, f: BoardFilters): BoardSearch {
+  const { q: _q, people: _people, tags: _tags, sections: _sections, ...rest } = search;
+  return { ...rest, ...searchFromFilters(f) };
+}
+
+/** Whether the tag filter includes `tag` (in any spelling). */
+export const hasTag = (f: BoardFilters, tag: string): boolean => f.tags.some((entry) => tagKey(entry) === tagKey(tag));
+
+/** The filters with `tag` added to the tag filter, or taken out when it's there (in any spelling). */
+export function toggleTag(f: BoardFilters, tag: string): BoardFilters {
+  return { ...f, tags: hasTag(f, tag) ? f.tags.filter((entry) => tagKey(entry) !== tagKey(tag)) : [...f.tags, tag] };
+}

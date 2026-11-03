@@ -31,7 +31,7 @@ const comment = (id: string, fields: Partial<CommentDto> = {}): CommentDto => ({
   ...fields,
 });
 
-async function panelBoard(rows: ProjectStateDto["rows"] = ROWS, user = ADMIN, comments: CommentDto[] = [], links: ProjectStateDto["links"] = []) {
+async function panelBoard(rows: ProjectStateDto["rows"] = ROWS, user = ADMIN, comments: CommentDto[] = [], links: ProjectStateDto["links"] = [], search = "") {
   FakeWebSocket.instances = [];
   vi.stubGlobal("WebSocket", FakeWebSocket);
   const api = signedIn(user, [project(PROJECT_ID, "Launch")]);
@@ -57,7 +57,7 @@ async function panelBoard(rows: ProjectStateDto["rows"] = ROWS, user = ADMIN, co
       nextBefore: null,
     },
   }));
-  const app = renderApp(`/p/${PROJECT_ID}`);
+  const app = renderApp(`/p/${PROJECT_ID}${search}`);
   await screen.findByRole("treegrid", { name: "Tasks" });
   await waitFor(() => expect(FakeWebSocket.last.sent).toHaveLength(1));
   FakeWebSocket.last.deliver({ type: "joined", projectId: PROJECT_ID, version: 5, instanceVersion: 1, viewers: [] });
@@ -464,6 +464,192 @@ describe("details panel", () => {
     expect(within(panel()).queryByRole("button", { name: /^(Add link|Remove link with|Link with)/ })).not.toBeInTheDocument();
     await user.click(within(lines()[0]!).getByRole("button", { name: "#2 ui" })); // goes to the linked task
     expect(panel()).toHaveAccessibleName("Details of “ui”");
+  });
+
+  describe("tags", () => {
+    const tagsBoard = async (tags: string[] = [], user = ADMIN, known: string[] = ["UI", "UX research", "Q4 · must-have", "Back end"]) => {
+      const rows = [ROWS[0]!, ROWS[1]!, task("hooks", { parentId: "x", position: "a1", userStart: "2026-10-12", duration: 2, tags })];
+      const app = await panelBoard(rows, user);
+      const tagRequests = vi.fn(() => ({ body: { tags: known } }));
+      app.api.on("GET /api/tags", tagRequests);
+      await selectRow(app.user, "hooks");
+      return { ...app, tagRequests };
+    };
+    const tagSection = () => within(panel()).getByRole("heading", { name: "Tags" }).closest("section")!;
+    const tagInput = () => within(tagSection()).getByRole("combobox", { name: "Add tag" });
+    const chips = () => within(tagSection()).queryAllByRole("listitem").map((item) => item.querySelector("[data-tag]")!.textContent);
+    const lastSetTags = () => sentCommands().filter((command) => command.type === "setTags").at(-1);
+
+    it("sits above Links: a borderless Add tag until focused", async () => {
+      const { user } = await tagsBoard();
+      const headings = within(panel()).getAllByRole("heading").map((heading) => heading.textContent);
+      expect(headings.indexOf("Tags")).toBe(headings.indexOf("Links") - 1);
+      expect(chips()).toEqual([]);
+      expect(tagInput()).toHaveAttribute("placeholder", "Add tag");
+      expect(tagInput().className).toContain("border-transparent");
+      expect(tagInput().className).toContain("focus:border-border-strong");
+      await user.click(tagInput());
+      expect(within(tagSection()).queryByRole("listbox")).not.toBeInTheDocument();
+    });
+
+    it('typing lists the matching workspace tags, then + Create "…"', async () => {
+      const { user } = await tagsBoard();
+      await user.type(tagInput(), "u");
+      const options = await within(tagSection()).findAllByRole("option");
+      expect(options.map((option) => option.textContent)).toEqual(["UI", "UX research", "Q4 · must-have", '+ Create "u"']);
+      expect(options[0]).toHaveAttribute("aria-selected", "true");
+    });
+
+    it("Enter adds the highlighted tag, in the workspace's spelling", async () => {
+      const { user } = await tagsBoard(["Docs"]);
+      await user.type(tagInput(), "ui");
+      expect((await within(tagSection()).findAllByRole("option")).map((option) => option.textContent)).toEqual(["UI"]);
+      await user.keyboard("{Enter}");
+      expect(lastSetTags()).toEqual({ type: "setTags", id: "hooks", tags: ["Docs", "UI"] });
+      expect(tagInput()).toHaveValue("");
+    });
+
+    it("creates a new tag, and the arrow keys move the highlight", async () => {
+      const { user } = await tagsBoard();
+      await user.type(tagInput(), "back");
+      await within(tagSection()).findAllByRole("option");
+      await user.keyboard("{ArrowDown}{Enter}");
+      expect(lastSetTags()).toEqual({ type: "setTags", id: "hooks", tags: ["back"] });
+    });
+
+    it("× and Backspace in the empty input remove tags", async () => {
+      const { user } = await tagsBoard(["UI", "Docs", "Back end"]);
+      expect(chips()).toEqual(["UI", "Docs", "Back end"]);
+      await user.click(within(tagSection()).getByRole("button", { name: "Remove the tag “Docs”" }));
+      expect(lastSetTags()).toEqual({ type: "setTags", id: "hooks", tags: ["UI", "Back end"] });
+      await user.click(tagInput());
+      await user.keyboard("{Backspace}");
+      expect(lastSetTags()).toEqual({ type: "setTags", id: "hooks", tags: ["UI"] });
+    });
+
+    it("reorders the chips by dragging their handle", async () => {
+      await tagsBoard(["UI", "Docs", "Back end"]);
+      within(tagSection())
+        .getAllByRole("listitem")
+        .forEach((item, index) => {
+          item.getBoundingClientRect = () => ({ top: 0, bottom: 20, left: index * 60, right: index * 60 + 50, width: 50, height: 20, x: index * 60, y: 0, toJSON: () => ({}) });
+        });
+      fireEvent.pointerDown(within(tagSection()).getByRole("button", { name: "Move the tag “UI”" }), { button: 0, clientX: 5, clientY: 10 });
+      fireEvent.pointerMove(window, { clientX: 100, clientY: 10 });
+      fireEvent.pointerMove(window, { clientX: 170, clientY: 10 });
+      fireEvent.pointerUp(window, { clientX: 170, clientY: 10 });
+      expect(lastSetTags()).toEqual({ type: "setTags", id: "hooks", tags: ["Docs", "Back end", "UI"] });
+    });
+
+    it("viewers see the chips only, and don't fetch the workspace's tags", async () => {
+      const { tagRequests } = await tagsBoard(["UI", "Docs"], VIEWER);
+      expect(chips()).toEqual(["UI", "Docs"]);
+      expect(within(tagSection()).queryByRole("combobox")).not.toBeInTheDocument();
+      expect(within(tagSection()).queryByRole("button")).not.toBeInTheDocument();
+      expect(tagRequests).not.toHaveBeenCalled();
+    });
+
+    it("keeps the typed text when a task is at the tag limit, and says why", async () => {
+      const full = Array.from({ length: 50 }, (_, index) => `tag ${index}`);
+      const { user } = await tagsBoard(full);
+      await user.type(tagInput(), "one more{Enter}");
+      expect(await screen.findByText("A task has at most 50 tags")).toBeInTheDocument();
+      expect(tagInput()).toHaveValue("one more");
+      expect(sentCommands().filter((command) => command.type === "setTags")).toEqual([]);
+    });
+
+    it("sections have no Tags section", async () => {
+      const { user } = await panelBoard();
+      await user.dblClick(rowOf("x").querySelector('[aria-label^="Row "]')!);
+      await screen.findByRole("complementary", { name: /^Details of/ });
+      expect(within(panel()).queryByRole("heading", { name: "Tags" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("offers Add a subtask, and for a section Add a task, unless the board is filtered", async () => {
+    const { user } = await panelBoard();
+    await selectRow(user, "hooks");
+    expect(within(panel()).getByRole("button", { name: "Add a subtask" })).toBeInTheDocument();
+  });
+
+  it("offers no Add a subtask / Add a task while filtering", async () => {
+    const { user } = await panelBoard(ROWS, ADMIN, [], [], "?q=hooks");
+    await selectRow(user, "hooks");
+    expect(within(panel()).queryByRole("button", { name: /^Add a/ })).not.toBeInTheDocument();
+  });
+
+  it("offers no Add a task on a section while filtering", async () => {
+    const { user } = await panelBoard(ROWS, ADMIN, [], [], "?q=hooks");
+    await user.dblClick(rowOf("x").querySelector('[aria-label^="Row "]')!);
+    await screen.findByRole("complementary", { name: /^Details of/ });
+    expect(within(panel()).queryByRole("button", { name: /^Add a/ })).not.toBeInTheDocument();
+  });
+
+  describe("sections and the More actions menu", () => {
+    const openSection = async (user: Awaited<ReturnType<typeof panelBoard>>["user"]) => {
+      await user.dblClick(rowOf("x").querySelector('[aria-label^="Row "]')!);
+      await screen.findByRole("complementary", { name: /^Details of/ });
+    };
+
+    it("a section has a description box that saves with setDescription", async () => {
+      const { user } = await panelBoard();
+      await openSection(user);
+      await user.type(within(panel()).getByRole("textbox", { name: "Description" }), "The first release");
+      await user.click(within(panel()).getByRole("textbox", { name: "Task title" })); // leaving saves it
+      expect(sentCommands().at(-1)).toEqual({ type: "setDescription", id: "x", description: "The first release" });
+    });
+
+    it("a section has Comments, posted against the section", async () => {
+      const { api, user } = await panelBoard();
+      const posted: unknown[] = [];
+      api.on(`POST /api/projects/${PROJECT_ID}/comments`, (body) => {
+        posted.push(body);
+        return { status: 201, body: { comment: comment("c9", { taskId: "x", body: (body as { body: string }).body, mine: true, author: { userId: ADMIN.id, label: ADMIN.name } }) } };
+      });
+      await openSection(user);
+      expect(within(panel()).getByRole("tab", { name: "Comments" })).toHaveAttribute("aria-selected", "true");
+      await user.type(within(panel()).getByRole("textbox", { name: "Write a comment" }), "kick-off monday{Control>}{Enter}{/Control}");
+      await waitFor(() => expect(posted).toEqual([{ taskId: "x", body: "kick-off monday" }]));
+      expect(await within(panel()).findByText("kick-off monday")).toBeInTheDocument();
+    });
+
+    it("has no Delete button at the bottom: it lives in the header's More actions menu", async () => {
+      const { user } = await panelBoard();
+      await selectRow(user, "hooks");
+      expect(within(panel()).queryByRole("button", { name: /^Delete (task|section)$/ })).not.toBeInTheDocument();
+      const more = within(panel()).getByRole("button", { name: "More actions" });
+      const close = within(panel()).getByRole("button", { name: "Close details (Esc)" });
+      expect(more.closest("header")).toBe(close.closest("header"));
+      await openSection(user);
+      expect(within(panel()).queryByRole("button", { name: /^Delete (task|section)$/ })).not.toBeInTheDocument();
+    });
+
+    it("More actions → Delete section deletes the section and closes the panel", async () => {
+      const { user } = await panelBoard();
+      await openSection(user);
+      await user.click(within(panel()).getByRole("button", { name: "More actions" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Delete section" }));
+      expect(sentCommands().at(-1)).toEqual({ type: "deleteRows", ids: ["x"] });
+      expect(await screen.findByText("Deleted “x” and 2 rows inside")).toBeInTheDocument();
+      await waitFor(() => expect(screen.queryByRole("complementary")).not.toBeInTheDocument());
+    });
+
+    it("More actions → Delete task deletes the task and closes the panel", async () => {
+      const { user } = await panelBoard();
+      await selectRow(user, "hooks");
+      await user.click(within(panel()).getByRole("button", { name: "More actions" }));
+      expect(screen.queryByRole("menuitem", { name: "Delete section" })).not.toBeInTheDocument();
+      await user.click(await screen.findByRole("menuitem", { name: "Delete task" }));
+      expect(sentCommands().at(-1)).toEqual({ type: "deleteRows", ids: ["hooks"] });
+      expect(await screen.findByText("Deleted “hooks”")).toBeInTheDocument();
+      await waitFor(() => expect(screen.queryByRole("complementary")).not.toBeInTheDocument());
+    });
+
+    it("viewers get no More actions menu", async () => {
+      const { user } = await panelBoard(ROWS, VIEWER);
+      await selectRow(user, "hooks");
+      expect(within(panel()).queryByRole("button", { name: "More actions" })).not.toBeInTheDocument();
+    });
   });
 
   it("is read-only for viewers, who can still comment", async () => {

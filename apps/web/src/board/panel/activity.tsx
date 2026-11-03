@@ -1,4 +1,4 @@
-import { isLinkChange, isLinkKindChange, LINK_KIND_WORDS, pairKindChanges, toDay, type Change, type LinkChange, type LinkKind, type LinkKindChange, type ProjectState, type RowId } from "@ganttlines/engine";
+import { isLinkChange, isLinkKindChange, LINK_KIND_WORDS, pairKindChanges, tagKey, toDay, type Change, type LinkChange, type LinkKind, type LinkKindChange, type ProjectState, type RowId } from "@ganttlines/engine";
 import type { ActivityEntryDto, ResourceDto } from "@ganttlines/protocol";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { errorMessage } from "../../api/client";
@@ -85,9 +85,20 @@ export function describeChange(change: Change | LinkKindChange, names: Names, ro
       return "moved it in the list";
     case "collapsed": // (older history: collapsing used to be stored)
       return null;
+    case "tags":
+      return describeTags(before, after);
     default:
       return `changed ${field}`;
   }
+}
+
+/** "tagged it UI, removed the tag Docs"; the same tags in another order: "reordered its tags". */
+function describeTags(before: unknown, after: unknown): string {
+  const list = (value: unknown) => (Array.isArray(value) ? value.filter((tag): tag is string => typeof tag === "string") : []);
+  const [was, now] = [list(before), list(after)];
+  const has = (tags: string[], tag: string) => tags.some((other) => tagKey(other) === tagKey(tag));
+  const phrases = [...now.filter((tag) => !has(was, tag)).map((tag) => `tagged it ${tag}`), ...was.filter((tag) => !has(now, tag)).map((tag) => `removed the tag ${tag}`)];
+  return phrases.join(", ") || "reordered its tags";
 }
 
 /** What an entry did to this row, e.g. "moved it in the list, renamed it to “Hooks”". */

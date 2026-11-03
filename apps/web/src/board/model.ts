@@ -21,6 +21,7 @@ import {
   type Tree,
 } from "@ganttlines/engine";
 import type { BaselineTaskDto } from "@ganttlines/protocol";
+import { filterRows, NO_FILTERS, type BoardFilters } from "./filters";
 import { outline, type ListRow } from "./rows";
 
 export type DrawKind = "task" | "milestone" | "parent" | "section";
@@ -72,6 +73,10 @@ export interface BoardModel {
   links: { link: Link; violation: boolean }[];
   /** the stored rows form a dependency cycle (the server prevents this; shown as an error) */
   cycle: boolean;
+  /** task rows: how many the filters match (all of them when not filtering), out of how many */
+  count: { matching: number; total: number };
+  /** the filters narrow the board (people and sections it doesn't know don't count) */
+  filtering: boolean;
 }
 
 /**
@@ -82,13 +87,19 @@ export function boardModel(
   state: ProjectState,
   calendar: Calendar,
   baseline: { mode: CompareMode; tasks: readonly BaselineTaskDto[] } | null,
-  /** search text: show matching rows (and their ancestors) only */
-  query = "",
+  /** show matching tasks (and their ancestors, as context) only; dates still come from the whole plan */
+  filters: BoardFilters = NO_FILTERS,
   /** rows collapsed in this browser */
   collapsed: ReadonlySet<RowId> = new Set(),
+  /** resource ids of the team, to tell known people in `filters` */
+  team?: ReadonlySet<string>,
+  /** tasks still shown as matches after they stopped matching (not counted as matches) */
+  keep?: ReadonlySet<RowId>,
 ): BoardModel {
-  const needle = query.trim().toLocaleLowerCase();
-  const { visible, numbers } = outline(state, needle ? (row) => row.title.toLocaleLowerCase().includes(needle) : undefined, collapsed);
+  const filtered = filterRows(state, filters, team);
+  const { visible, numbers } = outline(state, filters, collapsed, team, keep);
+  const total = Object.values(state.rows).filter((row) => row.kind === "task").length;
+  const count = { matching: filtered ? filtered.matches.size : total, total };
   let schedule: ReturnType<typeof computeSchedule> | null = null;
   try {
     schedule = computeSchedule(state, calendar);
@@ -137,7 +148,7 @@ export function boardModel(
       actual,
     };
   });
-  if (switched && !needle) {
+  if (switched && !filtered) {
     // Tasks the baseline had that were deleted since: shown at the end, as they were.
     for (const task of baseline.tasks) {
       if (state.rows[task.rowId]) continue;
@@ -149,6 +160,7 @@ export function boardModel(
         hasChildren: false,
         isParent: false,
         collapsed: false,
+        context: false,
         span: saved.get(task.rowId)!.span,
         kind: task.kind,
         violation: false,
@@ -166,7 +178,7 @@ export function boardModel(
   const links = Object.values(state.links)
     .filter((link) => shown.has(link.predecessorId) && shown.has(link.followerId))
     .map((link) => ({ link, violation: violated.has(linkKey(link)) }));
-  return { rows, numbers, links, cycle: schedule === null };
+  return { rows, numbers, links, cycle: schedule === null, count, filtering: filtered !== null };
 }
 
 /** A section's span in a baseline: from the earliest to the latest saved task inside it. */

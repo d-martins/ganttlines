@@ -37,6 +37,8 @@ describe("CommandSchema", () => {
       { type: "moveRow", id: A, parentId: null, afterId: B },
       { type: "deleteRows", ids: [A, B] },
       { type: "duplicateTask", id: A, newId: B },
+      { type: "setTags", id: A, tags: ["UI", "Back end"] },
+      { type: "setTags", id: A, tags: [] },
     ];
     for (const command of commands) expect(toEngineCommand(CommandSchema.parse(command))).toEqual(command);
   });
@@ -62,6 +64,9 @@ describe("CommandSchema", () => {
       { type: "updateTitle", id: A, title: "x".repeat(501) },
       { type: "deleteRows", ids: [] },
       { type: "explode", id: A },
+      { type: "setTags", id: A, tags: "UI" },
+      { type: "setTags", id: A, tags: ["x".repeat(101)] },
+      { type: "setTags", id: A, tags: Array.from({ length: 51 }, (_, i) => `t${i}`) },
     ];
     for (const value of bad) expect(CommandSchema.safeParse(value).success, JSON.stringify(value)).toBe(false);
   });
@@ -79,6 +84,12 @@ describe("CommandSchema", () => {
     expect(CommandSchema.safeParse({ type: "linkTasks", fromId: A, toId: B }).success).toBe(false);
     expect(CommandSchema.safeParse({ type: "removePredecessor", id: A }).success).toBe(false);
     expect(CommandSchema.safeParse({ type: "setOffset", id: A, offset: 1 }).success).toBe(false);
+  });
+
+  it("allows tags up to the engine's limits, trimmed", () => {
+    expect(CommandSchema.safeParse({ type: "setTags", id: A, tags: ["x".repeat(100)] }).success).toBe(true);
+    expect(CommandSchema.safeParse({ type: "setTags", id: A, tags: Array.from({ length: 50 }, (_, i) => `t${i}`) }).success).toBe(true);
+    expect(CommandSchema.parse({ type: "setTags", id: A, tags: [`  ${"y".repeat(100)}  `] })).toMatchObject({ tags: ["y".repeat(100)] });
   });
 
   it("refuses a lag of 0.25 or beyond the limit", () => {

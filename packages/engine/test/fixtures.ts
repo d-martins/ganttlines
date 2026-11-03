@@ -17,7 +17,7 @@ export function task(id: string, fields: Partial<TaskRow> = {}): TaskRow {
 }
 
 export function section(id: string, fields: Partial<SectionRow> = {}): SectionRow {
-  return { id, kind: "section", title: id, parentId: null, position: "", ...fields };
+  return { id, kind: "section", title: id, parentId: null, position: "", description: "", ...fields };
 }
 
 export function link(predecessorId: RowId, followerId: RowId, lag = 0, kind: LinkKind = "FS"): Link {

@@ -60,17 +60,40 @@ const connectRoute = createRoute({ ...needsServer,
 const setUpTwoFactorRoute = createRoute({ ...needsServer, getParentRoute: () => rootRoute, path: "/set-up-two-factor", component: SetUpTwoFactorPage });
 const appRoute = createRoute({ getParentRoute: () => rootRoute, id: "app", component: AppLayout });
 const homeRoute = createRoute({ getParentRoute: () => appRoute, path: "/", component: HomeRedirect });
-/** `?baseline=<id>&compare=switch`: only well-formed values are kept. */
-function validateBoardSearch(search: Record<string, unknown>): BoardSearch {
+/**
+ * `?baseline=<id>&compare=switch` and the filters `q`, `people`, `tags`, `sections`: only well-formed
+ * values are kept. Lists are JSON arrays in the address, so any character in a tag survives.
+ */
+export function validateBoardSearch(search: Record<string, unknown>): BoardSearch {
+  const result: BoardSearch = {};
   const baseline = typeof search["baseline"] === "string" && /^[0-9a-f-]{36}$/i.test(search["baseline"]) ? search["baseline"] : undefined;
-  if (!baseline) return {};
-  return search["compare"] === "switch" ? { baseline, compare: "switch" } : { baseline };
+  if (baseline) {
+    result.baseline = baseline;
+    if (search["compare"] === "switch") result.compare = "switch";
+  }
+  // A typed `?q=2026` (or `?tags=2026`) arrives as a number.
+  const text = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? String(value) : value);
+  const q = text(search["q"]);
+  if (typeof q === "string" && q.trim() !== "") result.q = q;
+  for (const key of ["people", "tags", "sections"] as const) {
+    const value = search[key];
+    // A single hand-typed value (`?tags=ui`) counts as a list of one.
+    const list = (Array.isArray(value) ? value : [value]).map(text).filter((entry): entry is string => typeof entry === "string" && entry !== "");
+    if (list.length > 0) result[key] = list;
+  }
+  return result;
 }
 
-/** Board URL state: the baseline being compared (`?baseline=<id>&compare=switch`, overlay by default). */
+/** Board URL state: the baseline being compared (overlay by default) and the filters. */
 export interface BoardSearch {
   baseline?: string;
   compare?: CompareMode;
+  q?: string;
+  /** resource ids; "none" = unassigned */
+  people?: string[];
+  tags?: string[];
+  /** section ids */
+  sections?: string[];
 }
 const boardRoute = createRoute({
   getParentRoute: () => appRoute,

@@ -10,6 +10,7 @@ import type { BarStyle } from "../view-store";
 import { BarMenu } from "./bar-menu";
 import { ActualTrack, BAR_HEIGHT, barDetails, DOT_GAP, DOT_REACH, DOT_SIZE, extent, GhostBar, ROW_HEIGHT, RowBar } from "./bars";
 import { dragCommand, edgeAt, linkKindOf, startAt, stepHalf, useChartDrag, type ChartDrag, type DragKind, type LinkEnd } from "./drag";
+import { TagChips, type TagFilter } from "./tag-chips";
 import type { Timeline } from "./timeline";
 import { AUTO_SCROLL_STEP, AUTO_SCROLL_TICK_MS, edgePush, HEADER_HEIGHT } from "../auto-scroll";
 
@@ -51,6 +52,8 @@ export function ChartRows({
   timeline,
   style,
   visibleLeft,
+  tagFilter,
+  filtering,
 }: {
   /** the rendered window (already showing any drag preview) */
   rows: readonly BoardRow[];
@@ -61,6 +64,10 @@ export function ChartRows({
   style: BarStyle;
   /** chart x of the first visible pixel (the list covers what's left of it) */
   visibleLeft: number;
+  /** what a click on a task's tag does: toggles it in the board's filter */
+  tagFilter: TagFilter;
+  /** the board is filtered: no rows are added from the chart */
+  filtering: boolean;
 }) {
   const board = useBoard();
   const { state, resources, resourceMap, canEdit, canCreateResources } = board;
@@ -226,7 +233,7 @@ export function ChartRows({
           <div
             key={row.id}
             data-row={absoluteIndex}
-            className={`group/row absolute right-0 left-0 ${drag?.targetId === row.id ? "bg-accent-soft/60" : ""}`}
+            className={`group/row absolute right-0 left-0 ${drag?.targetId === row.id ? "bg-accent-soft/60" : ""} ${entry.context ? "opacity-45" : ""}`}
             style={{ top: absoluteIndex * rowHeight, height: rowHeight }}
             onPointerMove={(event) => unscheduledLeaf && trackDay(event, absoluteIndex)}
             onPointerLeave={() => hover?.index === absoluteIndex && setHover(null)}
@@ -249,6 +256,7 @@ export function ChartRows({
                 resources={resourceMap}
                 titleGap={editable ? 18 : 6}
                 visibleLeft={visibleLeft}
+                tags={task && task.tags.length > 0 ? <TagChips title={row.title} tags={task.tags} filter={tagFilter} /> : null}
                 shape={
                   editable
                     ? {
@@ -333,7 +341,7 @@ export function ChartRows({
           </div>
         );
       })}
-      {canEdit ? (
+      {canEdit && !filtering ? (
         // The blank row under the last task: click a day to add a task starting there.
         <div
           className="absolute right-0 left-0 cursor-copy"

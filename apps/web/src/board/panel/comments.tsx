@@ -15,7 +15,7 @@ import { RichTextEditor, RichTextView } from "../../ui/rich-text";
 
 
 /**
- * A task's comments, newest first: a box to write one (Markdown-lite), then the list with
+ * A task's or section's comments, newest first: a box to write one (Markdown-lite), then the list with
  * edit/delete on your own (admins may delete any). Live: other people's comments arrive over the
  * WebSocket into the same cache.
  */

@@ -3,6 +3,7 @@ import type { Calendar, ResourceId } from "./calendar";
 import { diffState, type Change } from "./changes";
 import { dayOf, fromDay, halfDay, isAfternoon, toDay, type DayNum, type HalfDay, type IsoDate } from "./date";
 import { isFinishLink, LINK_KINDS, linkKey, MAX_LAG, MAX_LINKS_PER_TASK, type Link, type LinkKey, type LinkKind, type LinkRef } from "./links";
+import { normalizeTags } from "./tags";
 import { TASK_COLORS, TASK_DEFAULTS, type ProjectState, type Row, type RowId, type TaskColor, type TaskRow } from "./model";
 import {
   computeSchedule,
@@ -29,6 +30,7 @@ export type Command =
   | { type: "createRow"; id: RowId; kind: "task" | "section"; parentId: RowId | null; afterId: RowId | null; title: string; start?: IsoDate }
   | { type: "updateTitle"; id: RowId; title: string }
   | { type: "setDescription"; id: RowId; description: string }
+  | { type: "setTags"; id: RowId; tags: string[] }
   | { type: "setColor"; id: RowId; color: TaskColor }
   | { type: "setAssignee"; id: RowId; resourceId: ResourceId | null }
   /** `half`: the half of `start` the task starts in (default the morning). */
@@ -122,7 +124,9 @@ class Execution {
       case "updateTitle":
         return this.patch(this.row(command.id), { title: command.title });
       case "setDescription":
-        return this.patch(this.task(command.id), { description: command.description });
+        return this.patch(this.row(command.id), { description: command.description });
+      case "setTags":
+        return this.patch(this.task(command.id, "Sections have no tags"), { tags: normalizeTags(command.tags) });
       case "setColor":
         if (!TASK_COLORS.includes(command.color)) throw new Rejection("invalid", `Unknown color ${command.color}`);
         return this.patch(this.task(command.id), { color: command.color });
@@ -171,7 +175,7 @@ class Execution {
     const base = { id: command.id, title: command.title, parentId: command.parentId, position };
     if (command.kind === "section") {
       if (command.start !== undefined) throw new Rejection("invalid", "Sections have no dates");
-      this.rows[command.id] = { ...base, kind: "section" };
+      this.rows[command.id] = { ...base, kind: "section", description: "" };
     } else {
       const userStart = command.start === undefined ? null : fromDay(this.calendar.snap(this.day(command.start), null));
       this.rows[command.id] = { ...TASK_DEFAULTS, ...base, kind: "task", userStart };
@@ -619,9 +623,9 @@ class Execution {
     return row;
   }
 
-  private task(id: RowId): TaskRow {
+  private task(id: RowId, refusal = "Only tasks support this"): TaskRow {
     const row = this.row(id);
-    if (row.kind !== "task") throw new Rejection("invalid", "Only tasks support this");
+    if (row.kind !== "task") throw new Rejection("invalid", refusal);
     return row;
   }
 

@@ -335,6 +335,81 @@ describe("project commands", () => {
   });
 });
 
+describe("tags", () => {
+  it("stores tags, spelled as the workspace first spelled them", async () => {
+    const { editor, projectId } = await editorWithProject();
+    const other = (await t.app.inject({ method: "POST", url: "/api/projects", headers: { cookie: editor }, payload: { name: "Other" } })).json().project.id as string;
+    const first = randomUUID();
+    await send(editor, other, createTask(first, "Elsewhere"));
+    expect((await send(editor, other, { type: "setTags", id: first, tags: ["UI", "Back end"] })).statusCode).toBe(200);
+
+    const id = randomUUID();
+    await send(editor, projectId, createTask(id));
+    const response = await send(editor, projectId, { type: "setTags", id, tags: ["ui", " new ", "back END"] });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().changes).toEqual([expect.objectContaining({ rowId: id, field: "tags", after: ["UI", "new", "Back end"] })]);
+    const row = (await reload(editor, projectId)).rows.find((r: { id: string }) => r.id === id);
+    expect(row.tags).toEqual(["UI", "new", "Back end"]);
+  });
+
+  it("matches spellings only within the board for share-link editors, so other projects' tags stay hidden", async () => {
+    const { admin, editor, projectId } = await editorWithProject();
+    const secret = (await t.app.inject({ method: "POST", url: "/api/projects", headers: { cookie: editor }, payload: { name: "Secret" } })).json().project.id as string;
+    const hidden = randomUUID();
+    await send(editor, secret, createTask(hidden));
+    await send(editor, secret, { type: "setTags", id: hidden, tags: ["Secret Launch"] });
+    const id = randomUUID();
+    await send(editor, projectId, createTask(id));
+    await send(editor, projectId, { type: "setTags", id, tags: ["Board tag"] });
+    const tagsOf = async () => (await reload(editor, projectId)).rows.find((r: { id: string }) => r.id === id).tags;
+    const viaLink = (headers: Record<string, string>, tags: string[]) =>
+      t.app.inject({ method: "POST", url: `/api/projects/${projectId}/commands`, headers, payload: { commandId: randomUUID(), command: { type: "setTags", id, tags } } });
+
+    // An anonymous visitor on a collaborative link.
+    const anonymous = (await t.app.inject({ method: "POST", url: `/api/projects/${projectId}/share-links`, headers: { cookie: admin }, payload: { access: "anonymous", collaboration: true } })).json().token as string;
+    const visit = await t.app.inject({ method: "POST", url: `/api/share/${anonymous}/visitor`, payload: { name: "Rudy" } });
+    const visitor = { "x-share-token": anonymous, cookie: `gp_visitor=${visit.cookies.find((c) => c.name === "gp_visitor")!.value}` };
+    expect((await viaLink(visitor, ["secret launch", "board TAG"])).statusCode).toBe(200);
+    expect(await tagsOf()).toEqual(["secret launch", "Board tag"]);
+
+    // Signed-in guests and viewers who edit through a collaborative link: the board's own spelling, never the other project's.
+    const signedIn = (await t.app.inject({ method: "POST", url: `/api/projects/${projectId}/share-links`, headers: { cookie: admin }, payload: { access: "authenticated", collaboration: true } })).json().token as string;
+    for (const role of ["guest", "viewer"] as const) {
+      const user = await createUser(t.app, admin, { email: `${role}@example.com`, name: role, role });
+      expect((await viaLink({ "x-share-token": signedIn, cookie: user.cookie }, ["SECRET launch", role])).statusCode, role).toBe(200);
+      expect(await tagsOf(), role).toEqual(["secret launch", role]);
+    }
+
+    // An editor sees the whole workspace anyway (once this board no longer spells it its own way).
+    await send(editor, projectId, { type: "setTags", id, tags: [] });
+    await send(editor, projectId, { type: "setTags", id, tags: ["secret launch"] });
+    expect(await tagsOf()).toEqual(["Secret Launch"]);
+  });
+
+  it("refuses tags on sections, and keeps a section's description", async () => {
+    const { editor, projectId } = await editorWithProject();
+    const id = randomUUID();
+    await send(editor, projectId, { ...createTask(id, "Phase"), kind: "section" });
+    expect((await send(editor, projectId, { type: "setTags", id, tags: ["UI"] })).json()).toMatchObject({ message: "Sections have no tags" });
+    expect((await send(editor, projectId, { type: "setDescription", id, description: "What this phase is for" })).statusCode).toBe(200);
+    const row = (await reload(editor, projectId)).rows.find((r: { id: string }) => r.id === id);
+    expect(row).toMatchObject({ kind: "section", description: "What this phase is for" });
+    expect(row.tags).toBeUndefined();
+  });
+
+  it("answers a retried setTags with its first outcome", async () => {
+    const { editor, projectId } = await editorWithProject();
+    const id = randomUUID();
+    await send(editor, projectId, createTask(id));
+    await send(editor, projectId, { type: "setTags", id, tags: ["UI"] });
+    const commandId = randomUUID();
+    const first = await send(editor, projectId, { type: "setTags", id, tags: ["ui", "x"] }, commandId);
+    const again = await send(editor, projectId, { type: "setTags", id, tags: ["ui", "x"] }, commandId);
+    expect(again.statusCode).toBe(200);
+    expect(again.json()).toEqual(first.json());
+  });
+});
+
 describe("robustness", () => {
   it("recovers when the database moved on without the server (stale cache)", async () => {
     const { editor, projectId } = await editorWithProject();
