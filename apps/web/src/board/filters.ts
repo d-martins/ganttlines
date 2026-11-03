@@ -14,24 +14,43 @@ export interface BoardFilters {
 
 export const NO_FILTERS: BoardFilters = { q: "", people: [], tags: [], sections: [] };
 
+/** Whether these filters narrow anything; for what a board really filters by, pass them through knownFilters. */
 export function isFiltering(f: BoardFilters): boolean {
-  return f.q.trim() !== "" || f.people.length > 0 || f.tags.length > 0 || f.sections.length > 0;
+  return f.q.trim() !== "" || f.people.length > 0 || f.tags.some((tag) => tagKey(tag) !== "") || f.sections.length > 0;
 }
 
 /**
- * Rows that match, plus the ancestors shown as context; null when not filtering. Only tasks match.
- * People and sections this board doesn't know are ignored (people are known from `team` when given,
- * else from this board's tasks), so a link naming them never empties the board.
+ * The filters with the people and sections this board doesn't know left out (people are known from
+ * `team` when given, else from this board's tasks), so a link naming them never empties the board.
+ * Tags are text: one nobody here uses still filters (to nothing), so it never drops out.
  */
-export function filterRows(state: ProjectState, f: BoardFilters, team?: ReadonlySet<string>): { matches: Set<RowId>; context: Set<RowId> } | null {
+export function knownFilters(state: ProjectState, f: BoardFilters, team?: ReadonlySet<string>): BoardFilters {
+  const knownPeople = team ?? new Set(Object.values(state.rows).flatMap((row) => (row.kind === "task" && row.resourceId !== null ? [row.resourceId] : [])));
+  return {
+    q: f.q,
+    people: f.people.filter((id) => id === "none" || knownPeople.has(id)),
+    tags: f.tags,
+    sections: f.sections.filter((id) => state.rows[id]?.kind === "section"),
+  };
+}
+
+/**
+ * Rows that match, plus the ancestors shown as context; null when not filtering (see knownFilters).
+ * Only tasks match. Tasks in `keep` count as matches too (rows kept on screen after they stopped).
+ */
+export function filterRows(
+  state: ProjectState,
+  f: BoardFilters,
+  team?: ReadonlySet<string>,
+  keep?: ReadonlySet<RowId>,
+): { matches: Set<RowId>; context: Set<RowId> } | null {
   const rows = Object.values(state.rows);
   const tasks = rows.filter((row) => row.kind === "task");
-  const needle = f.q.trim().toLocaleLowerCase();
-  const knownPeople = team ?? new Set(tasks.flatMap((row) => (row.resourceId === null ? [] : [row.resourceId])));
-  const people = new Set(f.people.filter((id) => id === "none" || knownPeople.has(id)));
-  // Tags are text: one nobody here uses still filters (to nothing), so it never drops out.
-  const tags = new Set(f.tags.map(tagKey).filter((key) => key !== ""));
-  const sections = new Set(f.sections.filter((id) => state.rows[id]?.kind === "section"));
+  const known = knownFilters(state, f, team);
+  const needle = known.q.trim().toLocaleLowerCase();
+  const people = new Set(known.people);
+  const tags = new Set(known.tags.map(tagKey).filter((key) => key !== ""));
+  const sections = new Set(known.sections);
   if (!needle && people.size === 0 && tags.size === 0 && sections.size === 0) return null;
 
   const limit = rows.length;
@@ -53,6 +72,7 @@ export function filterRows(state: ProjectState, f: BoardFilters, team?: Readonly
     if (sections.size > 0 && !ancestors(row).some((above) => sections.has(above.id))) continue;
     matches.add(row.id);
   }
+  for (const id of keep ?? []) if (state.rows[id]?.kind === "task") matches.add(id);
   const context = new Set<RowId>();
   for (const id of matches) {
     for (const above of ancestors(state.rows[id]!)) if (!matches.has(above.id)) context.add(above.id);
@@ -72,4 +92,10 @@ export function searchFromFilters(f: BoardFilters): Pick<BoardSearch, "q" | "peo
     ...(f.tags.length > 0 ? { tags: f.tags } : {}),
     ...(f.sections.length > 0 ? { sections: f.sections } : {}),
   };
+}
+
+/** `search` with its filters replaced by `f` (the baseline and the rest are kept). */
+export function withFilters(search: BoardSearch, f: BoardFilters): BoardSearch {
+  const { q: _q, people: _people, tags: _tags, sections: _sections, ...rest } = search;
+  return { ...rest, ...searchFromFilters(f) };
 }

@@ -75,6 +75,8 @@ export interface BoardModel {
   cycle: boolean;
   /** task rows: how many the filters match (all of them when not filtering), out of how many */
   count: { matching: number; total: number };
+  /** the filters narrow the board (people and sections it doesn't know don't count) */
+  filtering: boolean;
 }
 
 /**
@@ -91,9 +93,11 @@ export function boardModel(
   collapsed: ReadonlySet<RowId> = new Set(),
   /** resource ids of the team, to tell known people in `filters` */
   team?: ReadonlySet<string>,
+  /** tasks still shown as matches after they stopped matching (not counted as matches) */
+  keep?: ReadonlySet<RowId>,
 ): BoardModel {
   const filtered = filterRows(state, filters, team);
-  const { visible, numbers } = outline(state, filters, collapsed, team);
+  const { visible, numbers } = outline(state, filters, collapsed, team, keep);
   const total = Object.values(state.rows).filter((row) => row.kind === "task").length;
   const count = { matching: filtered ? filtered.matches.size : total, total };
   let schedule: ReturnType<typeof computeSchedule> | null = null;
@@ -174,7 +178,7 @@ export function boardModel(
   const links = Object.values(state.links)
     .filter((link) => shown.has(link.predecessorId) && shown.has(link.followerId))
     .map((link) => ({ link, violation: violated.has(linkKey(link)) }));
-  return { rows, numbers, links, cycle: schedule === null, count };
+  return { rows, numbers, links, cycle: schedule === null, count, filtering: filtered !== null };
 }
 
 /** A section's span in a baseline: from the earliest to the latest saved task inside it. */

@@ -1,7 +1,7 @@
 import { Calendar, type ProjectState } from "@ganttlines/engine";
 import { defaultParseSearch, defaultStringifySearch } from "@tanstack/react-router";
 import { describe, expect, it } from "vitest";
-import { filterRows, filtersFromSearch, isFiltering, NO_FILTERS, searchFromFilters, type BoardFilters } from "../src/board/filters";
+import { filterRows, filtersFromSearch, isFiltering, knownFilters, NO_FILTERS, searchFromFilters, type BoardFilters } from "../src/board/filters";
 import { boardModel } from "../src/board/model";
 import { outline } from "../src/board/rows";
 import { validateBoardSearch } from "../src/router";
@@ -136,6 +136,36 @@ describe("outline and model while filtering", () => {
     ]);
   });
 
+  it("reports no row collapsed while filtering (their children show)", () => {
+    const { visible } = outline(state, f({ tags: ["ui"] }), new Set(["s", "p"]));
+    expect(visible.every((entry) => !entry.collapsed)).toBe(true);
+    expect(outline(state, NO_FILTERS, new Set(["s"])).visible[0]!.collapsed).toBe(true);
+  });
+
+  it("the model says whether it really filters: unknown people and sections don't", () => {
+    const calendar = new Calendar(CALENDAR);
+    expect(boardModel(state, calendar, null, f({ people: ["ghost"], sections: ["gone"] })).filtering).toBe(false);
+    expect(boardModel(state, calendar, null, f({ people: ["ghost"] }), new Set(), new Set(["ghost"])).filtering).toBe(true);
+    expect(boardModel(state, calendar, null, f({ tags: ["nope"] })).filtering).toBe(true);
+    expect(boardModel(state, calendar, null).filtering).toBe(false);
+  });
+
+  it("knownFilters keeps only what filters here", () => {
+    expect(knownFilters(state, f({ q: " ", people: ["ghost", "ana", "none"], sections: ["gone", "n", "p"], tags: ["x"] }))).toEqual(f({ q: " ", people: ["ana", "none"], sections: ["n"], tags: ["x"] }));
+  });
+
+  it("shows kept rows as matches, with their context, without counting them", () => {
+    const calendar = new Calendar(CALENDAR);
+    const model = boardModel(state, calendar, null, f({ q: "top" }), new Set(), undefined, new Set(["c2"]));
+    expect(model.rows.map((entry) => [entry.row.id, entry.context])).toEqual([
+      ["s", true],
+      ["p", true],
+      ["c2", false],
+      ["t", false],
+    ]);
+    expect(model.count).toEqual({ matching: 1, total: 5 });
+  });
+
   it("rows aren't context when not filtering", () => {
     const { visible } = outline(state);
     expect(visible.every((entry) => !entry.context)).toBe(true);
@@ -182,13 +212,18 @@ describe("filters in the address", () => {
     expect(roundTrip(f({ q: "2026" })).filters.q).toBe("2026");
   });
 
+  it("keeps numeric-looking list entries as strings", () => {
+    expect(validateBoardSearch(defaultParseSearch("?tags=2026&people=7&sections=3"))).toEqual({ tags: ["2026"], people: ["7"], sections: ["3"] });
+    expect(roundTrip(f({ tags: ["2026", "42"] })).filters.tags).toEqual(["2026", "42"]);
+  });
+
   it("leaves empty filters out of the address", () => {
     expect(searchFromFilters(NO_FILTERS)).toEqual({});
     expect(defaultStringifySearch(searchFromFilters(f({ q: "  " })))).toBe("");
   });
 
   it("drops entries that aren't strings and keeps the baseline rules", () => {
-    expect(validateBoardSearch({ people: ["ana", 3, null], tags: "ui", sections: { a: 1 }, q: 7 })).toEqual({ people: ["ana"], tags: ["ui"], q: "7" });
+    expect(validateBoardSearch({ people: ["ana", 3, null, Infinity], tags: "ui", sections: { a: 1 }, q: 7 })).toEqual({ people: ["ana", "3"], tags: ["ui"], q: "7" });
     expect(validateBoardSearch({ baseline: "nope", compare: "switch" })).toEqual({});
     expect(validateBoardSearch({ baseline: "22222222-2222-4222-8222-222222222222", compare: "switch" })).toEqual({
       baseline: "22222222-2222-4222-8222-222222222222",

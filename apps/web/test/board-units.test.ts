@@ -1,6 +1,7 @@
 import { Calendar, linkKey, toDay, weekday, type Change, type Link } from "@ganttlines/engine";
 import type { ActivityEntryDto } from "@ganttlines/protocol";
-import { describe, expect, it } from "vitest";
+import { act } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { elbow } from "../src/board/chart/dependencies";
 import { lineOf, linkOf, type LinkLine } from "../src/board/link-phrases";
 import { describeChange, describeEntry } from "../src/board/panel/activity";
@@ -299,5 +300,55 @@ describe("drag auto-scroll", () => {
     expect(edgePush(1000, 100, 900)).toBe(1); // past the edge: full speed forward
     expect(edgePush(120, 100, 900)).toBe(-0.5);
     expect(edgePush(0, 100, 900)).toBe(-1);
+  });
+});
+
+describe("lingering rows", () => {
+  const ids = (...list: string[]) => new Set(list);
+  const linger = async (initial: { matches: Set<string>; focused: string | null }) => {
+    const { renderHook } = await import("@testing-library/react");
+    const { useLinger } = await import("../src/board/linger");
+    return renderHook(({ matches, focused }) => useLinger(matches, focused), { initialProps: initial });
+  };
+  afterEach(() => vi.useRealTimers());
+
+  it("keeps a focused row that stops matching, until 5 s after focus leaves", async () => {
+    vi.useFakeTimers();
+    const hook = await linger({ matches: ids("a", "b"), focused: "a" });
+    hook.rerender({ matches: ids("b"), focused: "a" });
+    expect([...hook.result.current].sort()).toEqual(["a", "b"]);
+    act(() => vi.advanceTimersByTime(60_000)); // still focused: still kept
+    expect(hook.result.current.has("a")).toBe(true);
+    hook.rerender({ matches: ids("b"), focused: "b" });
+    act(() => vi.advanceTimersByTime(4_900));
+    expect(hook.result.current.has("a")).toBe(true);
+    act(() => vi.advanceTimersByTime(200));
+    expect([...hook.result.current]).toEqual(["b"]);
+  });
+
+  it("a row that matches again stays, and isn't removed later", async () => {
+    vi.useFakeTimers();
+    const hook = await linger({ matches: ids("a"), focused: "a" });
+    hook.rerender({ matches: ids(), focused: "a" });
+    hook.rerender({ matches: ids(), focused: null });
+    act(() => vi.advanceTimersByTime(2_000));
+    hook.rerender({ matches: ids("a"), focused: null });
+    act(() => vi.advanceTimersByTime(10_000));
+    hook.rerender({ matches: ids("a"), focused: null });
+    expect([...hook.result.current]).toEqual(["a"]);
+  });
+
+  it("a changed filter doesn't keep the focused row", async () => {
+    const { renderHook } = await import("@testing-library/react");
+    const { useLinger } = await import("../src/board/linger");
+    const hook = renderHook(({ matches, scope }) => useLinger(matches, "a", 5000, scope), { initialProps: { matches: ids("a", "b"), scope: "q=x" } });
+    hook.rerender({ matches: ids("b"), scope: "q=y" });
+    expect([...hook.result.current]).toEqual(["b"]);
+  });
+
+  it("a row that stops matching without focus leaves straight away", async () => {
+    const hook = await linger({ matches: ids("a", "b"), focused: "b" });
+    hook.rerender({ matches: ids("b"), focused: "b" });
+    expect([...hook.result.current]).toEqual(["b"]);
   });
 });

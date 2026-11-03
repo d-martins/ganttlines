@@ -226,7 +226,7 @@ export function ChartRows({
           <div
             key={row.id}
             data-row={absoluteIndex}
-            className={`group/row absolute right-0 left-0 ${drag?.targetId === row.id ? "bg-accent-soft/60" : ""}`}
+            className={`group/row absolute right-0 left-0 ${drag?.targetId === row.id ? "bg-accent-soft/60" : ""} ${entry.context ? "opacity-45" : ""}`}
             style={{ top: absoluteIndex * rowHeight, height: rowHeight }}
             onPointerMove={(event) => unscheduledLeaf && trackDay(event, absoluteIndex)}
             onPointerLeave={() => hover?.index === absoluteIndex && setHover(null)}

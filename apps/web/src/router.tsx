@@ -71,13 +71,14 @@ export function validateBoardSearch(search: Record<string, unknown>): BoardSearc
     result.baseline = baseline;
     if (search["compare"] === "switch") result.compare = "switch";
   }
-  // A typed `?q=2026` arrives as a number.
-  const q = typeof search["q"] === "number" && Number.isFinite(search["q"]) ? String(search["q"]) : search["q"];
+  // A typed `?q=2026` (or `?tags=2026`) arrives as a number.
+  const text = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? String(value) : value);
+  const q = text(search["q"]);
   if (typeof q === "string" && q.trim() !== "") result.q = q;
   for (const key of ["people", "tags", "sections"] as const) {
     const value = search[key];
     // A single hand-typed value (`?tags=ui`) counts as a list of one.
-    const list = (Array.isArray(value) ? value : [value]).filter((entry): entry is string => typeof entry === "string" && entry !== "");
+    const list = (Array.isArray(value) ? value : [value]).map(text).filter((entry): entry is string => typeof entry === "string" && entry !== "");
     if (list.length > 0) result[key] = list;
   }
   return result;

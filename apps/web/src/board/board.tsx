@@ -1,6 +1,8 @@
 import { applyCommand, toDay, weekday, type Calendar, type DayNum, type ProjectState } from "@ganttlines/engine";
 import type { BaselineTaskDto, CalendarDto, HighlightDto, ResourceDto } from "@ganttlines/protocol";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useNavigate, useSearch } from "@tanstack/react-router";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import type { BoardSearch } from "../router";
 import { ROW_HEIGHT } from "./chart/bars";
 import { ChartRows } from "./chart/chart-rows";
 import { DayMenu } from "./chart/day-menu";
@@ -12,7 +14,9 @@ import { chartRange, scaleOf, Timeline, zoomStep } from "./chart/timeline";
 import { today } from "./format";
 import { useBoard } from "./board-context";
 import { useCollapse, useCollapsed } from "./collapse";
-import { filtersFromSearch } from "./filters";
+import { FilterBar } from "./filter-bar";
+import { filterRows, filtersFromSearch, knownFilters, searchFromFilters, withFilters, type BoardFilters } from "./filters";
+import { useLinger } from "./linger";
 import { ListColumnHeaders, ListHeader, ListRows, useListKeys } from "./list/task-list";
 import { useSelection } from "./selection";
 import { boardModel, type CompareMode } from "./model";
@@ -44,6 +48,9 @@ const OVERSCAN_ROWS = 10;
 const OVERSCAN_PX = 600;
 /** Where "today" (and the day kept in place when zooming) sits: a third into the chart. */
 const ANCHOR = 1 / 3;
+/** how long a row that stopped matching stays after it is no longer selected */
+const LINGER_MS = 5000;
+const NO_ROWS: ReadonlySet<string> = new Set();
 
 interface Viewport {
   top: number;
@@ -81,7 +88,6 @@ export function Board({
   baseline: { mode: CompareMode; tasks: readonly BaselineTaskDto[] } | null;
 }) {
   const { dayWidth, barStyle, showWeekends, listWidth, todayRequest, setListWidth } = useBoardView();
-  const [query, setQuery] = useState("");
   const { canEdit, canEditCalendar, sync } = useBoard();
   const collapsed = useCollapsed(sync.projectId);
   // Collapsed rows deleted since are forgotten (once the board has rows to compare with).
@@ -95,11 +101,28 @@ export function Board({
     const result = applyCommand(state, calendar, dragCommand);
     return result.ok ? result.state : state;
   }, [state, calendar, dragCommand]);
-  const filters = useMemo(() => filtersFromSearch({ q: query }), [query]);
-  const model = useMemo(() => boardModel(displayed, calendar, baseline, filters, collapsed), [displayed, calendar, baseline, filters, collapsed]);
+  // The filters live in the address (shared links open filtered the same way).
+  const search = useSearch({ strict: false }) as BoardSearch;
+  const navigate = useNavigate();
+  const filterKey = JSON.stringify(searchFromFilters(filtersFromSearch(search)));
+  const filters = useMemo(() => filtersFromSearch(JSON.parse(filterKey) as BoardSearch), [filterKey]);
+  const updateFilters = useCallback(
+    (change: (current: BoardFilters) => BoardFilters) =>
+      void navigate({ to: ".", search: (previous: BoardSearch) => withFilters(previous, change(filtersFromSearch(previous))), replace: true }),
+    [navigate],
+  );
+  const team = useMemo(() => new Set(resources.map((resource) => resource.id)), [resources]);
   const { selectedId, select, centerRequest } = useSelection();
+  // A row an edit takes out of the filter stays while it is selected, and a little after.
+  const matches = useMemo(() => filterRows(displayed, filters, team)?.matches ?? NO_ROWS, [displayed, filters, team]);
+  const shownMatches = useLinger(matches, selectedId, LINGER_MS, filterKey);
+  const model = useMemo(
+    () => boardModel(displayed, calendar, baseline, filters, collapsed, team, shownMatches),
+    [displayed, calendar, baseline, filters, collapsed, team, shownMatches],
+  );
+  const known = useMemo(() => knownFilters(state, filters, team), [state, filters, team]);
   const DetailsPanel = useDetailsPanel();
-  const onListKey = useListKeys(model.rows);
+  const onListKey = useListKeys(model.rows, model.filtering);
   const todayDay = today();
   const highlightDays = useMemo(() => highlights.map((highlight) => ({ day: toDay(highlight.date), highlight })), [highlights]);
   // Holiday names by day, for the date header (people-specific ones say so).
@@ -275,6 +298,7 @@ export function Board({
 
   return (
     <div className="relative flex h-full flex-col overflow-hidden">
+      <FilterBar state={state} resources={resources} filters={filters} known={known} filtering={model.filtering} count={model.count} onUpdate={updateFilters} />
       {model.cycle ? (
         <p role="alert" className="border-b border-border bg-surface px-4 py-2 text-sm text-danger">
           These tasks' dependencies form a loop, so their dates can't be worked out.
@@ -284,7 +308,7 @@ export function Board({
         <div style={{ width: listWidth + timeline.width }}>
           <div className="sticky top-0 z-20 flex" style={{ height: HEADER_HEIGHT }}>
             <div className="sticky left-0 z-10 shrink-0 overflow-hidden border-r border-[var(--list-edge)] bg-surface shadow-[var(--list-shadow)]" style={{ width: listWidth }}>
-              <ListHeader query={query} onQuery={setQuery} />
+              <ListHeader filtering={model.filtering} />
               {divider}
             </div>
             <ChartHeader timeline={timeline} zoom={scaleOf(dayWidth)} stickyLeft={listWidth} days={days} highlights={highlightDays} holidays={holidayNames} todayDay={todayDay} />
@@ -314,7 +338,7 @@ export function Board({
               style={{ width: listWidth, height: bodyHeight, ...listGrid }}
             >
               <ListColumnHeaders />
-              <ListRows rows={shown} allRows={model.rows} firstRow={firstRow} rowHeight={rowHeight} numbers={model.numbers} searching={query.trim() !== ""} />
+              <ListRows rows={shown} allRows={model.rows} firstRow={firstRow} rowHeight={rowHeight} numbers={model.numbers} filtering={model.filtering} />
               {divider}
             </div>
             <DayMenu

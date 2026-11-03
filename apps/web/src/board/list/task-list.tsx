@@ -1,5 +1,5 @@
 import type { Calendar, RowId } from "@ganttlines/engine";
-import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, GripVertical, LocateFixed, IndentDecrease, IndentIncrease, MessageSquare, PanelRightOpen, Plus, Search, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, GripVertical, LocateFixed, IndentDecrease, IndentIncrease, MessageSquare, PanelRightOpen, Plus, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState, type HTMLAttributes, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type Ref } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { commentCounts } from "../../api/queries";
@@ -23,7 +23,8 @@ import { useCapabilities } from "../../workspace";
 const COLUMNS = "grid grid-cols-[40px_minmax(96px,1fr)_120px_40px_40px_76px] items-center";
 const INDENT = 16;
 
-export function ListHeader({ query, onQuery }: { query: string; onQuery: (query: string) => void }) {
+/** Outline tools and the column headings; reordering and collapsing are off while filtering. */
+export function ListHeader({ filtering }: { filtering: boolean }) {
   const { canEdit, sync, state } = useBoard();
   const run = useRun();
   const selectedId = useSelection((selection) => selection.selectedId);
@@ -36,32 +37,21 @@ export function ListHeader({ query, onQuery }: { query: string; onQuery: (query:
   return (
     <div className="flex h-full flex-col border-b border-border">
       <div className="flex h-6 items-center gap-1 px-1">
-        <label className="flex min-w-0 flex-1 items-center gap-1 rounded px-1 text-xs text-muted focus-within:bg-bg">
-          <Search aria-hidden size={12} className="shrink-0" />
-          <input
-            type="search"
-            aria-label="Search tasks"
-            placeholder="Search tasks"
-            value={query}
-            onChange={(event) => onQuery(event.target.value)}
-            onKeyDown={(event) => event.key === "Escape" && onQuery("")}
-            className="min-w-0 flex-1 bg-transparent py-0.5 text-text outline-none placeholder:text-muted"
-          />
-        </label>
+        <span className="flex-1" />
         {canEdit ? (
           <>
-            <IconButton label="Outdent (Alt+Shift+←)" className="h-5 w-5" disabled={!selectedId} onClick={() => selectedId && run({ type: "outdent", id: selectedId })}>
+            <IconButton label="Outdent (Alt+Shift+←)" className="h-5 w-5" disabled={!selectedId || filtering} onClick={() => selectedId && run({ type: "outdent", id: selectedId })}>
               <IndentDecrease size={13} />
             </IconButton>
-            <IconButton label="Indent (Alt+Shift+→)" className="h-5 w-5" disabled={!selectedId} onClick={() => selectedId && run({ type: "indent", id: selectedId })}>
+            <IconButton label="Indent (Alt+Shift+→)" className="h-5 w-5" disabled={!selectedId || filtering} onClick={() => selectedId && run({ type: "indent", id: selectedId })}>
               <IndentIncrease size={13} />
             </IconButton>
           </>
         ) : null}
-        <IconButton label="Expand all" className="h-5 w-5" onClick={() => setAll(false)}>
+        <IconButton label="Expand all" className="h-5 w-5 disabled:opacity-40" disabled={filtering} onClick={() => setAll(false)}>
           <ChevronsUpDown size={13} />
         </IconButton>
-        <IconButton label="Collapse all" className="h-5 w-5" onClick={() => setAll(true)}>
+        <IconButton label="Collapse all" className="h-5 w-5 disabled:opacity-40" disabled={filtering} onClick={() => setAll(true)}>
           <ChevronsDownUp size={13} />
         </IconButton>
       </div>
@@ -193,7 +183,7 @@ export function ListRows({
   firstRow,
   rowHeight,
   numbers,
-  searching,
+  filtering,
 }: {
   /** the rendered window */
   rows: readonly BoardRow[];
@@ -202,7 +192,8 @@ export function ListRows({
   firstRow: number;
   rowHeight: number;
   numbers: ReadonlyMap<RowId, number>;
-  searching: boolean;
+  /** the board is filtered: no reordering, indenting, adding rows or collapsing (hidden neighbours) */
+  filtering: boolean;
 }) {
   const board = useBoard();
   const capabilities = useCapabilities();
@@ -228,7 +219,7 @@ export function ListRows({
   };
 
   const startDrag = (event: ReactPointerEvent, id: RowId) => {
-    if (!canEdit || searching) return;
+    if (!canEdit || filtering) return;
     event.preventDefault();
     const grid = (event.currentTarget as HTMLElement).closest('[role="treegrid"]') as HTMLElement;
     const scroller = grid.closest('[data-testid="board-scroller"]') as HTMLElement | null;
@@ -296,11 +287,11 @@ export function ListRows({
               center(row.id);
               select(row.id, true);
             }}
-            className={`group ${COLUMNS} absolute right-0 left-0 px-1 text-sm ${selected ? "bg-accent-soft" : "hover:bg-surface-2"} ${drag?.id === row.id ? "opacity-50" : ""}`}
+            className={`group ${COLUMNS} absolute right-0 left-0 px-1 text-sm ${selected ? "bg-accent-soft" : "hover:bg-surface-2"} ${drag?.id === row.id ? "opacity-50" : entry.context ? "opacity-45" : ""}`}
             style={{ top: (firstRow + index) * rowHeight, height: rowHeight }}
           >
             <span role="gridcell" aria-label={`Row ${entry.number}`} className="relative pr-2 text-right text-xs text-muted tabular-nums">
-              {canEdit && !searching ? (
+              {canEdit && !filtering ? (
                 <button
                   type="button"
                   aria-label={`Move “${row.title || "Untitled"}”`}
@@ -318,14 +309,14 @@ export function ListRows({
                 <button
                   type="button"
                   aria-label={entry.collapsed ? "Expand" : "Collapse"}
-                  disabled={searching}
+                  disabled={filtering}
                   onClick={(event) => {
                     event.stopPropagation();
                     setCollapsed(board.sync.projectId, [row.id], !entry.collapsed);
                   }}
                   className="shrink-0 rounded text-muted hover:text-text disabled:cursor-default disabled:hover:text-muted"
                 >
-                  {entry.collapsed && !searching ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                  {entry.collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
                 </button>
               ) : (
                 <span className="w-3.5 shrink-0" />
@@ -358,10 +349,10 @@ export function ListRows({
                         return true;
                       }
                       commitTitle(row, value);
-                      if (!addRowBelow(board, state, row, entry.collapsed)) edit(null);
+                      if (filtering || !addRowBelow(board, state, row, entry.collapsed)) edit(null);
                       return true;
                     }
-                    if (event.altKey && event.shiftKey && (event.key === "ArrowRight" || event.key === "ArrowLeft")) {
+                    if (!filtering && event.altKey && event.shiftKey && (event.key === "ArrowRight" || event.key === "ArrowLeft")) {
                       // Alt+Shift+→ / ←: keep the title and indent / outdent, still typing.
                       event.preventDefault();
                       commitTitle(row, value);
@@ -403,7 +394,7 @@ export function ListRows({
                     </span>
                   ) : null}
                   <span className="ml-auto flex shrink-0">
-                    {canEdit ? (
+                    {canEdit && !filtering ? (
                       <button
                         type="button"
                         aria-label={`Add a subtask to “${row.title || "Untitled"}”`}
@@ -517,7 +508,7 @@ export function ListRows({
         );
       })}
       {drag?.target && dropTarget ? <DropIndicator target={drag.target} depth={dropTarget.depth} rowHeight={rowHeight} valid={dropValid} /> : null}
-      {canEdit && !searching ? (
+      {canEdit && !filtering ? (
         <div className="absolute left-0 flex gap-1 px-2 text-xs" style={{ top: allRows.length * rowHeight + 4 }}>
           <button type="button" className="flex items-center gap-1 rounded px-2 py-1 text-muted hover:bg-surface-2 hover:text-text" onClick={() => addAtEnd(board, state, "task")}>
             <Plus size={13} /> Add task
@@ -647,9 +638,9 @@ function DropIndicator({ target, depth, rowHeight, valid }: { target: NonNullabl
 
 /**
  * Keys on the task list (when not typing): ↑/↓ select (an open details panel follows), Enter/F2 edit the title, Delete removes,
- * Alt+Shift+→ / ← indent / outdent, Escape clears the selection. Tab is never taken: it moves focus.
+ * Alt+Shift+→ / ← indent / outdent (not while filtering), Escape clears the selection. Tab is never taken: it moves focus.
  */
-export function useListKeys(allRows: readonly BoardRow[]) {
+export function useListKeys(allRows: readonly BoardRow[], filtering = false) {
   const board = useBoard();
   const run = useRun();
   const { selectedId, select, edit } = useSelection();
@@ -667,7 +658,7 @@ export function useListKeys(allRows: readonly BoardRow[]) {
     switch (event.key) {
       case "ArrowRight":
       case "ArrowLeft":
-        if (!(event.altKey && event.shiftKey) || !current || !board.canEdit) return;
+        if (!(event.altKey && event.shiftKey) || !current || !board.canEdit || filtering) return;
         run({ type: event.key === "ArrowRight" ? "indent" : "outdent", id: current.row.id });
         break;
       case "ArrowDown":

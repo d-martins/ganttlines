@@ -18,6 +18,7 @@ import { replay } from "./pending";
 import { resetSelection } from "./selection";
 import { useActiveBoard } from "./active-board";
 import { Board } from "./board";
+import { filtersFromSearch, searchFromFilters } from "./filters";
 
 /** The board opened through a share link: its token and whether the link lets people edit. */
 export interface ShareAccess {
@@ -233,7 +234,7 @@ function LiveBoard({ sync, share }: { sync: BoardSync; share: ShareAccess | null
       {baselineMode === "switch" && snapshot.data ? (
         <p role="status" className="flex items-center gap-3 border-b border-border bg-accent-soft px-4 py-1.5 text-sm">
           Viewing baseline <strong>{snapshot.data.baseline.name}</strong> (read-only).
-          <button type="button" className="underline" onClick={() => void navigate({ to: ".", search: {} })}>
+          <button type="button" className="underline" onClick={() => void navigate({ to: ".", search: searchFromFilters(filtersFromSearch(search)) })}>
             Back to the live plan
           </button>
         </p>

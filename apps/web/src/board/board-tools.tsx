@@ -16,6 +16,7 @@ import { Field } from "../ui/field";
 import { FormDialog } from "../ui/form-dialog";
 import { Menu, MenuItem, MenuLabel, MenuRadio, MenuSeparator } from "../ui/menu";
 import { DAY_WIDTH, ZOOM_STEPS, zoomStep, type Zoom } from "./chart/timeline";
+import { filtersFromSearch, searchFromFilters } from "./filters";
 import { colorFor } from "./format";
 import type { CompareMode } from "./model";
 import { formatDay, today } from "./format";
@@ -123,9 +124,11 @@ function BaselinePicker({ projectId }: { projectId: string }) {
   const list = baselines.data ?? [];
   const current = list.find((baseline) => baseline.id === search.baseline);
   const compare: CompareMode = search.compare ?? "overlay";
-  const choose = (id: string) => void navigate({ to: ".", search: id === "none" ? {} : { baseline: id, ...(compare === "switch" ? { compare } : {}) } });
+  // The filters stay as they are.
+  const filters = searchFromFilters(filtersFromSearch(search));
+  const choose = (id: string) => void navigate({ to: ".", search: id === "none" ? filters : { ...filters, baseline: id, ...(compare === "switch" ? { compare } : {}) } });
   const setCompare = (mode: CompareMode) => {
-    if (search.baseline) void navigate({ to: ".", search: { baseline: search.baseline, ...(mode === "switch" ? { compare: mode } : {}) } });
+    if (search.baseline) void navigate({ to: ".", search: { ...filters, baseline: search.baseline, ...(mode === "switch" ? { compare: mode } : {}) } });
   };
   return (
     <>
@@ -198,7 +201,7 @@ function BaselinePicker({ projectId }: { projectId: string }) {
           remove.mutate(current.id, {
             onSuccess: () => {
               setDialog(null);
-              void navigate({ to: ".", search: {} });
+              void navigate({ to: ".", search: filters });
             },
           })
         }
