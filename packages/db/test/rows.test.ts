@@ -3,7 +3,7 @@ import { TASK_DEFAULTS, type SectionRow, type TaskRow } from "@ganttlines/engine
 import { toDbColumns, toEngineRow } from "../src/rows";
 import { toDbLink, toEngineLink } from "../src/links";
 
-const section: SectionRow = { id: "11111111-1111-4111-8111-111111111111", kind: "section", title: "Phase", parentId: null, position: "a0" };
+const section: SectionRow = { id: "11111111-1111-4111-8111-111111111111", kind: "section", title: "Phase", parentId: null, position: "a0", description: "the plan" };
 const task: TaskRow = {
   ...TASK_DEFAULTS,
   id: "22222222-2222-4222-8222-222222222222",
@@ -17,6 +17,7 @@ const task: TaskRow = {
   color: "purple",
   locked: true,
   description: "notes",
+  tags: ["UI", "Back end"],
 };
 const projectId = "55555555-5555-4555-8555-555555555555";
 
@@ -28,7 +29,13 @@ describe("row mapping", () => {
   });
 
   it("stores task-column defaults for sections", () => {
-    expect(toDbColumns(section)).toMatchObject({ userStart: null, duration: 1, color: "blue" });
+    expect(toDbColumns(section)).toMatchObject({ userStart: null, duration: 1, color: "blue", tags: [] });
+  });
+
+  it("keeps a task's tags in order and a section's description", () => {
+    expect(toDbColumns(task).tags).toEqual(["UI", "Back end"]);
+    expect(toDbColumns(section).description).toBe("the plan");
+    expect(toEngineRow({ ...toDbColumns(section), projectId, tags: ["stray"] })).toEqual(section);
   });
 
   it("rejects corrupted kinds and colors", () => {

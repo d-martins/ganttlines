@@ -4,15 +4,15 @@ import { postComment } from "../routes/comments";
 import { pickOne, pickProject } from "./lookup";
 import { answer, guarded, type ToolGroup } from "./tools";
 
-/** Reading and adding comments on tasks. */
+/** Reading and adding comments on tasks and sections. */
 export const comments: ToolGroup = (server, tools) => {
   const { context, caller } = tools;
 
   async function taskOf(projectRef: string, taskRef: string | undefined, includeArchived: boolean) {
     const project = pickProject(await context.db.project.findMany({ where: includeArchived ? {} : { archivedAt: null } }), projectRef);
     const { rows } = await context.projects.outline(project.id);
-    const tasks = rows.filter((entry) => entry.row.kind === "task").map((entry) => ({ id: entry.row.id, title: entry.row.title }));
-    const task = taskRef ? pickOne(tasks, taskRef, (row) => row.id, (row) => row.title, "task") : null;
+    const tasks = rows.map((entry) => ({ id: entry.row.id, title: entry.row.title }));
+    const task = taskRef ? pickOne(tasks, taskRef, (row) => row.id, (row) => row.title, "task or section") : null;
     return { project, task, titles: new Map(tasks.map((row) => [row.id, row.title])) };
   }
 
@@ -20,10 +20,10 @@ export const comments: ToolGroup = (server, tools) => {
     "list_comments",
     {
       title: "Read comments",
-      description: "Reads the latest comments on a project's tasks (or on one task), newest first. Comments are Markdown.",
+      description: "Reads the latest comments on a project's tasks and sections (or on one of them), newest first. Comments are Markdown.",
       inputSchema: z.object({
         project: z.string().min(1).describe("the project's id or name"),
-        task: z.string().optional().describe("only this task (id or title)"),
+        task: z.string().optional().describe("only this task or section (id or title)"),
         limit: z.number().int().min(1).max(100).optional().describe("default 30"),
       }),
       annotations: { readOnlyHint: true },
@@ -51,10 +51,10 @@ export const comments: ToolGroup = (server, tools) => {
     "add_comment",
     {
       title: "Comment on a task",
-      description: "Adds a comment to a task, as the person who connected this app (shown “via” the app). Markdown works.",
+      description: "Adds a comment to a task or section, as the person who connected this app (shown “via” the app). Markdown works.",
       inputSchema: z.object({
         project: z.string().min(1),
-        task: z.string().min(1).describe("the task's id or title"),
+        task: z.string().min(1).describe("the task's or section's id or title"),
         text: z.string().min(1).max(10_000),
       }),
     },

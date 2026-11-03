@@ -10,7 +10,7 @@ const ISO_DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "a date as YYYY-MM-DD")
 export function describeRow({ row, depth, isParent, span, violation, links, violatedLinks }: OutlineRow, names: { people: Map<string, string>; rows: Map<string, string> }) {
   const task = (id: string) => ({ id, title: names.rows.get(id) ?? "Unknown" });
   const base = { id: row.id, title: row.title, depth, parentId: row.parentId };
-  if (row.kind === "section") return { ...base, type: "section" as const };
+  if (row.kind === "section") return { ...base, type: "section" as const, ...(row.description ? { description: row.description } : {}) };
   return {
     ...base,
     type: isParent ? ("parent task" as const) : row.duration === 0 ? ("milestone" as const) : ("task" as const),
@@ -32,6 +32,7 @@ export function describeRow({ row, depth, isParent, span, violation, links, viol
     ...(violation ? { startsTooEarly: true } : {}),
     ...(row.actualDuration !== null ? { actualDurationDays: row.actualDuration } : {}),
     color: row.color,
+    tags: row.tags,
     ...(row.description ? { description: row.description } : {}),
   };
 }
@@ -80,7 +81,7 @@ export const readPlans: ToolGroup = (server, tools) => {
     {
       title: "Read a project",
       description:
-        "Reads one project's board in order: sections, tasks (with sub-tasks by depth), milestones, computed start/end dates, durations in working days, assignees, the tasks each waits on (predecessors: the kind of link, in words, and its lag in working days) and those waiting on it (followers), and descriptions. Dates are YYYY-MM-DD; a task can start in the afternoon or end at midday.",
+        "Reads one project's board in order: sections, tasks (with sub-tasks by depth), milestones, computed start/end dates, durations in working days, assignees, the tasks each waits on (predecessors: the kind of link, in words, and its lag in working days) and those waiting on it (followers), tags, and descriptions. Dates are YYYY-MM-DD; a task can start in the afternoon or end at midday.",
       inputSchema: z.object({ project: z.string().min(1).describe("the project's id or name") }),
       annotations: { readOnlyHint: true },
     },

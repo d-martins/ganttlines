@@ -1,4 +1,16 @@
-import { fromDay, halfDay, linkRequirement, MAX_LAG, MAX_LINKS_PER_TASK, spanStart as firstHalf, TASK_COLORS, type Command, type LinkKind } from "@ganttlines/engine";
+import {
+  fromDay,
+  halfDay,
+  linkRequirement,
+  MAX_LAG,
+  MAX_LINKS_PER_TASK,
+  MAX_TAG_LENGTH,
+  MAX_TAGS_PER_TASK,
+  spanStart as firstHalf,
+  TASK_COLORS,
+  type Command,
+  type LinkKind,
+} from "@ganttlines/engine";
 import type { Project } from "@ganttlines/db";
 import { CommandSchema, CreateProjectBody, toEngineCommand } from "@ganttlines/protocol";
 import { randomUUID } from "node:crypto";
@@ -165,6 +177,11 @@ const TaskFields = {
   predecessor: z.string().nullable().optional().describe("shorthand for a task with at most one link: the task (id or title) it starts after; null for none"),
   lagDays: LAG.optional().describe("with the shorthand: working days of delay on its one link (negative overlaps)"),
   milestone: z.boolean().optional().describe("a milestone (zero length)"),
+  tags: z
+    .array(z.string().max(MAX_TAG_LENGTH))
+    .max(MAX_TAGS_PER_TASK)
+    .optional()
+    .describe("the task's tags, in order, replacing its list ([] for none); tags are shared by every project and a tag already in use keeps its spelling (\"ui\" becomes \"UI\")"),
 };
 
 /** Editing plans: projects, and the tasks on their boards. */
@@ -250,7 +267,11 @@ export const writePlans: ToolGroup = (server, tools) => {
             await edit.run({ type: "createRow", id, kind, parentId, afterId, title: item.title, ...(start ? { start } : {}) });
             added.push({ id, title: item.title });
             await edit.load();
-            if (kind === "section") continue;
+            if (kind === "section") {
+              if (item.tags?.length) throw new ToolProblem("Sections have no tags.");
+              if (item.description) await edit.run({ type: "setDescription", id, description: item.description });
+              continue;
+            }
             await applyTaskFields(edit, id, item, team, added, Boolean(start));
             await edit.load();
           }
@@ -270,12 +291,13 @@ export const writePlans: ToolGroup = (server, tools) => {
     {
       title: "Change a task",
       description:
-        "Changes one task: title, description, colour, assignee, start (and half day), duration, milestone, lock, the tasks it waits on " +
+        "Changes one task: title, description, tags, colour, assignee, start (and half day), duration, milestone, lock, the tasks it waits on " +
         "(predecessors, each with a kind and lag; or the predecessor and lagDays shorthand on a task with at most one link), " +
-        "or the working days it actually took. Only the fields given change. Returns the task with its new dates.",
+        "or the working days it actually took. A section's title and description change the same way. Only the fields given change. " +
+        "Returns the task with its new dates.",
       inputSchema: z.object({
         project: z.string().min(1).describe("the project's id or name"),
-        task: z.string().min(1).describe("the task's id or title"),
+        task: z.string().min(1).describe("the task's (or section's) id or title"),
         title: z.string().min(1).max(500).optional(),
         locked: z.boolean().optional().describe("locked tasks keep their dates"),
         actualDurationDays: DAYS.nullable().optional().describe("the working days it really took (informational); null to clear"),
@@ -285,7 +307,11 @@ export const writePlans: ToolGroup = (server, tools) => {
     ({ project: ref, task: taskRef, ...fields }) =>
       guarded(async () => {
         const edit = await editProject(tools, ref);
-        const task = edit.find(taskRef, "task");
+        const task = edit.find(taskRef);
+        if (edit.row(task.id)?.row.kind === "section") {
+          const taskOnly = Object.entries(fields).flatMap(([name, value]) => (value !== undefined && name !== "title" && name !== "description" ? [name] : []));
+          if (taskOnly.length > 0) throw new ToolProblem(`“${task.title}” is a section: only its title and description change (not ${taskOnly.join(", ")}).`);
+        }
         const problem = shorthandProblem(fields, task.title, edit.row(task.id)?.links.into.length ?? 0);
         if (problem) throw new ToolProblem(problem);
         edit.about = task.title;
@@ -509,6 +535,7 @@ async function applyTaskFields(
     predecessor?: string | null | undefined;
     lagDays?: number | undefined;
     milestone?: boolean | undefined;
+    tags?: string[] | undefined;
   },
   team: Awaited<ReturnType<ToolContext["context"]["instance"]["resources"]>>,
   added: readonly { id: string; title: string }[],
@@ -555,4 +582,5 @@ async function applyTaskFields(
   }
   if (fields.description !== undefined) await edit.run({ type: "setDescription", id, description: fields.description });
   if (fields.color !== undefined) await edit.run({ type: "setColor", id, color: fields.color });
+  if (fields.tags !== undefined) await edit.run({ type: "setTags", id, tags: fields.tags });
 }

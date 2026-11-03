@@ -335,6 +335,47 @@ describe("project commands", () => {
   });
 });
 
+describe("tags", () => {
+  it("stores tags, spelled as the workspace first spelled them", async () => {
+    const { editor, projectId } = await editorWithProject();
+    const other = (await t.app.inject({ method: "POST", url: "/api/projects", headers: { cookie: editor }, payload: { name: "Other" } })).json().project.id as string;
+    const first = randomUUID();
+    await send(editor, other, createTask(first, "Elsewhere"));
+    expect((await send(editor, other, { type: "setTags", id: first, tags: ["UI", "Back end"] })).statusCode).toBe(200);
+
+    const id = randomUUID();
+    await send(editor, projectId, createTask(id));
+    const response = await send(editor, projectId, { type: "setTags", id, tags: ["ui", " new ", "back END"] });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().changes).toEqual([expect.objectContaining({ rowId: id, field: "tags", after: ["UI", "new", "Back end"] })]);
+    const row = (await reload(editor, projectId)).rows.find((r: { id: string }) => r.id === id);
+    expect(row.tags).toEqual(["UI", "new", "Back end"]);
+  });
+
+  it("refuses tags on sections, and keeps a section's description", async () => {
+    const { editor, projectId } = await editorWithProject();
+    const id = randomUUID();
+    await send(editor, projectId, { ...createTask(id, "Phase"), kind: "section" });
+    expect((await send(editor, projectId, { type: "setTags", id, tags: ["UI"] })).json()).toMatchObject({ message: "Sections have no tags" });
+    expect((await send(editor, projectId, { type: "setDescription", id, description: "What this phase is for" })).statusCode).toBe(200);
+    const row = (await reload(editor, projectId)).rows.find((r: { id: string }) => r.id === id);
+    expect(row).toMatchObject({ kind: "section", description: "What this phase is for" });
+    expect(row.tags).toBeUndefined();
+  });
+
+  it("answers a retried setTags with its first outcome", async () => {
+    const { editor, projectId } = await editorWithProject();
+    const id = randomUUID();
+    await send(editor, projectId, createTask(id));
+    await send(editor, projectId, { type: "setTags", id, tags: ["UI"] });
+    const commandId = randomUUID();
+    const first = await send(editor, projectId, { type: "setTags", id, tags: ["ui", "x"] }, commandId);
+    const again = await send(editor, projectId, { type: "setTags", id, tags: ["ui", "x"] }, commandId);
+    expect(again.statusCode).toBe(200);
+    expect(again.json()).toEqual(first.json());
+  });
+});
+
 describe("robustness", () => {
   it("recovers when the database moved on without the server (stale cache)", async () => {
     const { editor, projectId } = await editorWithProject();

@@ -4,6 +4,7 @@ import {
   applyCommand,
   baselineTasks,
   buildTree,
+  canonicalTags,
   type Change,
   childrenOf,
   type Command,
@@ -34,6 +35,7 @@ import { toProjectDto } from "../dto";
 import { conflict, HttpError, notFound } from "../errors";
 import { KeyedQueue } from "../queue";
 import { readProject, type StoredProject } from "./state";
+import { workspaceTags } from "./tags";
 import { MemoryUndoStore, type UndoStore } from "./undo-store";
 
 /** Clients further behind than this (in versions or in total changes) reload instead of replaying. */
@@ -128,7 +130,9 @@ export class ProjectService {
       return this.remember(projectId, commandId, digest, async () => {
         if (stored.meta.archivedAt) throw conflict("This project is archived");
         await this.checkReferences(stored, command);
-        const result = applyCommand(stored.state, (await this.instance.current()).calendar, command);
+        // Tags are workspace-wide: "ui" is stored as "UI" when the workspace already spells it so.
+        const effective = command.type === "setTags" ? { ...command, tags: canonicalTags(command.tags, await workspaceTags(this.db)) } : command;
+        const result = applyCommand(stored.state, (await this.instance.current()).calendar, effective);
         if (!result.ok) throw new HttpError(422, result.reason, result.message);
         if (result.changes.length === 0) return { version: stored.meta.version, changes: [] };
         const key = actorKey(actor);
@@ -179,9 +183,9 @@ export class ProjectService {
     });
   }
 
-  /** Whether `rowId` is a task of the project (for attaching comments). */
-  hasTask(projectId: string, rowId: string): Promise<boolean> {
-    return this.queue.run(projectId, async () => (await this.load(projectId)).state.rows[rowId]?.kind === "task");
+  /** Whether `rowId` is a task or section of the project (for attaching comments). */
+  hasCommentableRow(projectId: string, rowId: string): Promise<boolean> {
+    return this.queue.run(projectId, async () => (await this.load(projectId)).state.rows[rowId] !== undefined);
   }
 
   /** The current computed dates of every scheduled task (for baselines). */

@@ -81,6 +81,26 @@ describe("comments", () => {
     expect(response.statusCode).toBe(404);
   });
 
+  it("attaches comments to sections too, but not to rows of another project", async () => {
+    const { ana, vi, projectId } = await board();
+    const sectionId = randomUUID();
+    await t.app.inject({
+      method: "POST",
+      url: `/api/projects/${projectId}/commands`,
+      headers: { cookie: ana },
+      payload: { commandId: randomUUID(), command: { type: "createRow", id: sectionId, kind: "section", parentId: null, afterId: null, title: "Phase 1" } },
+    });
+    const created = await t.app.inject({ method: "POST", url: `/api/projects/${projectId}/comments`, headers: { cookie: vi }, payload: { taskId: sectionId, body: "What's in scope?" } });
+    expect(created.statusCode).toBe(201);
+    expect(created.json().comment).toMatchObject({ taskId: sectionId, body: "What's in scope?" });
+    const listed = (await t.app.inject({ url: `/api/projects/${projectId}/comments?taskId=${sectionId}`, headers: { cookie: vi } })).json().comments;
+    expect(listed).toEqual([expect.objectContaining({ taskId: sectionId })]);
+
+    const other = (await t.app.inject({ method: "POST", url: "/api/projects", headers: { cookie: ana }, payload: { name: "Other" } })).json().project.id;
+    const elsewhere = await t.app.inject({ method: "POST", url: `/api/projects/${other}/comments`, headers: { cookie: vi }, payload: { taskId: sectionId, body: "?" } });
+    expect(elsewhere.statusCode).toBe(404);
+  });
+
   it("lets link visitors read comments, and comment only on collaborative links", async () => {
     const { admin, projectId, taskId } = await board();
     const viewOnly = await anonymousLink(admin, projectId, false);

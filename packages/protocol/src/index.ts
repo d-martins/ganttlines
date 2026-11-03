@@ -17,6 +17,7 @@ export {
   type ApiError,
   type ProjectDto,
   type Role,
+  type TagsDto,
   type UserDto,
 } from "./api";
 export {
