@@ -2,15 +2,18 @@ import {
   applyCommand,
   baselineTasks,
   Calendar,
+  canonicalTags,
   diffState,
   findLinkProblem,
   findTreeProblem,
   hasCycle,
   linkKey,
+  rankTags,
   revertChanges,
   type Change,
   type Command,
   type ProjectState,
+  type TagUse,
 } from "@ganttlines/engine";
 import type {
   BaselineDto,
@@ -236,6 +239,27 @@ export class LocalSource implements WorkspaceSource {
     return [...project.baselines]
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
       .map((baseline) => ({ id: baseline.id, name: baseline.name, createdAt: baseline.createdAt, createdBy: baseline.createdBy }));
+  }
+
+  // —— tags ——
+
+  /** Every tag on a task in any project, like the server answers it (the first spelling; most used first, then alphabetically). */
+  async workspaceTags(): Promise<string[]> {
+    const spellings = new Map<string, TagUse>();
+    for (const project of this.projects.values()) {
+      const first = Date.parse(project.createdAt);
+      for (const row of project.rows) {
+        if (row.kind !== "task") continue;
+        for (const tag of row.tags) {
+          const known = spellings.get(tag);
+          if (known) {
+            known.uses++;
+            known.first = Math.min(known.first, first);
+          } else spellings.set(tag, { tag, uses: 1, first });
+        }
+      }
+    }
+    return rankTags([...spellings.values()]);
   }
 
   /** The whole workspace as a file (what Export saves). */
@@ -535,7 +559,9 @@ export class LocalSource implements WorkspaceSource {
       if (project.archived) throw conflict("This project is archived");
       const state = stateOf(project);
       this.checkAssignee(state, command);
-      const result = applyCommand(state, this.engineCalendar(), command);
+      // One person works here, so tags take the spelling already used anywhere in the workspace.
+      const effective = command.type === "setTags" ? { ...command, tags: canonicalTags(command.tags, await this.workspaceTags()) } : command;
+      const result = applyCommand(state, this.engineCalendar(), effective);
       if (!result.ok) throw new ApiError(422, result.reason, result.message);
       if (result.changes.length === 0) return project.version;
       const history = this.historyOf(projectId);

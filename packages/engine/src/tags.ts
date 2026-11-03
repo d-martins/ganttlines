@@ -27,3 +27,30 @@ export function canonicalTags(tags: readonly string[], known: readonly string[])
   for (const tag of known) if (!spelling.has(tagKey(tag))) spelling.set(tagKey(tag), tag);
   return tags.map((tag) => spelling.get(tagKey(tag)) ?? tag);
 }
+
+/** One exact spelling of a tag: on how many tasks it is, and when the oldest project using it was made (ms). */
+export interface TagUse {
+  tag: string;
+  uses: number;
+  first: number;
+}
+
+/**
+ * A workspace's tag list from the spellings in use: one spelling per tag — the one found first
+ * (oldest project first, then alphabetically) — most used first, then alphabetically.
+ */
+export function rankTags(spellings: readonly TagUse[]): string[] {
+  const ordered = [...spellings].sort((a, b) => a.first - b.first || compareText(a.tag, b.tag));
+  const byKey = new Map<string, { tag: string; uses: number }>();
+  for (const { tag, uses } of ordered) {
+    const key = tagKey(tag);
+    const known = byKey.get(key);
+    if (known) known.uses += uses;
+    else byKey.set(key, { tag, uses });
+  }
+  return [...byKey.values()].sort((a, b) => b.uses - a.uses || compareText(a.tag, b.tag)).map(({ tag }) => tag);
+}
+
+function compareText(a: string, b: string): number {
+  return a.localeCompare(b, "en", { sensitivity: "base" }) || (a < b ? -1 : a > b ? 1 : 0);
+}

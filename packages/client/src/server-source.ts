@@ -14,6 +14,7 @@ import type {
   ProjectStateDto,
   PublicHolidayDto,
   ResourceDto,
+  TagsDto,
   TimeOffBody,
   TimeOffDto,
   UpdateProjectBody,
@@ -82,6 +83,10 @@ export class ServerSource implements WorkspaceSource {
   }
   async deleteBaseline(_projectId: string, baselineId: string): Promise<void> {
     await this.api<void>("DELETE", `/api/baselines/${baselineId}`);
+  }
+
+  async workspaceTags(): Promise<string[]> {
+    return (await this.api<TagsDto>("GET", "/api/tags")).tags;
   }
 
   calendar(): Promise<CalendarDto> {

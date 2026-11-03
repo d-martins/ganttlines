@@ -44,4 +44,4 @@ export { buildTree, childrenOf, findTreeProblem, isAncestor, isParentTask, type 
 export { revertChanges, type Reverted } from "./undo";
 export { baselineTasks, type BaselineTask } from "./baseline";
 export { workedDays, workedDaysOfAll } from "./worked";
-export { canonicalTags, MAX_TAG_LENGTH, MAX_TAGS_PER_TASK, normalizeTags, tagKey } from "./tags";
+export { canonicalTags, MAX_TAG_LENGTH, MAX_TAGS_PER_TASK, normalizeTags, rankTags, tagKey, type TagUse } from "./tags";

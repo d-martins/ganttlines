@@ -1,5 +1,5 @@
 import { Calendar, findLinkProblem, findTreeProblem, hasCycle, linkKey, toDay, type ProjectState, type Row } from "@ganttlines/engine";
-import type { WorkspaceFile, WorkspaceFileV1 } from "@ganttlines/protocol";
+import type { WorkspaceFile, WorkspaceFileV1, WorkspaceFileV2 } from "@ganttlines/protocol";
 import { ApiError } from "../api";
 import { checkFormat, toCalendarDto, WORKSPACE_FORMAT, WORKSPACE_VERSION } from "./records";
 import { upgradeProjectRecord } from "./upgrade";
@@ -17,7 +17,7 @@ const invalid = (message: string) => new ApiError(400, "invalid_file", message);
 
 /**
  * Reads a workspace file and checks everything — shape, references, outlines, links, dependency
- * loops — before anything is changed. A version 1 file is upgraded. Throws `ApiError` 400 with the reason.
+ * loops — before anything is changed. An older file (version 1 or 2) is upgraded. Throws `ApiError` 400 with the reason.
  */
 export async function readWorkspaceFile(text: string): Promise<WorkspaceFile> {
   if (text.length > MAX_FILE_BYTES) throw invalid("This file is too big (over 50 MB)");
@@ -30,16 +30,18 @@ export async function readWorkspaceFile(text: string): Promise<WorkspaceFile> {
   if (typeof json !== "object" || json === null) throw invalid("This isn't a GanttLines workspace file");
   checkFormat(json as { format?: unknown; version?: unknown });
   const { protocol, explain } = await validation();
-  const parsed = (json as { version: number }).version === 1 ? protocol.WorkspaceFileV1.safeParse(json) : protocol.WorkspaceFile.safeParse(json);
+  const version = (json as { version: number }).version;
+  const schema = version === 1 ? protocol.WorkspaceFileV1 : version === 2 ? protocol.WorkspaceFileV2 : protocol.WorkspaceFile;
+  const parsed = schema.safeParse(json);
   if (!parsed.success) throw invalid(`This file can't be opened: ${explain(parsed.error)}`);
-  const file = parsed.data.version === 1 ? upgradeFile(parsed.data) : parsed.data;
+  const file = parsed.data.version === WORKSPACE_VERSION ? parsed.data : upgradeFile(parsed.data);
   const problem = referenceProblem(file);
   if (problem) throw invalid(`This file can't be opened: ${problem}`);
   return file;
 }
 
-function upgradeFile(file: WorkspaceFileV1): WorkspaceFile {
-  return { ...file, version: 2, projects: file.projects.map((project) => upgradeProjectRecord(project) as WorkspaceFile["projects"][number]) };
+function upgradeFile(file: WorkspaceFileV1 | WorkspaceFileV2): WorkspaceFile {
+  return { ...file, version: WORKSPACE_VERSION, projects: file.projects.map((project) => upgradeProjectRecord(project) as WorkspaceFile["projects"][number]) };
 }
 
 /** The first id used twice within a collection (or across projects' rows), if any. */

@@ -41,6 +41,35 @@ async function versionOneDatabase(factory: IDBFactory, name: string, projectIds:
   return db;
 }
 
+const { tags: _tags, ...v2TaskFields } = TASK_DEFAULTS;
+const v2Project = (id: string) => ({
+  id,
+  name: "Launch",
+  archived: false,
+  createdAt: "2026-10-01T00:00:00.000Z",
+  version: 3,
+  rows: [{ ...v2TaskFields, id: A, kind: "task", title: "A", parentId: null, position: "a0" }, { id: B, kind: "section", title: "S", parentId: null, position: "a1" }],
+  links: [],
+  highlights: [],
+  baselines: [],
+});
+
+/** A database as this app left it before tags: version 2, tasks without tags and sections without descriptions. */
+async function versionTwoDatabase(factory: IDBFactory, name: string, projectIds: string[]): Promise<IDBDatabase> {
+  const db = await openRaw(factory, name, 2, (created) => {
+    created.createObjectStore("workspace");
+    created.createObjectStore("projects", { keyPath: "id" });
+  });
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(["workspace", "projects"], "readwrite");
+    tx.objectStore("workspace").put({ ...emptyWorkspace(), version: 2 }, "workspace");
+    for (const id of projectIds) tx.objectStore("projects").put(v2Project(id));
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+  return db;
+}
+
 function readAll(db: IDBDatabase): Promise<{ workspace: unknown; projects: unknown[] }> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(["workspace", "projects"], "readonly");
@@ -90,8 +119,8 @@ describe("the workspace in IndexedDB", () => {
     const factory = new IDBFactory();
     (await versionOneDatabase(factory, "old", ["p1", "p2"])).close();
     await new IndexedDbStore("old", factory).load();
-    // Written back in the upgrade itself, not on the next save: the stored records are version 2.
-    const db = await openRaw(factory, "old", 2);
+    // Written back in the upgrade itself, not on the next save: the stored records are the current version.
+    const db = await openRaw(factory, "old", 3);
     const { workspace, projects } = await readAll(db);
     db.close();
     expect(workspace).toMatchObject({ version: WORKSPACE_VERSION });
@@ -99,7 +128,40 @@ describe("the workspace in IndexedDB", () => {
     for (const project of projects as client.ProjectRecord[]) {
       expect(project.links).toEqual([{ predecessorId: A, followerId: B, kind: "FS", lag: -1 }]);
       for (const row of project.rows) expect(row).not.toHaveProperty("predecessorId");
+      for (const row of project.rows) expect(row).toMatchObject({ tags: [] });
     }
+  });
+
+  it("opening a version-2 database gives every task tags and every section a description", async () => {
+    const factory = new IDBFactory();
+    (await versionTwoDatabase(factory, "v2", ["p1", "p2", "p3"])).close();
+    await new IndexedDbStore("v2", factory).load();
+    // Written back in the upgrade itself, not on the next save: the stored records are version 3.
+    const db = await openRaw(factory, "v2", 3);
+    const { workspace, projects } = await readAll(db);
+    db.close();
+    expect(workspace).toMatchObject({ version: 3 });
+    expect(projects).toHaveLength(3);
+    for (const project of projects as client.ProjectRecord[]) {
+      expect(project.rows).toEqual([expect.objectContaining({ id: A, kind: "task", tags: [] }), { id: B, kind: "section", title: "S", parentId: null, position: "a1", description: "" }]);
+    }
+  });
+
+  it("a failed version-2 upgrade leaves the version-2 data", async () => {
+    const factory = new IDBFactory();
+    (await versionTwoDatabase(factory, "failing-v2", ["p1", "p2"])).close();
+    const { upgradeProjectRecord } = await vi.importActual<typeof client>("@ganttlines/client");
+    vi.mocked(client.upgradeProjectRecord)
+      .mockImplementationOnce(upgradeProjectRecord)
+      .mockImplementationOnce(() => {
+        throw new Error("unreadable project");
+      });
+    await expect(new IndexedDbStore("failing-v2", factory).load()).rejects.toThrow();
+    const db = await openRaw(factory, "failing-v2", 2);
+    const { workspace, projects } = await readAll(db);
+    db.close();
+    expect(workspace).toMatchObject({ version: 2 });
+    expect(projects).toEqual([v2Project("p1"), v2Project("p2")]);
   });
 
   it("an open older connection is closed when the upgrade starts", async () => {

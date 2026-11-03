@@ -34,6 +34,10 @@ const CREATE = "22222222-2222-4222-8222-222222222222";
 const UNDO = "33333333-3333-4333-8333-333333333333";
 const REDO = "55555555-5555-4555-8555-555555555555";
 const AGAIN = "66666666-6666-4666-8666-666666666666";
+const OTHER_TASK = "77777777-7777-4777-8777-777777777777";
+const TAG = "88888888-8888-4888-8888-888888888888";
+const CREATE_OTHER = "99999999-9999-4999-8999-999999999999";
+const TAG_OTHER = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
 /** A workspace with something of everything: a board with rows, a baseline, a location, time off, other working days. */
 export async function fillWorkspace(source: WorkspaceSource): Promise<ProjectDto> {
@@ -164,6 +168,27 @@ export function workspaceContract(setup: () => Promise<WorkspaceSource>): void {
       const demo = await source.saveHighlight(project.id, { date: "2026-10-09", label: "Demo", color: "#e5892f" });
       expect(await live.next("highlights")).toMatchObject({ projectId: project.id, highlights: [expect.objectContaining({ id: demo.id })] });
       live.close();
+    });
+
+    it("lists the workspace's tags, and tagging in another project keeps the first spelling", async () => {
+      expect(await source.workspaceTags()).toEqual([]);
+      const { live } = await projectWithTask();
+      live.send({ type: "command", commandId: TAG, command: { type: "setTags", id: TASK, tags: ["UI", "Back end"] } });
+      await live.next("ack", (message) => message.commandId === TAG);
+      live.close();
+      const other = await source.createProject({ name: "Other" });
+      const board = source.openBoard(other.id);
+      const second = listen(board.openLink());
+      await second.open;
+      second.send({ type: "join", projectId: other.id, version: 0, protocol: PROTOCOL_VERSION });
+      await second.next("joined");
+      second.send({ type: "command", commandId: CREATE_OTHER, command: { type: "createRow", id: OTHER_TASK, kind: "task", parentId: null, afterId: null, title: "Polish" } });
+      await second.next("ack", (message) => message.commandId === CREATE_OTHER);
+      second.send({ type: "command", commandId: TAG_OTHER, command: { type: "setTags", id: OTHER_TASK, tags: ["ui", "Alpha"] } });
+      await second.next("ack", (message) => message.commandId === TAG_OTHER);
+      second.close();
+      expect((await board.load()).rows).toEqual([expect.objectContaining({ id: OTHER_TASK, tags: ["UI", "Alpha"] })]);
+      expect(await source.workspaceTags()).toEqual(["UI", "Alpha", "Back end"]);
     });
 
     it("says a board that doesn't exist can't be shown", async () => {

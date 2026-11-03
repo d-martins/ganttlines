@@ -4,7 +4,7 @@ import { ApiError } from "../api";
 
 /** The workspace file's — and the stored records' — format. */
 export const WORKSPACE_FORMAT = "ganttlines-workspace";
-export const WORKSPACE_VERSION = 2;
+export const WORKSPACE_VERSION = 3;
 
 export interface StoredResource {
   id: string;
@@ -70,15 +70,16 @@ export const emptyWorkspace = (): WorkspaceRecord => ({
 });
 
 /**
- * Checks a stored or imported workspace's format and version: version 1 (a task's single
- * predecessor kept on its row) is upgraded by the caller; newer ones are refused — never half-read.
+ * Checks a stored or imported workspace's format and version: older versions (1: a task's single
+ * predecessor kept on its row; 2: no tags or section descriptions) are upgraded by the caller;
+ * newer ones are refused — never half-read.
  */
 export function checkFormat(value: { format?: unknown; version?: unknown }): void {
   if (value.format !== WORKSPACE_FORMAT || typeof value.version !== "number") throw new ApiError(400, "invalid_file", "This isn't a GanttLines workspace");
   if (value.version > WORKSPACE_VERSION) {
     throw new ApiError(400, "newer_version", "This workspace was saved by a newer version of GanttLines — update GanttLines to open it");
   }
-  if (value.version !== 1 && value.version !== 2) throw new ApiError(400, "invalid_file", "This isn't a GanttLines workspace");
+  if (!Number.isInteger(value.version) || value.version < 1) throw new ApiError(400, "invalid_file", "This isn't a GanttLines workspace");
 }
 
 const byStart = (a: { startDate: string; id: string }, b: { startDate: string; id: string }) => a.startDate.localeCompare(b.startDate) || a.id.localeCompare(b.id);
