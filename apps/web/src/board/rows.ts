@@ -1,4 +1,5 @@
 import { buildTree, childrenOf, isParentTask, type ProjectState, type Row, type RowId } from "@ganttlines/engine";
+import { filterRows, type BoardFilters } from "./filters";
 
 export interface ListRow {
   row: Row;
@@ -11,6 +12,8 @@ export interface ListRow {
   isParent: boolean;
   /** its children are hidden in this browser (see collapse.ts) */
   collapsed: boolean;
+  /** shown only because a filter match is inside it (drawn dimmed) */
+  context: boolean;
 }
 
 export interface Outline {
@@ -21,38 +24,31 @@ export interface Outline {
 }
 
 /**
- * The project as an outline: depth-first by position, numbered 1…n. With `filter`, only rows that
- * match it and their ancestors are shown, collapsed or not (search).
+ * The project as an outline: depth-first by position, numbered 1…n. While `filters` narrow it, only
+ * the matching tasks and their ancestors (as context) are shown, collapsed or not.
  */
-export function outline(state: ProjectState, filter?: (row: Row) => boolean, collapsed: ReadonlySet<RowId> = new Set()): Outline {
+export function outline(
+  state: ProjectState,
+  filters?: BoardFilters,
+  collapsed: ReadonlySet<RowId> = new Set(),
+  /** resource ids of the team, to tell known people in `filters` */
+  team?: ReadonlySet<string>,
+): Outline {
   const tree = buildTree(state);
   const visible: ListRow[] = [];
   const numbers = new Map<RowId, number>();
-  const shown = filter ? matchesWithAncestors(state, filter) : null;
+  const filtered = filters ? filterRows(state, filters, team) : null;
   const visit = (parentId: RowId | null, depth: number, hidden: boolean) => {
     for (const row of childrenOf(tree, parentId)) {
       numbers.set(row.id, numbers.size + 1);
       const hasChildren = childrenOf(tree, row.id).length > 0;
-      const show = shown ? shown.has(row.id) : !hidden;
+      const context = filtered?.context.has(row.id) ?? false;
+      const show = filtered ? context || filtered.matches.has(row.id) : !hidden;
       const isCollapsed = hasChildren && collapsed.has(row.id);
-      if (show) visible.push({ row, number: numbers.size, depth, hasChildren, isParent: isParentTask(tree, row), collapsed: isCollapsed });
+      if (show) visible.push({ row, number: numbers.size, depth, hasChildren, isParent: isParentTask(tree, row), collapsed: isCollapsed, context });
       visit(row.id, depth + 1, hidden || isCollapsed);
     }
   };
   visit(null, 0, false);
   return { visible, numbers };
-}
-
-function matchesWithAncestors(state: ProjectState, filter: (row: Row) => boolean): Set<RowId> {
-  const shown = new Set<RowId>();
-  const limit = Object.keys(state.rows).length;
-  for (const row of Object.values(state.rows)) {
-    if (!filter(row)) continue;
-    let current: Row | undefined = row;
-    for (let steps = limit; current && !shown.has(current.id) && steps >= 0; steps--) {
-      shown.add(current.id);
-      current = current.parentId === null ? undefined : state.rows[current.parentId];
-    }
-  }
-  return shown;
 }

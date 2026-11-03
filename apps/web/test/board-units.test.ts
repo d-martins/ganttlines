@@ -7,6 +7,7 @@ import { describeChange, describeEntry } from "../src/board/panel/activity";
 import { chartRange, Timeline } from "../src/board/chart/timeline";
 import { dropMove } from "../src/board/list/list-actions";
 import { durations } from "../src/board/list/task-list";
+import { NO_FILTERS } from "../src/board/filters";
 import { boardModel } from "../src/board/model";
 import { outline } from "../src/board/rows";
 import { ANA, CALENDAR, section, task } from "./board-fixtures";
@@ -200,7 +201,7 @@ describe("board model", () => {
       },
       links: Object.fromEntries([fs, ss, hidden].map((link) => [linkKey(link), link])),
     };
-    const model = boardModel(state, new Calendar(CALENDAR), null, "", new Set(["s"]));
+    const model = boardModel(state, new Calendar(CALENDAR), null, NO_FILTERS, new Set(["s"]));
     expect(model.rows.map((entry) => entry.row.id)).toEqual(["a", "b", "s"]);
     expect(model.links).toEqual(
       expect.arrayContaining([

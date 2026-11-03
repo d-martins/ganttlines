@@ -8,7 +8,7 @@ export function task(id: string, fields: Partial<TaskRow> = {}): TaskRow {
 }
 
 export function section(id: string, fields: Partial<SectionRow> = {}): SectionRow {
-  return { id, kind: "section", title: id, parentId: null, position: "a0", ...fields };
+  return { id, kind: "section", title: id, parentId: null, position: "a0", description: "", ...fields };
 }
 
 export const PROJECT_ID = "11111111-1111-4111-8111-111111111111";

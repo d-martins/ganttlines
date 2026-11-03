@@ -12,6 +12,7 @@ import { chartRange, scaleOf, Timeline, zoomStep } from "./chart/timeline";
 import { today } from "./format";
 import { useBoard } from "./board-context";
 import { useCollapse, useCollapsed } from "./collapse";
+import { filtersFromSearch } from "./filters";
 import { ListColumnHeaders, ListHeader, ListRows, useListKeys } from "./list/task-list";
 import { useSelection } from "./selection";
 import { boardModel, type CompareMode } from "./model";
@@ -94,7 +95,8 @@ export function Board({
     const result = applyCommand(state, calendar, dragCommand);
     return result.ok ? result.state : state;
   }, [state, calendar, dragCommand]);
-  const model = useMemo(() => boardModel(displayed, calendar, baseline, query, collapsed), [displayed, calendar, baseline, query, collapsed]);
+  const filters = useMemo(() => filtersFromSearch({ q: query }), [query]);
+  const model = useMemo(() => boardModel(displayed, calendar, baseline, filters, collapsed), [displayed, calendar, baseline, filters, collapsed]);
   const { selectedId, select, centerRequest } = useSelection();
   const DetailsPanel = useDetailsPanel();
   const onListKey = useListKeys(model.rows);
