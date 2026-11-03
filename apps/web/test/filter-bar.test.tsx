@@ -89,14 +89,17 @@ describe("the filter bar", () => {
     expect(within(bar()).getByRole("button", { name: "Section: Design" })).toBeInTheDocument();
   });
 
-  it("+ Filter's Back returns to the three choices, menu still open", async () => {
+  it("+ Filter's title goes back to the three choices, menu still open", async () => {
     const { user } = await board();
     const choices = () => screen.getAllByRole("menuitem").map((item) => item.textContent);
     await user.click(within(bar()).getByRole("button", { name: "+ Filter" }));
     await user.click(await screen.findByRole("menuitem", { name: "People" }));
     expect(await screen.findByRole("menuitemcheckbox", { name: "Ana Silva" })).toBeInTheDocument();
-    expect(choices()[0]).toBe("‹ Back");
-    await user.click(screen.getByRole("menuitem", { name: "‹ Back" }));
+    // The title is the way back: one row, "‹ People", with no separate heading or Back item.
+    expect(choices()).toEqual(["People"]);
+    expect(screen.getAllByText("People", { selector: '[role="menu"] *' })).toHaveLength(1);
+    expect(within(screen.getByRole("menu")).queryByText(/Back/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("menuitem", { name: "Back from People" }));
     expect(choices()).toEqual(["People", "Tags", "Section"]);
     expect(screen.queryByRole("menuitemcheckbox")).not.toBeInTheDocument();
     // Backspace and ArrowLeft do the same
@@ -111,11 +114,12 @@ describe("the filter bar", () => {
     expect(screen.getByRole("menu")).toBeInTheDocument();
   });
 
-  it("a chip's menu has no Back", async () => {
+  it("a chip's menu has a plain title, with no way back", async () => {
     const { user } = await board(`?people=${json([ANA.id])}`);
     await user.click(within(bar()).getByRole("button", { name: "People: Ana Silva" }));
     expect(await screen.findByRole("menuitemcheckbox", { name: "Ana Silva" })).toBeInTheDocument();
-    expect(screen.queryByRole("menuitem", { name: "‹ Back" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Back from People" })).not.toBeInTheDocument();
+    expect(screen.getByText("People", { selector: '[role="menu"] *' })).toBeInTheDocument();
   });
 
   it("a chosen section's heading shows at full strength; the count counts tasks", async () => {

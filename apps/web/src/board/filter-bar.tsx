@@ -1,7 +1,7 @@
 import { tagKey, type ProjectState, type RowId } from "@ganttlines/engine";
 import type { ResourceDto } from "@ganttlines/protocol";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { ChevronRight, Search, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Search, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { NO_FILTERS, type BoardFilters } from "./filters";
 import { outline } from "./rows";
@@ -109,8 +109,8 @@ export function FilterBar({
 }
 
 /**
- * "+ Filter" (`part` null) first asks which filter, then shows its choices in the same menu, with
- * Back (or Backspace, ←) to ask again; a chip opens straight on its own part.
+ * "+ Filter" (`part` null) first asks which filter, then shows its choices in the same menu, under a
+ * title that goes back (as do Backspace and ←) to ask again; a chip opens straight on its own part.
  */
 function FilterMenu({ part: initial, items, trigger }: { part: Part | null; items: (part: Part) => ReactNode; trigger: ReactNode }) {
   const [part, setPart] = useState<Part | null>(initial);
@@ -163,16 +163,19 @@ function FilterMenu({ part: initial, items, trigger }: { part: Part | null; item
             <>
               {canGoBack ? (
                 <DropdownMenu.Item
+                  aria-label={`Back from ${PART_NAMES[part]}`}
                   onSelect={(event) => {
                     event.preventDefault();
                     go(null);
                   }}
-                  className={`${ITEM} text-muted`}
+                  className={`${ITEM} gap-1 py-1 pl-1 text-xs font-semibold text-muted data-[highlighted]:text-text`}
                 >
-                  ‹ Back
+                  <ChevronLeft aria-hidden size={14} />
+                  {PART_NAMES[part]}
                 </DropdownMenu.Item>
-              ) : null}
-              <DropdownMenu.Label className="px-2 py-1 text-xs font-semibold text-muted">{PART_NAMES[part]}</DropdownMenu.Label>
+              ) : (
+                <DropdownMenu.Label className="px-2 py-1 text-xs font-semibold text-muted">{PART_NAMES[part]}</DropdownMenu.Label>
+              )}
               {items(part)}
             </>
           )}
