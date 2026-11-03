@@ -13,6 +13,7 @@ interface RowBase {
   parentId: RowId | null;
   /** fractional-indexing key; siblings sort by plain string comparison */
   position: string;
+  description: string;
 }
 
 export interface SectionRow extends RowBase {
@@ -35,7 +36,8 @@ export interface TaskRow extends RowBase {
   resourceId: ResourceId | null;
   color: TaskColor;
   locked: boolean;
-  description: string;
+  /** Workspace-wide labels, one per case-insensitive spelling; see `normalizeTags`. */
+  tags: string[];
 }
 
 export type Row = SectionRow | TaskRow;
@@ -53,5 +55,6 @@ export const TASK_DEFAULTS = {
   color: "blue",
   locked: false,
   description: "",
+  tags: [],
   actualDuration: null,
 } as const satisfies Partial<TaskRow>;

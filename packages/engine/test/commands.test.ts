@@ -103,6 +103,11 @@ describe("field edits", () => {
     expect(taskIn(state, "a")).toMatchObject({ title: "Hooks", description: "notes", color: "purple", resourceId: "ana" });
   });
 
+  it("sets a section's description", () => {
+    const state = run(project(section("s")), cal, { type: "setDescription", id: "s", description: "Goals" });
+    expect(state.rows["s"]).toMatchObject({ description: "Goals" });
+  });
+
   it("reports missing rows", () => {
     expect(applyCommand(project(), cal, { type: "updateTitle", id: "x", title: "" })).toMatchObject({ ok: false, reason: "not_found" });
   });
@@ -1267,5 +1272,38 @@ describe("changes", () => {
     const result = applyCommand(project(), cal, { type: "createRow", id: "a", kind: "section", parentId: null, afterId: null, title: "S" });
     if (!result.ok) throw new Error(result.message);
     expect(result.changes).toEqual([{ rowId: "a", field: "*", before: null, after: result.state.rows.a }]);
+  });
+});
+
+describe("setTags", () => {
+  it("stores the normalized list and logs one change", () => {
+    const result = applyCommand(project(task("a")), cal, { type: "setTags", id: "a", tags: [" UI ", "ui", "", "Q4"] });
+    if (!result.ok) throw new Error(result.message);
+    expect(taskIn(result.state, "a").tags).toEqual(["UI", "Q4"]);
+    expect(result.changes).toEqual([{ rowId: "a", field: "tags", before: [], after: ["UI", "Q4"] }]);
+  });
+
+  it("is refused on a section", () => {
+    expect(applyCommand(project(section("s")), cal, { type: "setTags", id: "s", tags: ["UI"] })).toEqual({
+      ok: false, reason: "invalid", message: "Sections have no tags",
+    });
+  });
+
+  it("rejects too many tags", () => {
+    const tags = Array.from({ length: 51 }, (_, i) => `t${i}`);
+    expect(applyCommand(project(task("a")), cal, { type: "setTags", id: "a", tags })).toMatchObject({ ok: false, reason: "invalid" });
+  });
+
+  it("is undone by reverting its changes", () => {
+    const before = project(task("a", { tags: ["Old"] }));
+    const result = applyCommand(before, cal, { type: "setTags", id: "a", tags: ["New"] });
+    if (!result.ok) throw new Error(result.message);
+    const undone = revertChanges(result.state, result.changes, "undo");
+    expect(taskIn(undone.state, "a").tags).toEqual(["Old"]);
+  });
+
+  it("is copied by duplicateTask", () => {
+    const state = run(project(task("a", { tags: ["UI"] })), cal, { type: "duplicateTask", id: "a", newId: "b" });
+    expect(taskIn(state, "b").tags).toEqual(["UI"]);
   });
 });

@@ -4,7 +4,7 @@ import { findLinkProblem, findTreeProblem, TASK_DEFAULTS, type Link, type Row } 
 const SECTION_ID = "11111111-1111-4111-8111-111111111111";
 const TASK_ID = "22222222-2222-4222-8222-222222222222";
 const rows: Row[] = [
-  { id: SECTION_ID, kind: "section", title: "Phase 1", parentId: null, position: "a0" },
+  { id: SECTION_ID, kind: "section", title: "Phase 1", parentId: null, position: "a0", description: "" },
   { ...TASK_DEFAULTS, id: TASK_ID, kind: "task", title: "Build", parentId: SECTION_ID, position: "a0", userStart: "2026-10-05", duration: 3 },
 ];
 
@@ -23,7 +23,7 @@ describe("findTreeProblem", () => {
 
 describe("findLinkProblem", () => {
   const task = (id: string, parentId: string | null = null): Row => ({ ...TASK_DEFAULTS, id, kind: "task", title: id, parentId, position: "a0" });
-  const tasks: Row[] = [task("a"), task("b"), task("p"), task("c", "p"), { id: "s", kind: "section", title: "S", parentId: null, position: "a1" }];
+  const tasks: Row[] = [task("a"), task("b"), task("p"), task("c", "p"), { id: "s", kind: "section", title: "S", parentId: null, position: "a1", description: "" }];
   const link = (predecessorId: string, followerId: string, kind: Link["kind"] = "FS", lag = 0): Link => ({ predecessorId, followerId, kind, lag });
 
   it("accepts valid links", () => {

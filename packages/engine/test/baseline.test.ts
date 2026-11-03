@@ -3,7 +3,7 @@ import { baselineTasks, Calendar, TASK_DEFAULTS, type ProjectState, type Row } f
 
 const calendar = new Calendar({ workingWeekdays: [1, 2, 3, 4, 5], holidays: [], timeOff: [] });
 const rows: Row[] = [
-  { id: "s", kind: "section", title: "Phase", parentId: null, position: "a0" },
+  { id: "s", kind: "section", title: "Phase", parentId: null, position: "a0", description: "" },
   { ...TASK_DEFAULTS, id: "a", kind: "task", title: "Design", parentId: "s", position: "a0", userStart: "2026-10-05", duration: 2 },
   { ...TASK_DEFAULTS, id: "m", kind: "task", title: "Go", parentId: "s", position: "a1", userStart: "2026-10-09", duration: 0 },
 ];
