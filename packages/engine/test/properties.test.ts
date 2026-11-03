@@ -42,7 +42,7 @@ const calendarArb = fc
 
 const linkSpecArb = fc.record({
   predecessor: fc.nat(),
-  kind: fc.constantFrom<LinkKind>("FS", "SS", "FF"),
+  kind: fc.constantFrom<LinkKind>("FS", "SS", "FF", "SF"),
   lag: fc.integer({ min: 0, max: 6 }).map((halves) => halves / 2),
   overlap: fc.integer({ min: 0, max: 4 }).map((halves) => halves / 2),
 });
@@ -89,7 +89,7 @@ const projectArb = fc
           parentId,
         });
         if (i === 0) return [row];
-        // FS lags from -2 to 3 days, SS and FF from 0 to 3.
+        // FS lags from -2 to 3 days, the other kinds from 0 to 3.
         const links = spec.links
           .map(({ predecessor, kind, lag, overlap }) => ({ predecessor: predecessor % i, kind, lag: kind === "FS" ? lag - overlap : lag }))
           .filter(({ predecessor }) => !isSection(predecessor) && !isAncestorOf(predecessor, i))
@@ -104,7 +104,7 @@ const FRESH_IDS = ["n0", "n1", "n2", "n3"];
 const UNKNOWN_ID = "gone";
 
 const halfArb = fc.constantFrom("morning" as const, "afternoon" as const);
-const kindArb = fc.constantFrom<LinkKind>("FS", "SS", "FF");
+const kindArb = fc.constantFrom<LinkKind>("FS", "SS", "FF", "SF");
 const lagArb = fc.integer({ min: -6, max: 6 }).map((halves) => halves / 2);
 
 const commandArb = (existing: string[]): fc.Arbitrary<Command> => {
@@ -129,8 +129,21 @@ const commandArb = (existing: string[]): fc.Arbitrary<Command> => {
     {
       weight: 3,
       arbitrary: fc
-        .record({ type: fc.constant("updateLink" as const), predecessorId: id, followerId: id, kind: kindArb, lag: lagArb, newKind: fc.option(kindArb, { nil: undefined }) })
-        .map(({ newKind, ...fields }): Command => ({ ...fields, ...(newKind === undefined ? {} : { newKind }) })),
+        .record({
+          type: fc.constant("updateLink" as const),
+          predecessorId: id,
+          followerId: id,
+          kind: kindArb,
+          lag: fc.option(lagArb, { nil: undefined }),
+          newKind: fc.option(kindArb, { nil: undefined }),
+          reverse: fc.boolean(),
+        })
+        .map(({ newKind, lag, reverse, ...fields }): Command => ({
+          ...fields,
+          ...(lag === undefined ? {} : { lag }),
+          ...(newKind === undefined ? {} : { newKind }),
+          ...(reverse ? { reverse } : {}),
+        })),
     },
     { weight: 2, arbitrary: fc.record({ type: fc.constant("removeLink" as const), predecessorId: id, followerId: id, kind: kindArb }) },
     fc.record({ type: fc.constant("setLocked" as const), id, locked: fc.boolean() }),

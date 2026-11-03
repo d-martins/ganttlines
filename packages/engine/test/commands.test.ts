@@ -505,7 +505,7 @@ describe("addLink", () => {
     expect(add(base, "gone", "b")).toMatchObject({ ok: false, reason: "not_found" });
     expect(add(project(section("s"), task("a", { userStart: "2026-10-05" })), "s", "a")).toMatchObject({ ok: false, reason: "invalid" });
     expect(add(base, "a", "a")).toMatchObject({ ok: false, reason: "invalid" });
-    expect(add(base, "a", "b", "SF" as LinkKind)).toMatchObject({ ok: false, reason: "invalid" });
+    expect(add(base, "a", "b", "XX" as LinkKind)).toMatchObject({ ok: false, reason: "invalid" });
     expect(add(project(task("a"), task("b", { userStart: "2026-10-06" })), "a", "b")).toMatchObject({ ok: false, reason: "unscheduled" });
     const chain = project(task("a", { userStart: "2026-10-05" }), task("b", { userStart: "2026-10-06" }), link("a", "b"));
     expect(add(chain, "b", "a", "SS")).toMatchObject({ ok: false, reason: "cycle" });
@@ -549,6 +549,8 @@ describe("addLink", () => {
     expect(add(base, "a", "b", "FS", 0.3)).toMatchObject({ ok: false, reason: "invalid" });
     expect(add(base, "a", "b", "SS", -1)).toMatchObject({ ok: false, reason: "invalid", message: "Only “after it finishes” links can overlap" });
     expect(add(base, "a", "b", "FF", -0.5)).toMatchObject({ ok: false, reason: "invalid" });
+    expect(add(base, "a", "b", "SF", -0.5)).toMatchObject({ ok: false, reason: "invalid", message: "Only “after it finishes” links can overlap" });
+    expect(add(base, "a", "b", "SF", 1.5)).toMatchObject({ ok: true });
     const overlapped = run(base, cal, { type: "addLink", predecessorId: "a", followerId: "b", kind: "FS", lag: -1 });
     expect(lagOf(overlapped, "b")).toBe(-1);
     expect(datesIn(overlapped, "b")?.start).toBe("2026-10-07");
@@ -674,6 +676,94 @@ describe("updateLink", () => {
     );
     expect(lagOf(state, "p")).toBe(1);
     expect(taskIn(state, "c").userStart).toBe("2026-10-05");
+  });
+});
+
+describe("updateLink to and from start → finish", () => {
+  it("changes FS to SF and re-places the follower to end before the predecessor starts", () => {
+    const early = project(task("a", { userStart: "2026-10-05", duration: 3 }), task("b", { userStart: "2026-10-01" }), link("a", "b")); // b shown Thu 8
+    const sf = run(early, cal, { type: "updateLink", predecessorId: "a", followerId: "b", kind: "FS", newKind: "SF" });
+    expect(Object.keys(sf.links)).toEqual(["b|a|SF"]);
+    expect(taskIn(sf, "b").userStart).toBe("2026-10-02"); // ends Fri 2, just before a starts
+  });
+
+  it("refuses a negative SF lag", () => {
+    const sf = project(task("a", { userStart: "2026-10-07" }), task("b", { userStart: "2026-10-01" }), link("a", "b", 1, "SF"));
+    expect(applyCommand(sf, cal, { type: "updateLink", predecessorId: "a", followerId: "b", kind: "SF", lag: -0.5 })).toMatchObject({ ok: false, reason: "invalid" });
+  });
+});
+
+describe("updateLink reverse", () => {
+  const linked = project(
+    task("a", { userStart: "2026-10-05", duration: 3 }), // Mon 5 – Wed 7
+    task("b", { userStart: "2026-10-05" }), // shown Thu 8
+    link("a", "b"),
+  );
+  const reverse = (state: ProjectState, fields: { lag?: number; newKind?: LinkKind } = {}, kind: LinkKind = "FS", predecessorId = "a", followerId = "b") =>
+    applyCommand(state, cal, { type: "updateLink", predecessorId, followerId, kind, reverse: true, ...fields });
+
+  it("swaps the ends in one change set, without pinning the old follower; undo restores the original", () => {
+    const result = reverse(linked);
+    if (!result.ok) throw new Error(result.message);
+    expect(result.state.links).toEqual({ "a|b|FS": link("b", "a") });
+    // b goes back to its own start; a now waits for b.
+    expect(datesIn(result.state, "b")?.start).toBe("2026-10-05");
+    expect(datesIn(result.state, "a")).toEqual({ start: "2026-10-06", end: "2026-10-08" });
+    expect(result.changes).toHaveLength(2);
+    expect(result.changes.every((change) => "link" in change)).toBe(true);
+    expect(revertChanges(result.state, result.changes, "undo")).toEqual({ state: linked, skipped: 0 });
+    expect(revertChanges(linked, result.changes, "redo")).toEqual({ state: result.state, skipped: 0 });
+  });
+
+  it("combines with a new kind and lag", () => {
+    const result = reverse(linked, { newKind: "SS", lag: 1 });
+    if (!result.ok) throw new Error(result.message);
+    expect(result.state.links).toEqual({ "a|b|SS": link("b", "a", 1, "SS") });
+    expect(datesIn(result.state, "a")?.start).toBe("2026-10-06");
+  });
+
+  it("keeps the lag when none is given, dropping an overlap only FS can have", () => {
+    const sf = project(task("a", { userStart: "2026-10-07" }), task("b", { userStart: "2026-10-01" }), link("a", "b", 1.5, "SF"));
+    const same = reverse(sf, {}, "SF");
+    expect(same).toMatchObject({ ok: true, state: { links: { "a|b|SF": link("b", "a", 1.5, "SF") } } });
+    const overlapped = project(task("a", { userStart: "2026-10-05", duration: 3 }), task("b", { userStart: "2026-10-05" }), link("a", "b", -1));
+    expect(reverse(overlapped, { newKind: "SF" })).toMatchObject({ ok: true, state: { links: { "a|b|SF": link("b", "a", 0, "SF") } } });
+  });
+
+  it("clamps an FS overlap to what the new predecessor allows", () => {
+    const overlapped = project(task("a", { userStart: "2026-10-05", duration: 3 }), task("b", { userStart: "2026-10-05" }), link("a", "b", -2)); // b shown Tue 6
+    const result = reverse(overlapped);
+    if (!result.ok) throw new Error(result.message);
+    // b runs Mon 5 only: a can start no earlier than Tue 6, an overlap of 0.
+    expect(result.state.links["a|b|FS"]?.lag).toBe(0);
+    expect(datesIn(result.state, "a")?.start).toBe("2026-10-06");
+  });
+
+  it("refuses a cycle, a duplicate, an invalid lag and a missing link", () => {
+    const both = project(task("a", { userStart: "2026-10-05" }), task("b", { userStart: "2026-10-06" }), link("a", "b"), link("a", "b", 0, "SS"));
+    expect(reverse(both)).toMatchObject({ ok: false, reason: "cycle" });
+    const twice = project(task("a", { userStart: "2026-10-05" }), task("b", { userStart: "2026-10-06" }), link("a", "b"), link("b", "a"));
+    expect(reverse(twice)).toMatchObject({ ok: false, reason: "invalid", message: "These tasks are already linked that way" });
+    expect(reverse(linked, { newKind: "SS", lag: -1 })).toMatchObject({ ok: false, reason: "invalid" });
+    expect(reverse(linked, {}, "SS")).toMatchObject({ ok: false, reason: "not_found" });
+  });
+
+  it("refuses when the new follower would follow too many links", () => {
+    const predecessors = Array.from({ length: MAX_LINKS_PER_TASK }, (_, i) => task(`p${i}`, { userStart: "2026-10-05" }));
+    const state = project(
+      ...predecessors,
+      task("a", { userStart: "2026-10-05" }),
+      task("b", { userStart: "2026-10-06" }),
+      ...predecessors.map((predecessor) => link(predecessor.id, "a")),
+      link("a", "b"),
+    );
+    expect(reverse(state)).toMatchObject({ ok: false, reason: "invalid", message: "A task can wait on at most 50 links" });
+  });
+
+  it("refuses a new follower without dates", () => {
+    // The old follower's dates are there; the predecessor's are gone (e.g. a stale link), so the reverse can't link.
+    const state = project(task("a"), task("b", { userStart: "2026-10-06" }), link("a", "b"));
+    expect(reverse(state)).toMatchObject({ ok: false, reason: "unscheduled" });
   });
 });
 
@@ -937,6 +1027,63 @@ describe("moveTask with links of every kind", () => {
     );
     expect(datesIn(state, "c")?.start).toBe("2026-10-06");
     expect(state.links).toMatchObject({ "p|a|FS": { lag: -2 }, "p|s|SS": { lag: 0 }, "p|f|FF": { lag: 1 } });
+  });
+});
+
+describe("moveTask and resizeTask with start → finish links", () => {
+  const a = task("a", { userStart: "2026-10-14" }); // Wed 14
+
+  it("dragging an SF follower earlier reduces its lag, never below 0", () => {
+    const linked = project(a, task("b", { userStart: "2026-10-01" }), link("a", "b", 2, "SF")); // b ends, and starts, Thu 15
+    expect(datesIn(linked, "b")?.start).toBe("2026-10-15");
+    const later = run(linked, cal, { type: "moveTask", id: "b", start: "2026-10-16" });
+    expect(later.links["b|a|SF"]?.lag).toBe(2);
+    expect(datesIn(later, "b")?.start).toBe("2026-10-16");
+    const earlier = run(linked, cal, { type: "moveTask", id: "b", start: "2026-10-14" });
+    expect(earlier.links["b|a|SF"]?.lag).toBe(1);
+    expect(datesIn(earlier, "b")?.start).toBe("2026-10-14");
+    const tooEarly = run(linked, cal, { type: "moveTask", id: "b", start: "2026-10-08" });
+    expect(tooEarly.links["b|a|SF"]?.lag).toBe(0);
+    expect(datesIn(tooEarly, "b")?.start).toBe("2026-10-13"); // ends just before a starts
+  });
+
+  it("a milestone held back by an SF delay lands on the day it was dropped", () => {
+    const linked = project(a, task("m", { userStart: "2026-10-01", duration: 0 }), link("a", "m", 2, "SF"));
+    expect(datesIn(linked, "m")?.start).toBe("2026-10-15");
+    const state = run(linked, cal, { type: "moveTask", id: "m", start: "2026-10-14", half: "afternoon" });
+    expect(datesIn(state, "m")?.start).toBe("2026-10-14");
+    expect(state.links["m|a|SF"]?.lag).toBe(1);
+    expect(taskIn(state, "m").startsAfternoon).toBe(false);
+  });
+
+  it("a start-edge resize leaves SF alone", () => {
+    const linked = project(a, task("b", { userStart: "2026-10-01", duration: 2 }), link("a", "b", 0, "SF")); // Mon 12 – Tue 13
+    expect(datesIn(linked, "b")).toEqual({ start: "2026-10-12", end: "2026-10-13" });
+    const state = run(linked, cal, { type: "resizeTask", id: "b", edge: "start", date: "2026-10-07" });
+    expect(taskIn(state, "b")).toMatchObject({ userStart: "2026-10-07", duration: 5 });
+    expect(datesIn(state, "b")).toEqual({ start: "2026-10-07", end: "2026-10-13" });
+    expect(state.links["b|a|SF"]?.lag).toBe(0);
+    const delayed = project(a, task("b", { userStart: "2026-10-01", duration: 2 }), link("a", "b", 2, "SF")); // Wed 14 – Thu 15
+    const resized = run(delayed, cal, { type: "resizeTask", id: "b", edge: "start", date: "2026-10-13" });
+    expect(resized.links["b|a|SF"]?.lag).toBe(2);
+    expect(datesIn(resized, "b")).toEqual({ start: "2026-10-13", end: "2026-10-15" });
+  });
+
+  it("SF into a parent is left alone by a drag of the parent, and removing it snaps the parent back", () => {
+    const stretched = project(
+      a,
+      task("p"),
+      task("c", { parentId: "p", userStart: "2026-10-05", duration: 2 }), // Mon 5 – Tue 6
+      link("a", "p", 1, "SF"), // p stretched to Wed 14
+    );
+    expect(datesIn(stretched, "p")).toEqual({ start: "2026-10-05", end: "2026-10-14" });
+    const dragged = run(stretched, cal, { type: "moveTask", id: "p", start: "2026-10-06" });
+    expect(dragged.links["p|a|SF"]?.lag).toBe(1);
+    expect(taskIn(dragged, "c").userStart).toBe("2026-10-06");
+    const removed = applyCommand(stretched, cal, { type: "removeLink", predecessorId: "a", followerId: "p", kind: "SF" });
+    if (!removed.ok) throw new Error(removed.message);
+    expect(removed.changes).toHaveLength(1);
+    expect(datesIn(removed.state, "p")).toEqual({ start: "2026-10-05", end: "2026-10-06" });
   });
 });
 

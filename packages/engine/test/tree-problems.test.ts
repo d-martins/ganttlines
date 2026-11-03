@@ -27,7 +27,7 @@ describe("findLinkProblem", () => {
   const link = (predecessorId: string, followerId: string, kind: Link["kind"] = "FS", lag = 0): Link => ({ predecessorId, followerId, kind, lag });
 
   it("accepts valid links", () => {
-    expect(findLinkProblem(tasks, [link("a", "b", "FS", -2), link("a", "b", "SS", 1.5), link("p", "a", "FF")])).toBeNull();
+    expect(findLinkProblem(tasks, [link("a", "b", "FS", -2), link("a", "b", "SS", 1.5), link("p", "a", "FF"), link("b", "a", "SF", 2.5)])).toBeNull();
   });
 
   it.each([
@@ -38,9 +38,10 @@ describe("findLinkProblem", () => {
     ["a link from a parent to its subtask", [link("p", "c")]],
     ["an SS lag of −1", [link("a", "b", "SS", -1)]],
     ["an FF lag of −1", [link("a", "b", "FF", -1)]],
+    ["an SF lag of −0.5", [link("a", "b", "SF", -0.5)]],
     ["a lag of 0.25", [link("a", "b", "FS", 0.25)]],
     ["a lag beyond the limit", [link("a", "b", "FS", 3661)]],
-    ["an unknown kind", [link("a", "b", "SF" as Link["kind"])]],
+    ["an unknown kind", [link("a", "b", "XX" as Link["kind"])]],
   ])("reports %s", (_, links) => {
     expect(findLinkProblem(tasks, links)).toEqual(expect.any(String));
   });

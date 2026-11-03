@@ -2,11 +2,22 @@ import type { Change, LinkChange } from "./changes";
 import type { ProjectState, Row, RowId } from "./model";
 import { hasAncestor } from "./tree";
 
-/** FS: starts after the predecessor finishes; SS: starts once it starts; FF: can't finish before it finishes. */
-export type LinkKind = "FS" | "SS" | "FF";
-export const LINK_KINDS: readonly LinkKind[] = ["FS", "SS", "FF"];
+/**
+ * FS: starts after the predecessor finishes; SS: starts once it starts; FF: can't finish before it
+ * finishes; SF: can't finish before it starts.
+ */
+export type LinkKind = "FS" | "SS" | "FF" | "SF";
+export const LINK_KINDS: readonly LinkKind[] = ["FS", "SS", "FF", "SF"];
 /** Each kind in the words people see. */
-export const LINK_KIND_WORDS: Readonly<Record<LinkKind, string>> = { FS: "after it finishes", SS: "once it starts", FF: "can't finish before it" };
+export const LINK_KIND_WORDS: Readonly<Record<LinkKind, string>> = {
+  FS: "after it finishes",
+  SS: "once it starts",
+  FF: "can't finish before it",
+  SF: "can't finish before it starts",
+};
+
+/** Kinds that hold back the follower's end rather than its start: onto a parent, they stretch it. */
+export const isFinishLink = (kind: LinkKind): boolean => kind === "FF" || kind === "SF";
 
 /** What identifies a link: several links may join the same two tasks, one per kind. */
 export interface LinkRef {
