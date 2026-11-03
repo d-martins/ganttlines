@@ -89,6 +89,57 @@ describe("the filter bar", () => {
     expect(within(bar()).getByRole("button", { name: "Section: Design" })).toBeInTheDocument();
   });
 
+  it("+ Filter's Back returns to the three choices, menu still open", async () => {
+    const { user } = await board();
+    const choices = () => screen.getAllByRole("menuitem").map((item) => item.textContent);
+    await user.click(within(bar()).getByRole("button", { name: "+ Filter" }));
+    await user.click(await screen.findByRole("menuitem", { name: "People" }));
+    expect(await screen.findByRole("menuitemcheckbox", { name: "Ana Silva" })).toBeInTheDocument();
+    expect(choices()[0]).toBe("‹ Back");
+    await user.click(screen.getByRole("menuitem", { name: "‹ Back" }));
+    expect(choices()).toEqual(["People", "Tags", "Section"]);
+    expect(screen.queryByRole("menuitemcheckbox")).not.toBeInTheDocument();
+    // Backspace and ArrowLeft do the same
+    await user.click(screen.getByRole("menuitem", { name: "Tags" }));
+    expect(await screen.findByRole("menuitemcheckbox", { name: "UI" })).toBeInTheDocument();
+    await user.keyboard("{Backspace}");
+    expect(choices()).toEqual(["People", "Tags", "Section"]);
+    await user.click(screen.getByRole("menuitem", { name: "Section" }));
+    expect(await screen.findByRole("menuitemcheckbox", { name: "Design" })).toBeInTheDocument();
+    await user.keyboard("{ArrowLeft}");
+    expect(choices()).toEqual(["People", "Tags", "Section"]);
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+  });
+
+  it("a chip's menu has no Back", async () => {
+    const { user } = await board(`?people=${json([ANA.id])}`);
+    await user.click(within(bar()).getByRole("button", { name: "People: Ana Silva" }));
+    expect(await screen.findByRole("menuitemcheckbox", { name: "Ana Silva" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "‹ Back" })).not.toBeInTheDocument();
+  });
+
+  it("a chosen section's heading shows at full strength; the count counts tasks", async () => {
+    await board(`?sections=${json(["design"])}`);
+    expect(titles()).toEqual(["Design", "Screens", "Hooks"]);
+    expect(listRow("Design")).not.toHaveClass("opacity-45");
+    expect(within(bar()).getByText("2 of 3 tasks")).toBeInTheDocument();
+  });
+
+  it("the search finds sections: one shows with all of its tasks, and the other filters still apply inside", async () => {
+    const { user } = await board();
+    await user.type(within(bar()).getByRole("searchbox", { name: "Search tasks" }), "desi");
+    await waitFor(() => expect(titles()).toEqual(["Design", "Screens", "Hooks"]));
+    expect(listRow("Design")).not.toHaveClass("opacity-45");
+    expect(within(bar()).getByText("2 of 3 tasks")).toBeInTheDocument();
+  });
+
+  it("search plus a person: the matching section with only that person's tasks", async () => {
+    await board(`?q=design&people=${json([RUI.id])}`);
+    expect(titles()).toEqual(["Design", "Hooks"]);
+    expect(listRow("Design")).not.toHaveClass("opacity-45");
+    expect(within(bar()).getByText("1 of 3 tasks")).toBeInTheDocument();
+  });
+
   it("a chip reopens its part of the menu", async () => {
     const { user, router } = await board(`?people=${json([ANA.id])}`);
     await user.click(within(bar()).getByRole("button", { name: "People: Ana Silva" }));

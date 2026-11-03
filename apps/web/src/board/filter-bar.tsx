@@ -109,28 +109,49 @@ export function FilterBar({
 }
 
 /**
- * "+ Filter" (`part` null) first asks which filter, then shows its choices in the same menu; a chip
- * opens straight on its own part.
+ * "+ Filter" (`part` null) first asks which filter, then shows its choices in the same menu, with
+ * Back (or Backspace, ←) to ask again; a chip opens straight on its own part.
  */
 function FilterMenu({ part: initial, items, trigger }: { part: Part | null; items: (part: Part) => ReactNode; trigger: ReactNode }) {
   const [part, setPart] = useState<Part | null>(initial);
   const content = useRef<HTMLDivElement>(null);
-  // The chosen item is gone once its part shows: keep focus in the menu, for the arrow keys.
+  const moved = useRef(false);
+  const go = (next: Part | null) => {
+    moved.current = true;
+    setPart(next);
+  };
+  // The chosen item is gone once the menu changes: keep focus in the menu, for the arrow keys.
   useEffect(() => {
-    if (part !== initial) content.current?.focus();
-  }, [part, initial]);
+    if (moved.current) content.current?.focus();
+    moved.current = false;
+  }, [part]);
+  const canGoBack = initial === null && part !== null;
   return (
     <DropdownMenu.Root onOpenChange={(open) => open && setPart(initial)}>
       <DropdownMenu.Trigger asChild>{trigger}</DropdownMenu.Trigger>
       <DropdownMenu.Portal>
-        <DropdownMenu.Content ref={content} align="start" sideOffset={4} className={CONTENT}>
+        <DropdownMenu.Content
+          ref={content}
+          align="start"
+          sideOffset={4}
+          className={CONTENT}
+          onKeyDown={(event) => {
+            if (!canGoBack) return;
+            // Backspace belongs to a text box that has focus.
+            const typing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement;
+            if (event.key === "ArrowLeft" || (event.key === "Backspace" && !typing)) {
+              event.preventDefault();
+              go(null);
+            }
+          }}
+        >
           {part === null ? (
             (["people", "tags", "sections"] as const).map((choice) => (
               <DropdownMenu.Item
                 key={choice}
                 onSelect={(event) => {
                   event.preventDefault();
-                  setPart(choice);
+                  go(choice);
                 }}
                 className={`${ITEM} justify-between`}
               >
@@ -140,6 +161,17 @@ function FilterMenu({ part: initial, items, trigger }: { part: Part | null; item
             ))
           ) : (
             <>
+              {canGoBack ? (
+                <DropdownMenu.Item
+                  onSelect={(event) => {
+                    event.preventDefault();
+                    go(null);
+                  }}
+                  className={`${ITEM} text-muted`}
+                >
+                  ‹ Back
+                </DropdownMenu.Item>
+              ) : null}
               <DropdownMenu.Label className="px-2 py-1 text-xs font-semibold text-muted">{PART_NAMES[part]}</DropdownMenu.Label>
               {items(part)}
             </>

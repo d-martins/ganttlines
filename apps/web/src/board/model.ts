@@ -93,13 +93,13 @@ export function boardModel(
   collapsed: ReadonlySet<RowId> = new Set(),
   /** resource ids of the team, to tell known people in `filters` */
   team?: ReadonlySet<string>,
-  /** tasks still shown as matches after they stopped matching (not counted as matches) */
+  /** rows still shown as matches after they stopped matching (not counted as matches) */
   keep?: ReadonlySet<RowId>,
 ): BoardModel {
   const filtered = filterRows(state, filters, team);
   const { visible, numbers } = outline(state, filters, collapsed, team, keep);
   const total = Object.values(state.rows).filter((row) => row.kind === "task").length;
-  const count = { matching: filtered ? filtered.matches.size : total, total };
+  const count = { matching: filtered ? [...filtered.matches].filter((id) => state.rows[id]?.kind === "task").length : total, total };
   let schedule: ReturnType<typeof computeSchedule> | null = null;
   try {
     schedule = computeSchedule(state, calendar);
