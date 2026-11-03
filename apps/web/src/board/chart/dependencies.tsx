@@ -27,7 +27,9 @@ export function elbow(from: { left: number; right: number; y: number; half: numb
  * Path of a link of `kind` from its predecessor to its follower. FS is the elbow into the follower's
  * start. SS leaves the predecessor's start, passes left of both bars and enters the follower's start
  * (pointing right); FF leaves the predecessor's end, passes right of both and enters the follower's
- * end (pointing left). Arrows are drawn under the rows, so a start dot shown on hover covers its line.
+ * end (pointing left). SF leaves the predecessor's start and enters the follower's end (pointing left),
+ * running between the rows and round the follower's end unless that end is well left of the start.
+ * Arrows are drawn under the rows, so a start dot shown on hover covers its line.
  */
 export function linkPath(
   kind: LinkKind,
@@ -37,6 +39,12 @@ export function linkPath(
 ): string {
   if (kind === "FS") return elbow(from, to, rowHeight);
   if (kind === "SS") return `M${from.left},${from.y} H${Math.min(from.left, to.left) - STUB} V${to.y} H${to.left}`;
+  if (kind === "SF") {
+    const out = from.left - STUB;
+    if (to.right + STUB <= out) return `M${from.left},${from.y} H${out} V${to.y} H${to.right}`;
+    const between = from.y + (to.y >= from.y ? rowHeight / 2 : -rowHeight / 2);
+    return `M${from.left},${from.y} H${out} V${between} H${to.right + STUB} V${to.y} H${to.right}`;
+  }
   return `M${from.right},${from.y} H${Math.max(from.right, to.right) + STUB} V${to.y} H${to.right}`;
 }
 

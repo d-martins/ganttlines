@@ -21,9 +21,8 @@ export interface ChartDrag {
 
 export type LinkEnd = "start" | "end";
 
-/** The kind of a link from the predecessor's end `from` to the follower's end `to`; null for start → end, which isn't a kind. */
-export const linkKindOf = (from: LinkEnd, to: LinkEnd): LinkKind | null =>
-  from === "end" ? (to === "start" ? "FS" : "FF") : to === "start" ? "SS" : null;
+/** The kind of a link from the predecessor's end `from` to the follower's end `to`. */
+export const linkKindOf = (from: LinkEnd, to: LinkEnd): LinkKind => (from === "end" ? (to === "start" ? "FS" : "FF") : to === "start" ? "SS" : "SF");
 
 export const useChartDrag = create<{ drag: ChartDrag | null }>(() => ({ drag: null }));
 

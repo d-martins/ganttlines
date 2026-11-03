@@ -261,58 +261,137 @@ describe("details panel", () => {
     expect(within(panel()).getByText("via share link")).toBeInTheDocument();
   });
 
-  it("the Links section lists waits-on and needed-by with kinds in words", async () => {
-    const { user } = await panelBoard(LINK_ROWS, ADMIN, [], LINKS);
+  const links = () => within(panel()).getByRole("list", { name: "Links" });
+  const lines = () => within(links()).getAllByRole("listitem");
+
+  it("None + Add link when there are no links", async () => {
+    const { user } = await panelBoard();
     await selectRow(user, "hooks");
-    const waitsOn = within(panel()).getByRole("group", { name: "Waits on" });
-    const [first] = within(waitsOn).getAllByRole("listitem");
-    expect(within(first!).getByRole("button", { name: "#2 ui" })).toBeInTheDocument();
-    expect(within(first!).getByRole("combobox", { name: "Kind of link with #2 ui" })).toHaveDisplayValue("after it finishes");
-    expect(within(first!).getByRole("spinbutton", { name: "Delay after #2 ui" })).toHaveValue(2);
-    const neededBy = within(panel()).getByRole("group", { name: "Needed by" });
-    const [line] = within(neededBy).getAllByRole("listitem");
-    expect(within(line!).getByRole("button", { name: "#4 qa" })).toBeInTheDocument();
-    expect(within(line!).getByRole("combobox", { name: "Kind of link with #4 qa" })).toHaveDisplayValue("once it starts");
-    // The delay belongs to qa's link to this task.
-    expect(within(line!).getByRole("spinbutton", { name: "Delay for #4 qa" })).toHaveValue(0);
-    expect(within(line!).getAllByRole("option").map((option) => option.textContent)).toEqual(["after it finishes", "once it starts", "can't finish before it"]);
-    await user.click(within(first!).getByRole("button", { name: "#2 ui" })); // goes to the linked task
-    expect(panel()).toHaveAccessibleName("Details of “ui”");
-    expect(within(within(panel()).getByRole("group", { name: "Needed by" })).getByRole("button", { name: "#3 hooks" })).toBeInTheDocument();
+    expect(within(panel()).getByText("None")).toBeVisible();
+    expect(within(panel()).getByRole("button", { name: "Add link" })).toBeInTheDocument();
+    expect(within(panel()).queryByRole("listitem")).not.toBeInTheDocument();
   });
 
-  it("changing the kind sends updateLink with newKind", async () => {
-    const { user } = await panelBoard(LINK_ROWS, ADMIN, [], LINKS);
+  it("one line per link with both dropdowns and ×, sorted by the other task's row", async () => {
+    const { user } = await panelBoard(LINK_ROWS, ADMIN, [], [...LINKS].reverse());
     await selectRow(user, "hooks");
-    const [line] = within(within(panel()).getByRole("group", { name: "Waits on" })).getAllByRole("listitem");
-    await user.selectOptions(within(line!).getByRole("combobox", { name: "Kind of link with #2 ui" }), "can't finish before it");
-    expect(sentCommands().at(-1)).toEqual({ type: "updateLink", predecessorId: "ui", followerId: "hooks", kind: "FS", newKind: "FF" });
-    const [changed] = within(within(panel()).getByRole("group", { name: "Waits on" })).getAllByRole("listitem");
-    const delay = within(changed!).getByRole("spinbutton", { name: "Delay after #2 ui" });
-    await user.clear(delay);
-    await user.type(delay, "1.5{Enter}");
-    expect(sentCommands().at(-1)).toEqual({ type: "updateLink", predecessorId: "ui", followerId: "hooks", kind: "FF", lag: 1.5 });
+    expect(within(panel()).queryByText("None")).not.toBeInTheDocument();
+    const [ui, qa] = lines();
+    expect(lines()).toHaveLength(2);
+    // hooks waits for ui to finish (FS); qa starts once hooks starts (SS, qa waits).
+    const when = within(ui!).getByRole("combobox", { name: "Link with #2 ui: this task" });
+    expect(when).toHaveDisplayValue("starts after");
+    expect(within(when).getAllByRole("option").map((option) => option.textContent)).toEqual(["starts before", "starts after", "ends before", "ends after"]);
+    expect(within(ui!).getByRole("button", { name: "Link with #2 ui: change the task" })).toHaveTextContent("#2 ui");
+    const end = within(ui!).getByRole("combobox", { name: "Link with #2 ui: the other task" });
+    expect(end).toHaveDisplayValue("finished");
+    expect(within(end).getAllByRole("option").map((option) => option.textContent)).toEqual(["finished", "started"]);
+    expect(within(ui!).getByRole("button", { name: "Remove link with #2 ui" })).toBeInTheDocument();
+    expect(within(qa!).getByRole("combobox", { name: "Link with #4 qa: this task" })).toHaveDisplayValue("starts before");
+    expect(within(qa!).getByRole("combobox", { name: "Link with #4 qa: the other task" })).toHaveDisplayValue("started");
+    // No delay box: delays change by dragging.
+    expect(within(links()).queryByRole("spinbutton")).not.toBeInTheDocument();
+    expect(within(panel()).queryByRole("spinbutton", { name: /delay/i })).not.toBeInTheDocument();
   });
 
-  it("changing the kind from the keyboard keeps focus on the line's kind, one updateLink per change", async () => {
+  it('changing "finished" to "started" sends updateLink newKind SS, keeping focus there', async () => {
     const { user } = await panelBoard(LINK_ROWS, ADMIN, [], LINKS);
     await selectRow(user, "hooks");
-    const kind = () => within(panel()).getByRole("combobox", { name: "Kind of link with #2 ui" });
-    kind().focus();
-    const before = sentCommands().length;
+    const end = () => within(panel()).getByRole("combobox", { name: "Link with #2 ui: the other task" });
+    await user.selectOptions(end(), "started");
+    expect(sentCommands().at(-1)).toEqual({ type: "updateLink", predecessorId: "ui", followerId: "hooks", kind: "FS", newKind: "SS" });
+    expect(end()).toHaveDisplayValue("started");
+    expect(end()).toHaveFocus();
     // Arrow keys on a closed select change it at once (Windows, Linux): each press is one change.
-    fireEvent.change(kind(), { target: { value: "SS" } });
-    expect(kind()).toHaveDisplayValue("once it starts");
-    expect(kind()).toHaveFocus();
-    fireEvent.change(kind(), { target: { value: "FF" } });
-    expect(kind()).toHaveFocus();
-    expect(sentCommands().slice(before)).toEqual([
-      { type: "updateLink", predecessorId: "ui", followerId: "hooks", kind: "FS", newKind: "SS" },
-      { type: "updateLink", predecessorId: "ui", followerId: "hooks", kind: "SS", newKind: "FF" },
-    ]);
+    const before = sentCommands().length;
+    fireEvent.change(end(), { target: { value: "finished" } });
+    expect(end()).toHaveFocus();
+    expect(sentCommands().slice(before)).toEqual([{ type: "updateLink", predecessorId: "ui", followerId: "hooks", kind: "SS", newKind: "FS" }]);
   });
 
-  it("the add-link picker leaves out the task's own parent and subtasks", async () => {
+  it('changing "starts after" to "ends before" sends updateLink reverse + kind', async () => {
+    const { user } = await panelBoard(LINK_ROWS, ADMIN, [], LINKS);
+    await selectRow(user, "hooks");
+    const when = () => within(panel()).getByRole("combobox", { name: "Link with #2 ui: this task" });
+    await user.selectOptions(when(), "ends before");
+    // hooks ends before ui finishes: ui now waits on hooks, finish to finish.
+    expect(sentCommands().at(-1)).toEqual({ type: "updateLink", predecessorId: "ui", followerId: "hooks", kind: "FS", newKind: "FF", reverse: true });
+    expect(when()).toHaveDisplayValue("ends before");
+    expect(within(panel()).getByRole("combobox", { name: "Link with #2 ui: the other task" })).toHaveDisplayValue("finished");
+    expect(when()).toHaveFocus();
+    // Turned around with the same kind: reverse alone.
+    await user.selectOptions(when(), "ends after");
+    expect(sentCommands().at(-1)).toEqual({ type: "updateLink", predecessorId: "hooks", followerId: "ui", kind: "FF", reverse: true });
+  });
+
+  it("picking another task sends removeLink then addLink", async () => {
+    const rows = [...LINK_ROWS, task("docs", { parentId: "x", position: "a3", userStart: "2026-10-22", duration: 1 })];
+    const { user } = await panelBoard(rows, ADMIN, [], LINKS);
+    await selectRow(user, "hooks");
+    await user.click(within(panel()).getByRole("button", { name: "Link with #2 ui: change the task" }));
+    const offered = within(screen.getByRole("listbox")).getAllByRole("option").map((option) => option.textContent);
+    expect(offered).toEqual([expect.stringMatching(/^#4 qa/), expect.stringMatching(/^#5 docs/)]); // not hooks, the section or ui (this link)
+    // qa already waits on hooks: waiting on qa would go round in a circle, so nothing is sent.
+    await user.type(screen.getByRole("combobox", { name: "Find a task to link" }), "qa{Enter}");
+    expect(await screen.findByRole("alert")).toHaveTextContent(/circle|cycle|loop/i);
+    const before = sentCommands().length;
+    await user.click(within(panel()).getByRole("button", { name: "Link with #2 ui: change the task" }));
+    await user.type(screen.getByRole("combobox", { name: "Find a task to link" }), "docs{Enter}");
+    expect(sentCommands().slice(before)).toEqual([
+      { type: "removeLink", predecessorId: "ui", followerId: "hooks", kind: "FS", keepPlace: false },
+      { type: "addLink", predecessorId: "docs", followerId: "hooks", kind: "FS" },
+    ]);
+    await waitFor(() => expect(within(panel()).getByRole("button", { name: "Link with #5 docs: change the task" })).toHaveFocus());
+    expect(within(panel()).queryByRole("button", { name: /^Link with #2 ui/ })).not.toBeInTheDocument();
+  });
+
+  it("goes to the linked task from its picker", async () => {
+    const { user } = await panelBoard(LINK_ROWS, ADMIN, [], LINKS);
+    await selectRow(user, "hooks");
+    await user.click(within(panel()).getByRole("button", { name: "Link with #2 ui: change the task" }));
+    await user.click(screen.getByRole("button", { name: "Go to #2 ui" }));
+    expect(panel()).toHaveAccessibleName("Details of “ui”");
+    expect(within(panel()).getByRole("combobox", { name: "Link with #3 hooks: this task" })).toHaveDisplayValue("ends before");
+  });
+
+  it("draft line: × discards; pick sends addLink; refusal keeps the draft and shows the message", async () => {
+    const rows = [...ROWS, task("idea", { parentId: "x", position: "a2", duration: 1 })];
+    const { user } = await panelBoard(rows);
+    await selectRow(user, "hooks");
+    const add = () => within(panel()).getByRole("button", { name: "Add link" });
+    await user.click(add());
+    // The draft opens on its task list; Escape leaves the line.
+    expect(screen.getByRole("combobox", { name: "Find a task to link" })).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(within(panel()).queryByText("None")).not.toBeInTheDocument();
+    expect(within(panel()).getByRole("combobox", { name: "New link: this task" })).toHaveDisplayValue("starts after");
+    expect(within(panel()).getByRole("button", { name: "New link: choose a task" })).toHaveTextContent("choose a task…");
+    expect(within(panel()).getByRole("combobox", { name: "New link: the other task" })).toHaveDisplayValue("finished");
+    await user.click(add()); // at most one draft
+    await user.keyboard("{Escape}");
+    expect(lines()).toHaveLength(1);
+    await user.click(within(panel()).getByRole("button", { name: "Discard the new link" }));
+    expect(within(panel()).getByText("None")).toBeVisible();
+    expect(add()).toHaveFocus();
+    expect(sentCommands()).toEqual([]);
+
+    // Refused (no dates): the draft stays and the reason shows.
+    await user.click(add());
+    await user.type(screen.getByRole("combobox", { name: "Find a task to link" }), "idea{Enter}");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Both tasks need dates before they can be linked");
+    expect(sentCommands()).toEqual([]);
+    expect(within(panel()).getByRole("button", { name: "New link: choose a task" })).toBeInTheDocument();
+
+    // ends after … finished: hooks can't finish before ui finishes (FF).
+    await user.selectOptions(within(panel()).getByRole("combobox", { name: "New link: this task" }), "ends after");
+    await user.click(within(panel()).getByRole("button", { name: "New link: choose a task" }));
+    await user.type(screen.getByRole("combobox", { name: "Find a task to link" }), "ui{Enter}");
+    expect(sentCommands()).toEqual([{ type: "addLink", predecessorId: "ui", followerId: "hooks", kind: "FF" }]);
+    expect(within(panel()).queryByRole("button", { name: "New link: choose a task" })).not.toBeInTheDocument();
+    expect(within(panel()).getByRole("combobox", { name: "Link with #2 ui: this task" })).toHaveDisplayValue("ends after");
+  });
+
+  it("the picker leaves out the task itself, sections, its parents and subtasks, and tasks linked the same way", async () => {
     const rows = [
       section("x", { position: "a0" }),
       task("plan", { parentId: "x", position: "a0", title: "plan" }),
@@ -327,14 +406,16 @@ describe("details panel", () => {
     const offered = () => within(screen.getByRole("listbox")).getAllByRole("option").map((option) => option.textContent);
     expect(offered()).toEqual([expect.stringMatching(/^#6 docs/)]); // not itself, the section, its parent, its subtask or ship (already waited on)
     await user.keyboard("{Escape}");
-    await user.selectOptions(within(panel()).getByRole("combobox", { name: "New link direction" }), "Needed by");
-    await user.click(within(panel()).getByRole("button", { name: "Add link" }));
+    // ends before … started: the other task waits on this one (FS).
+    await user.selectOptions(within(panel()).getByRole("combobox", { name: "New link: this task" }), "ends before");
+    await user.selectOptions(within(panel()).getByRole("combobox", { name: "New link: the other task" }), "started");
+    await user.click(within(panel()).getByRole("button", { name: "New link: choose a task" }));
     expect(offered()).toEqual([expect.stringMatching(/^#5 ship/), expect.stringMatching(/^#6 docs/)]);
     await user.type(screen.getByRole("combobox", { name: "Find a task to link" }), "docs{Enter}");
     expect(sentCommands().at(-1)).toEqual({ type: "addLink", predecessorId: "build", followerId: "docs", kind: "FS" });
   });
 
-  it("after × the focus moves to the next line's ×, then to Add link when none is left", async () => {
+  it("after × the focus moves to the next line's ×, then to + Add link when none is left", async () => {
     const { user } = await panelBoard(LINK_ROWS, ADMIN, [], LINKS);
     await selectRow(user, "hooks");
     await user.click(within(panel()).getByRole("button", { name: "Remove link with #2 ui" }));
@@ -343,27 +424,17 @@ describe("details panel", () => {
     await user.keyboard("{Enter}");
     expect(sentCommands().at(-1)).toEqual({ type: "removeLink", predecessorId: "hooks", followerId: "qa", kind: "SS" });
     await waitFor(() => expect(within(panel()).getByRole("button", { name: "Add link" })).toHaveFocus());
+    expect(within(panel()).getByText("None")).toBeVisible();
   });
 
-  it("× sends removeLink", async () => {
-    const { user } = await panelBoard(LINK_ROWS, ADMIN, [], LINKS);
-    await selectRow(user, "hooks");
-    const [line] = within(within(panel()).getByRole("group", { name: "Needed by" })).getAllByRole("listitem");
-    await user.click(within(line!).getByRole("button", { name: "Remove link with #4 qa" }));
-    expect(sentCommands().at(-1)).toEqual({ type: "removeLink", predecessorId: "hooks", followerId: "qa", kind: "SS" });
-    expect(within(panel()).queryByRole("group", { name: "Needed by" })).not.toBeInTheDocument(); // none left
-  });
-
-  it("viewers see links without controls", async () => {
+  it("viewers see plain text", async () => {
     const { user } = await panelBoard(LINK_ROWS, VIEWER, [], LINKS);
     await selectRow(user, "hooks");
-    const [line] = within(within(panel()).getByRole("group", { name: "Waits on" })).getAllByRole("listitem");
-    expect(line).toHaveTextContent("#2 ui");
-    expect(line).toHaveTextContent("after it finishes, 2 days later");
-    expect(within(panel()).getByRole("group", { name: "Needed by" })).toHaveTextContent("once it starts");
-    expect(within(panel()).queryByRole("combobox", { name: /link/i })).not.toBeInTheDocument();
-    expect(within(panel()).queryByRole("spinbutton", { name: /^Delay (after|for)/ })).not.toBeInTheDocument();
-    expect(within(panel()).queryByRole("button", { name: /^(Add link|Remove link with)/ })).not.toBeInTheDocument();
+    expect(lines().map((line) => line.textContent)).toEqual(["starts after #2 ui finished", "starts before #4 qa started"]);
+    expect(within(panel()).queryByRole("combobox", { name: /^(Link with|New link)/ })).not.toBeInTheDocument();
+    expect(within(panel()).queryByRole("button", { name: /^(Add link|Remove link with|Link with)/ })).not.toBeInTheDocument();
+    await user.click(within(lines()[0]!).getByRole("button", { name: "#2 ui" })); // goes to the linked task
+    expect(panel()).toHaveAccessibleName("Details of “ui”");
   });
 
   it("is read-only for viewers, who can still comment", async () => {

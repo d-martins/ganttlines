@@ -123,8 +123,7 @@ export function ChartRows({
         if (target && target.row.kind === "task" && target.span && target.row.id !== rowId) {
           const box = extent(target.kind, target.span, now, style);
           const end: LinkEnd = x < (box.left + box.right) / 2 ? "start" : "end";
-          const linkKind = linkKindOf(linkFrom, end);
-          if (linkKind) tie = { id: target.row.id, end, kind: linkKind };
+          tie = { id: target.row.id, end, kind: linkKindOf(linkFrom, end) };
         }
         const from = extent(entry.kind, span, now, style);
         current = {

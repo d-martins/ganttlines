@@ -160,15 +160,10 @@ describe("chart editing", () => {
     expect(sentCommands()).toEqual([{ type: "addLink", predecessorId: "ui", followerId: "hooks", kind: "SS" }]);
   });
 
-  it("start dot onto a right half sends nothing", async () => {
+  it("start dot onto the right half sends addLink SF", async () => {
     await chartBoard();
-    const dot = startDot();
-    fireEvent.pointerDown(dot, { button: 0, clientX: 500, clientY: 0 });
-    fireEvent.pointerMove(window, { clientX: HOOKS_RIGHT_HALF, clientY: HOOKS_Y });
-    const hooksStrip = document.querySelector('[data-chart-body] [data-row="2"]')!;
-    expect(hooksStrip.className).not.toContain("bg-accent-soft"); // no target highlight
-    fireEvent.pointerUp(window, { clientX: HOOKS_RIGHT_HALF, clientY: HOOKS_Y });
-    expect(sentCommands()).toEqual([]);
+    drag(startDot(), 500, HOOKS_RIGHT_HALF, HOOKS_Y);
+    expect(sentCommands()).toEqual([{ type: "addLink", predecessorId: "ui", followerId: "hooks", kind: "SF" }]);
   });
 
   /** Presses `dot` and moves the pointer to (x, y) without dropping. */
@@ -194,11 +189,14 @@ describe("chart editing", () => {
     expect(kindLabel()).toBeNull();
   });
 
-  it("while linking from the start dot onto a right half, shows neither marker nor kind", async () => {
+  it("while linking from the start dot onto a right half, marks the target's end and says the kind", async () => {
     await chartBoard();
     hoverLink(startDot(), HOOKS_RIGHT_HALF, HOOKS_Y);
-    expect(targetMarker()).toBeNull();
-    expect(kindLabel()).toBeNull();
+    expect(targetMarker()).toHaveAttribute("data-end", "end");
+    expect(targetMarker()).toHaveAttribute("cx", "1408");
+    expect(kindLabel()).toHaveTextContent("can't finish before it starts");
+    const hooksStrip = document.querySelector('[data-chart-body] [data-row="2"]')!;
+    expect(hooksStrip.className).toContain("bg-accent-soft"); // the target is highlighted
     fireEvent.keyDown(window, { key: "Escape" });
   });
 
@@ -339,5 +337,13 @@ describe("linkPath", () => {
     // FF: out of the right edges, round the rightmost, into the follower's right side (pointing left).
     expect(linkPath("FF", from, to, 30)).toBe("M100,15 H148 V45 H140");
     expect(linkPath("FF", from, { ...to, right: 80 }, 30)).toBe("M100,15 H108 V45 H80");
+  });
+
+  it("SF arrow path", () => {
+    // Out of the predecessor's left edge, between the rows, round the follower's end, into it (pointing left).
+    expect(linkPath("SF", from, to, 30)).toBe("M40,15 H32 V30 H148 V45 H140");
+    expect(linkPath("SF", { ...from, y: 45 }, { ...to, y: 15 }, 30)).toBe("M40,45 H32 V30 H148 V15 H140");
+    // A follower ending well before the predecessor starts: straight across into its end.
+    expect(linkPath("SF", from, { ...to, left: 0, right: 20 }, 30)).toBe("M40,15 H32 V45 H20");
   });
 });

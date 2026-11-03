@@ -175,7 +175,7 @@ describe("editing the task list", () => {
     const panel = await addLinkTo(user, "ui");
     await user.type(screen.getByRole("combobox", { name: "Find a task to link" }), "#3{Enter}");
     expect(sentCommands().at(-1)).toEqual({ type: "addLink", predecessorId: "hooks", followerId: "ui", kind: "FS" });
-    expect(within(within(panel).getByRole("group", { name: "Waits on" })).getByRole("button", { name: "#3 hooks" })).toBeInTheDocument(); // ui follows hooks, as picked
+    expect(within(panel).getByRole("combobox", { name: "Link with #3 hooks: this task" })).toHaveDisplayValue("starts after"); // ui follows hooks, as picked
     expect(screen.queryByText(/so it now follows this task instead/)).not.toBeInTheDocument();
   });
 
@@ -202,8 +202,8 @@ describe("editing the task list", () => {
     await user.click(within(panel).getByRole("button", { name: "Add link" })); // ui is waited on that way already
     expect(screen.queryByRole("option", { name: /ui/ })).not.toBeInTheDocument();
     await user.keyboard("{Escape}");
-    await user.selectOptions(within(panel).getByRole("combobox", { name: "New link kind" }), "once it starts"); // another kind may join them too
-    await user.click(within(panel).getByRole("button", { name: "Add link" }));
+    await user.selectOptions(within(panel).getByRole("combobox", { name: "New link: the other task" }), "started"); // another kind may join them too
+    await user.click(within(panel).getByRole("button", { name: "New link: choose a task" }));
     expect(screen.getByRole("option", { name: /ui/ })).toBeInTheDocument();
   });
 

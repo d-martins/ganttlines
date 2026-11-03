@@ -216,7 +216,7 @@ export function DetailsPanel({ numbers }: { numbers: ReadonlyMap<RowId, number> 
       </div>
       {row.kind === "task" ? (
         <Section title="Links">
-          <LinksSection task={row} state={state} numbers={numbers} canEdit={board.canEdit} run={run} schedule={schedule} />
+          <LinksSection key={row.id} task={row} state={state} numbers={numbers} canEdit={board.canEdit} run={run} calendar={calendar} schedule={schedule} />
         </Section>
       ) : null}
       <Section title={row.kind === "section" ? "Tasks" : "Subtasks"}>
