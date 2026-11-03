@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "../../src/config";
+import { appVersion } from "../../src/version";
 
 const SECRET = "x".repeat(32);
 
@@ -20,7 +21,7 @@ describe("loadConfig", () => {
       port: 3000,
       bind: "127.0.0.1",
       trustProxy: false,
-      version: "dev",
+      version: appVersion({}), // the root package.json's
       initialAdmin: null,
       firstAdminEmail: null,
       cluster: "single",

@@ -29,7 +29,8 @@ RUN printf '#!/bin/sh\nexec node --import tsx /app/apps/server/src/cli.ts "$@"\n
  && chmod +x /usr/local/bin/ganttlines \
  && install -d -o node -g node /backups
 
-ARG APP_VERSION=dev
+# Release images pass the tag; without it the root package.json's version is used.
+ARG APP_VERSION=
 ENV NODE_ENV=production \
     APP_VERSION=$APP_VERSION \
     BIND=0.0.0.0 \
