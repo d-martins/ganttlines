@@ -50,7 +50,12 @@ describe("link mapping", () => {
     expect(toEngineLink(toDbLink(link, projectId))).toEqual(link);
   });
 
+  it("accepts SF", () => {
+    const sf = { ...link, kind: "SF" as const };
+    expect(toEngineLink(toDbLink(sf, projectId))).toEqual(sf);
+  });
+
   it("rejects an unknown kind", () => {
-    expect(() => toEngineLink({ ...toDbLink(link, projectId), kind: "SF" })).toThrow(/unknown kind/);
+    expect(() => toEngineLink({ ...toDbLink(link, projectId), kind: "XX" })).toThrow(/unknown kind/);
   });
 });

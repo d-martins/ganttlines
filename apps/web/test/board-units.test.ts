@@ -2,6 +2,7 @@ import { Calendar, linkKey, toDay, weekday, type Change, type Link } from "@gant
 import type { ActivityEntryDto } from "@ganttlines/protocol";
 import { describe, expect, it } from "vitest";
 import { elbow } from "../src/board/chart/dependencies";
+import { lineOf, linkOf, type LinkLine } from "../src/board/link-phrases";
 import { describeChange, describeEntry } from "../src/board/panel/activity";
 import { chartRange, Timeline } from "../src/board/chart/timeline";
 import { dropMove } from "../src/board/list/list-actions";
@@ -25,9 +26,11 @@ describe("history of links", () => {
     expect(describeChange(created(2), names, "f")).toBe("now waits on “Design”, after it finishes, 2 days later");
     expect(describeChange(created(-1.5), names, "f")).toBe("now waits on “Design”, after it finishes, overlapping 1.5 days");
     expect(describeChange(created(0, "SS"), names, "f")).toBe("now waits on “Design”, once it starts");
+    expect(describeChange(created(1, "SF"), names, "f")).toBe("now waits on “Design”, can't finish before it starts, 1 day later");
+    expect(describeChange(created(0, "SF"), names, "p")).toBe("“Build” now waits on it, can't finish before it starts");
     expect(describeChange(removed, names, "f")).toBe("no longer waits on “Design”");
     expect(describeChange(lag, names, "f")).toBe("changed the delay after “Design” to 3 days");
-    expect(describeChange(created(2, "FF"), names, "p")).toBe("“Build” now waits on it, can't finish before it");
+    expect(describeChange(created(2, "FF"), names, "p")).toBe("“Build” now waits on it, can't finish before it finishes");
     expect(describeChange(removed, names, "p")).toBe("“Build” no longer waits on it");
     expect(describeChange(lag, names, "p")).toBe("changed the delay of “Build”'s link to 3 days");
     expect(describeChange({ ...lag, after: -2 }, names, "f")).toBe("now overlaps “Design” by 2 days");
@@ -46,8 +49,51 @@ describe("history of links", () => {
     const entry = (changes: Change[], name = "updateLink") => ({ version: 1, name, actor: { label: "Ana" }, createdAt: "2026-10-01T00:00:00Z", changes }) as ActivityEntryDto;
     expect(describeEntry(entry(toSS), names, "f")).toBe("changed the link with “Design” to “once it starts” (was “after it finishes”)");
     expect(describeEntry(entry(toSS), names, "p")).toBe("“Build”'s link to it is now “once it starts”");
+    const toSF = [removed, created(0, "SF")];
+    expect(describeEntry(entry(toSF), names, "f")).toBe("changed the link with “Design” to “can't finish before it starts” (was “after it finishes”)");
     // Created first, deleted second (as an undo may log it): still one kind change.
     expect(describeEntry(entry([...toSS].reverse(), "undo"), names, "f")).toBe("undid a change (changed the link with “Design” to “once it starts” (was “after it finishes”))");
+  });
+});
+
+describe("history of a turned-around link", () => {
+  const names = { state: { rows: { p: task("p", { title: "Design" }), f: task("f", { title: "Build" }) }, links: {} }, resources: new Map() };
+  const was = { predecessorId: "p", followerId: "f", kind: "FS" as const };
+  const removed = { link: was, field: "*" as const, before: { ...was, lag: 0 }, after: null };
+  const turned = (kind: Link["kind"], lag = 0) => {
+    const ref = { predecessorId: "f", followerId: "p", kind };
+    return { link: ref, field: "*" as const, before: null, after: { ...ref, lag } };
+  };
+  const entry = (changes: Change[], name = "updateLink") => ({ version: 1, name, actor: { label: "Ana" }, createdAt: "2026-10-01T00:00:00Z", changes }) as ActivityEntryDto;
+
+  it("reads as one change, from either task", () => {
+    // Design now waits on Build.
+    expect(describeEntry(entry([removed, turned("FS")]), names, "f")).toBe("turned the link with “Design” around: now “Design” waits on it, after it finishes");
+    expect(describeEntry(entry([removed, turned("FS", 1)]), names, "p")).toBe("turned the link with “Build” around: now waits on “Build”, after it finishes, 1 day later");
+    expect(describeEntry(entry([removed, turned("SF")]), names, "f")).toBe("turned the link with “Design” around: now “Design” waits on it, can't finish before it starts");
+    expect(describeEntry(entry([turned("SF"), removed], "undo"), names, "p")).toBe("undid a change (turned the link with “Build” around: now waits on “Build”, can't finish before it starts)");
+  });
+});
+
+describe("link lines", () => {
+  // [this task …] the other task [… ], and the link it means: its kind and whether this task waits.
+  const TABLE: [LinkLine["when"], LinkLine["end"], Link["kind"], boolean][] = [
+    ["starts after", "finished", "FS", true],
+    ["starts after", "started", "SS", true],
+    ["ends after", "finished", "FF", true],
+    ["ends after", "started", "SF", true],
+    ["ends before", "started", "FS", false],
+    ["starts before", "started", "SS", false],
+    ["ends before", "finished", "FF", false],
+    ["starts before", "finished", "SF", false],
+  ];
+
+  it("reads each of the eight lines as a kind and a direction", () => {
+    for (const [when, end, kind, thisWaits] of TABLE) expect(linkOf({ when, end })).toEqual({ kind, thisWaits });
+  });
+
+  it("writes each kind and direction as its line", () => {
+    for (const [when, end, kind, thisWaits] of TABLE) expect(lineOf({ kind, thisWaits })).toEqual({ when, end });
   });
 });
 

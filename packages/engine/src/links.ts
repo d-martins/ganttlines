@@ -2,11 +2,22 @@ import type { Change, LinkChange } from "./changes";
 import type { ProjectState, Row, RowId } from "./model";
 import { hasAncestor } from "./tree";
 
-/** FS: starts after the predecessor finishes; SS: starts once it starts; FF: can't finish before it finishes. */
-export type LinkKind = "FS" | "SS" | "FF";
-export const LINK_KINDS: readonly LinkKind[] = ["FS", "SS", "FF"];
+/**
+ * FS: starts after the predecessor finishes; SS: starts once it starts; FF: can't finish before it
+ * finishes; SF: can't finish before it starts.
+ */
+export type LinkKind = "FS" | "SS" | "FF" | "SF";
+export const LINK_KINDS: readonly LinkKind[] = ["FS", "SS", "FF", "SF"];
 /** Each kind in the words people see. */
-export const LINK_KIND_WORDS: Readonly<Record<LinkKind, string>> = { FS: "after it finishes", SS: "once it starts", FF: "can't finish before it" };
+export const LINK_KIND_WORDS: Readonly<Record<LinkKind, string>> = {
+  FS: "after it finishes",
+  SS: "once it starts",
+  FF: "can't finish before it finishes",
+  SF: "can't finish before it starts",
+};
+
+/** Kinds that hold back the follower's end rather than its start: onto a parent, they stretch it. */
+export const isFinishLink = (kind: LinkKind): boolean => kind === "FF" || kind === "SF";
 
 /** What identifies a link: several links may join the same two tasks, one per kind. */
 export interface LinkRef {
@@ -78,19 +89,25 @@ export function findLinkProblem(rows: readonly Row[], links: readonly Link[]): s
   return null;
 }
 
-/** A link whose kind changed: logged as a delete of the old kind and a create of the new one. */
+/**
+ * A link whose kind changed, or that was turned around: logged as a delete of the old link and a
+ * create of the new one.
+ */
 export interface LinkKindChange {
   /** the link as it is now */
   link: Link;
   fromKind: LinkKind;
   toKind: LinkKind;
+  /** the two tasks swapped places: the old follower is now the predecessor */
+  reversed?: true;
 }
 
 export const isLinkKindChange = (change: Change | LinkKindChange): change is LinkKindChange => "toKind" in change;
 
 /**
  * The changes of one history entry with each whole-link delete and create of the same two tasks
- * read as one kind change (where the first of the two was); everything else passes through.
+ * read as one kind change (where the first of the two was): the same way round with another kind,
+ * or turned around with any kind. Everything else passes through.
  */
 export function pairKindChanges(changes: readonly Change[]): (Change | LinkKindChange)[] {
   // A whole-link create (`created`) or delete.
@@ -103,19 +120,16 @@ export function pairKindChanges(changes: readonly Change[]): (Change | LinkKindC
     const created = isWhole(change, true);
     if (created || isWhole(change, false)) {
       const { link } = change as LinkChange;
-      const match = changes.findIndex(
-        (other, at) =>
-          at > index &&
-          !used.has(at) &&
-          isWhole(other, !created) &&
-          other.link.predecessorId === link.predecessorId &&
-          other.link.followerId === link.followerId &&
-          other.link.kind !== link.kind,
-      );
+      const sameWay = (other: LinkChange) => other.link.predecessorId === link.predecessorId && other.link.followerId === link.followerId && other.link.kind !== link.kind;
+      const turned = (other: LinkChange) => other.link.predecessorId === link.followerId && other.link.followerId === link.predecessorId;
+      const candidates = (other: Change, at: number): other is LinkChange => at > index && !used.has(at) && isWhole(other, !created);
+      let match = changes.findIndex((other, at) => candidates(other, at) && sameWay(other));
+      if (match < 0) match = changes.findIndex((other, at) => candidates(other, at) && turned(other));
       if (match >= 0) {
         used.add(match);
         const [removed, added] = (created ? [changes[match], change] : [change, changes[match]]) as [LinkChange, LinkChange];
-        result.push({ link: added.after as Link, fromKind: removed.link.kind, toKind: added.link.kind });
+        const reversed = added.link.predecessorId !== removed.link.predecessorId;
+        result.push({ link: added.after as Link, fromKind: removed.link.kind, toKind: added.link.kind, ...(reversed ? { reversed: true as const } : {}) });
         continue;
       }
     }

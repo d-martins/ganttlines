@@ -133,6 +133,21 @@ describe("pairKindChanges", () => {
     expect(pairKindChanges([deleted(fs), created(ss), created(ff)])).toEqual([{ link: ss, fromKind: "FS", toKind: "SS" }, created(ff)]);
   });
 
+  it("reads a delete and a create of the same two tasks turned around as one change, of the same kind or another", () => {
+    const turned = link("b", "a", 1, "SF");
+    const back = link("b", "a", 1);
+    expect(pairKindChanges([deleted(fs), created(turned)])).toEqual([{ link: turned, fromKind: "FS", toKind: "SF", reversed: true }]);
+    expect(pairKindChanges([created(back), deleted(fs)])).toEqual([{ link: back, fromKind: "FS", toKind: "FS", reversed: true }]);
+    // A kind change of the same two tasks stays a plain kind change.
+    expect(pairKindChanges([deleted(fs), created(ss)])).toEqual([{ link: ss, fromKind: "FS", toKind: "SS" }]);
+  });
+
+  it("pairs the changes a turned-around link diffs to", () => {
+    const rows = [task("a", { userStart: "2026-10-05" }), task("b", { userStart: "2026-10-06" })];
+    const turned = link("b", "a", 1);
+    expect(pairKindChanges(diffState(project(...rows, fs), project(...rows, turned)))).toEqual([{ link: turned, fromKind: "FS", toKind: "FS", reversed: true }]);
+  });
+
   it("pairs the changes a kind change diffs to", () => {
     const before = project(task("a", { userStart: "2026-10-05" }), task("b", { userStart: "2026-10-06" }), fs);
     const after = project(task("a", { userStart: "2026-10-05" }), task("b", { userStart: "2026-10-06" }), ss);

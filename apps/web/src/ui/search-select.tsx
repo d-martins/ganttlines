@@ -18,8 +18,8 @@ export interface SearchOption {
 /**
  * A searchable single-choice list in a popover: type to filter, ↑/↓ to move, Enter to choose. It
  * opens on the current choice (checked). With `open`/`onOpenChange` it is controlled and the
- * trigger is only an anchor — the owner decides what opens it (e.g. a double-click); otherwise a
- * click on the trigger opens it.
+ * trigger is only an anchor — the owner decides what opens it (e.g. a double-click), unless
+ * `triggerOpens` keeps it a trigger too; otherwise a click on the trigger opens it.
  */
 export function SearchSelect({
   trigger,
@@ -30,6 +30,7 @@ export function SearchSelect({
   footer,
   open: controlledOpen,
   onOpenChange,
+  triggerOpens = false,
   align = "start",
 }: {
   trigger: ReactNode;
@@ -42,6 +43,8 @@ export function SearchSelect({
   footer?: ReactNode;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  /** controlled: a click on the trigger still opens it (and focus goes back to it on close) */
+  triggerOpens?: boolean;
   align?: "start" | "end";
 }) {
   const [ownOpen, setOwnOpen] = useState(false);
@@ -71,7 +74,7 @@ export function SearchSelect({
 
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
-      {controlled ? <Popover.Anchor asChild>{trigger}</Popover.Anchor> : <Popover.Trigger asChild>{trigger}</Popover.Trigger>}
+      {controlled && !triggerOpens ? <Popover.Anchor asChild>{trigger}</Popover.Anchor> : <Popover.Trigger asChild>{trigger}</Popover.Trigger>}
       <Popover.Portal>
         <Popover.Content {...focusReturn} align={align} sideOffset={4} className="z-50 w-72 rounded-md border border-border bg-bg p-1 text-sm text-text shadow-lg">
           <input

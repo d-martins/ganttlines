@@ -2,7 +2,7 @@ import { generateKeyBetween } from "fractional-indexing";
 import type { Calendar, ResourceId } from "./calendar";
 import { diffState, type Change } from "./changes";
 import { dayOf, fromDay, halfDay, isAfternoon, toDay, type DayNum, type HalfDay, type IsoDate } from "./date";
-import { LINK_KINDS, linkKey, MAX_LAG, MAX_LINKS_PER_TASK, type Link, type LinkKey, type LinkKind, type LinkRef } from "./links";
+import { isFinishLink, LINK_KINDS, linkKey, MAX_LAG, MAX_LINKS_PER_TASK, type Link, type LinkKey, type LinkKind, type LinkRef } from "./links";
 import { TASK_COLORS, TASK_DEFAULTS, type ProjectState, type Row, type RowId, type TaskColor, type TaskRow } from "./model";
 import {
   computeSchedule,
@@ -41,8 +41,12 @@ export type Command =
   | { type: "setLocked"; id: RowId; locked: boolean }
   /** `followerId` waits for `predecessorId` as `kind` says; `lag` defaults to 0. */
   | { type: "addLink"; predecessorId: RowId; followerId: RowId; kind: LinkKind; lag?: number }
-  /** Changes the lag, the kind (`newKind`), or both; the link keeps its lag when `lag` is left out. */
-  | { type: "updateLink"; predecessorId: RowId; followerId: RowId; kind: LinkKind; lag?: number; newKind?: LinkKind }
+  /**
+   * Changes the lag, the kind (`newKind`), or both; the link keeps its lag when `lag` is left out.
+   * `reverse` swaps the predecessor and the follower: the turned-around link must be one `addLink`
+   * would accept, and the old follower is no longer held where it was.
+   */
+  | { type: "updateLink"; predecessorId: RowId; followerId: RowId; kind: LinkKind; lag?: number; newKind?: LinkKind; reverse?: boolean }
   /**
    * `keepPlace` (default true) keeps the follower where it is shown; false leaves its own start
    * as it was, so it moves to where its remaining links and its own date put it.
@@ -139,7 +143,7 @@ class Execution {
       case "addLink":
         return this.addLink(command, command.lag ?? 0);
       case "updateLink":
-        return this.updateLink(command, command.lag, command.newKind);
+        return this.updateLink(command, command.lag, command.newKind, command.reverse ?? false);
       case "removeLink":
         if (command.keepPlace === false) this.deleteLink(this.existingLink(command));
         else this.detachLink(this.existingLink(command));
@@ -281,7 +285,7 @@ class Execution {
       const end = this.calendar.snapHalfBack(at, resource);
       return this.patch(task, { duration: this.validDuration(this.durationBetween(spanStart(span), end, resource)) });
     }
-    // The end stays put, so FF links neither clamp the new start nor change their lag.
+    // The end stays put, so FF and SF links neither clamp the new start nor change their lag.
     const placement = this.placeLeaf(task, Math.min(at, spanEnd(span)), { keepFinish: true });
     const start = halfDay(toDay(placement.userStart), placement.startsAfternoon);
     return this.patch(task, { ...placement, duration: this.validDuration(this.durationBetween(start, spanEnd(span), resource)) });
@@ -317,6 +321,14 @@ class Execution {
   // ── dependencies ────────────────────────────────────────────────────────
 
   private addLink(ref: LinkRef, lag: number): ProjectState {
+    this.assertCanLink(ref, lag);
+    // If the follower starts earlier, scheduling places it after the link (its own start stays
+    // its "not before" date).
+    return this.putLink({ predecessorId: ref.predecessorId, followerId: ref.followerId, kind: ref.kind, lag });
+  }
+
+  /** Refuses a link `addLink` couldn't make; cycles are caught once the command has run. */
+  private assertCanLink(ref: LinkRef, lag: number): void {
     const { predecessorId, followerId, kind } = ref;
     this.task(predecessorId);
     this.task(followerId);
@@ -331,9 +343,6 @@ class Execution {
     }
     this.assertValidLag(kind, lag);
     if (!this.spanOf(predecessorId) || !this.spanOf(followerId)) throw new Rejection("unscheduled", "Both tasks need dates before they can be linked");
-    // If the follower starts earlier, scheduling places it after the link (its own start stays
-    // its "not before" date).
-    return this.putLink({ predecessorId, followerId, kind, lag });
   }
 
   /**
@@ -341,28 +350,35 @@ class Execution {
    * at the earliest start all its constraints now allow (earlier or later); otherwise it keeps its
    * own date, moving later only if the link now holds it back. An FS lag is clamped so the follower
    * never starts before the day after its predecessor starts.
+   * A reversed link leaves its old follower to its own start and remaining links; it never decided
+   * its new follower's start, so the new follower keeps its own date.
    */
-  private updateLink(ref: LinkRef, lag: number | undefined, newKind: LinkKind | undefined): ProjectState {
+  private updateLink(ref: LinkRef, lag: number | undefined, newKind: LinkKind | undefined, reverse: boolean): ProjectState {
     const link = this.existingLink(ref);
     const kind = newKind ?? link.kind;
-    if (!LINK_KINDS.includes(kind)) throw new Rejection("invalid", `Unknown link kind ${kind}`);
-    if (kind !== link.kind && this.links[linkKey({ ...link, kind })]) throw new Rejection("invalid", "These tasks are already linked that way");
     // A kind change without a lag keeps the lag, except an overlap only FS can have.
     const nextLag = lag ?? (kind === "FS" ? link.lag : Math.max(0, link.lag));
-    this.assertValidLag(kind, nextLag);
-    const follower = this.task(link.followerId);
+    const updated: Link = reverse
+      ? { predecessorId: link.followerId, followerId: link.predecessorId, kind, lag: nextLag }
+      : { predecessorId: link.predecessorId, followerId: link.followerId, kind, lag: nextLag };
+    const follower = this.task(updated.followerId);
     // A parent's locked flag has no effect on scheduling.
     const isParent = isParentTask(this.tree, follower);
-    if (follower.locked && !isParent) throw new Rejection("locked", "This task's dates are locked");
+    if (reverse) this.assertCanLink(updated, nextLag);
+    else {
+      if (!LINK_KINDS.includes(kind)) throw new Rejection("invalid", `Unknown link kind ${kind}`);
+      if (kind !== link.kind && this.links[linkKey(updated)]) throw new Rejection("invalid", "These tasks are already linked that way");
+      this.assertValidLag(kind, nextLag);
+      if (follower.locked && !isParent) throw new Rejection("locked", "This task's dates are locked");
+    }
     this.deleteLink(link);
-    const updated: Link = { predecessorId: link.predecessorId, followerId: link.followerId, kind, lag: nextLag };
     if (isParent || follower.userStart === null) return this.putLink(updated);
 
     const resource = follower.resourceId;
-    const predecessor = this.spanOf(link.predecessorId);
+    const predecessor = this.spanOf(updated.predecessorId);
     const shown = this.spanOf(follower.id);
     const shownStart = shown ? spanStart(shown) : null;
-    const deciding = shownStart !== null && predecessor !== null && this.calendar.snapHalf(linkRequirement(this.calendar, follower, link, predecessor), resource) === shownStart;
+    const deciding = !reverse && shownStart !== null && predecessor !== null && this.calendar.snapHalf(linkRequirement(this.calendar, follower, link, predecessor), resource) === shownStart;
     if (kind === "FS" && predecessor) {
       const natural = naturalStart(this.calendar, predecessor, resource);
       const floor = floorStart(this.calendar, predecessor, resource);
@@ -422,7 +438,7 @@ class Execution {
    * from ancestor tasks (whose lags stay as they are), and never before the floor of any of its
    * own links (see `anchor`), which then record where it was dropped.
    * Predecessors in `moving` move along with the task, so they neither clamp nor re-anchor it;
-   * `keepFinish` (the end stays where it is) leaves its FF links alone.
+   * `keepFinish` (the end stays where it is) leaves its FF and SF links alone.
    */
   private placeLeaf(
     task: TaskRow,
@@ -448,12 +464,12 @@ class Execution {
 
   /**
    * Clamps `half` to the floor of each of `task`'s own links with a scheduled predecessor (FS: the
-   * day after the predecessor starts; SS: its start; FF: the start that ends with it) and records
-   * the drop on the links that hold it back: their lag becomes the one that starts it exactly there
-   * (FS: the overlap with the predecessor's natural start, in days; SS and FF: never below 0). Links
-   * that don't hold it back keep their lag, except an FS overlap, which shrinks back toward 0 (it
-   * never overlaps more than the drop). FF links into a parent stretch it instead, so they are left
-   * alone, as they are with `keepFinish`.
+   * day after the predecessor starts; SS: its start; FF: the start that ends with it; SF: the start
+   * that ends just before it starts) and records the drop on the links that hold it back: their lag
+   * becomes the one that starts it exactly there (FS: the overlap with the predecessor's natural
+   * start, in days; the other kinds: never below 0). Links that don't hold it back keep their lag,
+   * except an FS overlap, which shrinks back toward 0 (it never overlaps more than the drop). FF and
+   * SF links into a parent stretch it instead, so they are left alone, as they are with `keepFinish`.
    */
   private anchor(
     task: TaskRow,
@@ -467,7 +483,7 @@ class Execution {
     const follower = { resourceId: resource, duration: task.duration };
     const anchored: { link: Link; span: Span }[] = [];
     for (const link of this.linksInto(task.id)) {
-      if (skipFinish && link.kind === "FF") continue;
+      if (skipFinish && isFinishLink(link.kind)) continue;
       const span = moving.has(link.predecessorId) ? null : spanOf(link.predecessorId);
       if (span) anchored.push({ link, span });
     }
@@ -481,8 +497,8 @@ class Execution {
         const overlap = this.calendar.workingHalvesBetween(naturalStart(this.calendar, span, resource), clamped, resource) / 2;
         this.patchLink(link, { lag: holdsBack ? overlap : Math.min(0, overlap) });
       } else if (holdsBack) {
-        // A milestone's FF requirement is the morning of its day, so it lands on the drop's day.
-        const from = link.kind === "FF" ? onItsDay(task, clamped) : clamped;
+        // A milestone's FF or SF requirement is the morning of its day, so it lands on the drop's day.
+        const from = isFinishLink(link.kind) ? onItsDay(task, clamped) : clamped;
         const excess = this.calendar.workingHalvesBetween(from, required, resource) / 2;
         this.patchLink(link, { lag: Math.max(0, link.lag - excess) });
       }
@@ -506,9 +522,9 @@ class Execution {
   /**
    * Removes `link` while keeping its follower visually where it is: a leaf keeps its current start;
    * for a parent, the subtasks an FS or SS link was pushing are pinned at their current start (the
-   * others keep following their own constraints), while an FF link only stretched the parent, which
-   * snaps back to its subtasks. `after`, the tree after a move, skips a leaf the move made a parent
-   * (its dates now come from its subtasks).
+   * others keep following their own constraints), while an FF or SF link only stretched the parent,
+   * which snaps back to its subtasks. `after`, the tree after a move, skips a leaf the move made a
+   * parent (its dates now come from its subtasks).
    */
   private detachLink(link: Link, after?: Tree): void {
     this.deleteLink(link);
@@ -520,7 +536,7 @@ class Execution {
       if (span) this.patch(task, startAt(spanStart(span)));
       return;
     }
-    if (link.kind === "FF") return;
+    if (isFinishLink(link.kind)) return;
     const remaining = (id: RowId) => (this.rows[id] ? this.spanOf(id) : null);
     for (const leaf of descendantLeafTasks(this.tree, task.id)) {
       const current = this.rows[leaf.id]; // deleted subtasks (deleteRows) must not come back

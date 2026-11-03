@@ -23,6 +23,11 @@ function describeLinkChange(change: LinkChange | LinkKindChange, names: Names, r
   const otherRow = names.state.rows[asFollower ? link.predecessorId : link.followerId];
   const other = otherRow ? quote(otherRow.title) : "a deleted task";
   if (isLinkKindChange(change)) {
+    if (change.reversed) {
+      const turned = `turned the link with ${other} around: now`;
+      const phrase = LINK_KIND_WORDS[link.kind];
+      return asFollower ? `${turned} waits on ${other}, ${phrase}${delayWords(change.link.lag)}` : `${turned} ${other} waits on it, ${phrase}`;
+    }
     return asFollower
       ? `changed the link with ${other} to ${kindWords(change.toKind)} (was ${kindWords(change.fromKind)})`
       : `${other}'s link to it is now ${kindWords(change.toKind)}`;

@@ -1,6 +1,6 @@
 import type { Calendar, ResourceId } from "./calendar";
 import { dayOf, halfDay, isAfternoon, toDay, type DayNum, type HalfDay } from "./date";
-import { linkKey, type Link, type LinkKey } from "./links";
+import { isFinishLink, linkKey, type Link, type LinkKey } from "./links";
 import type { ProjectState, Row, RowId, TaskRow } from "./model";
 import { buildTree, childrenOf, isParentTask } from "./tree";
 
@@ -85,12 +85,12 @@ export function computeSchedule(state: ProjectState, calendar: Calendar): Schedu
   const computeContainer = (row: Row): Computed => {
     let span = rollUp(childrenOf(tree, row.id).map((child) => compute(child.id).span));
     if (row.kind !== "task") return { span, violation: false };
-    // An FF link into a parent stretches its end; its subtasks keep their dates.
+    // An FF or SF link into a parent stretches its end; its subtasks keep their dates.
     for (const link of existing(into.get(row.id) ?? [])) {
-      if (link.kind !== "FF") continue;
+      if (!isFinishLink(link.kind)) continue;
       const predecessor = compute(link.predecessorId).span;
       if (!span || !predecessor) continue;
-      const end = finishFloor(calendar, predecessor, link.lag, null);
+      const end = finishFloor(calendar, link, predecessor, null);
       if (end > spanEnd(span)) span = spanOfHalves(spanStart(span), end);
     }
     return { span, violation: false };
@@ -130,9 +130,13 @@ export function floorStart(calendar: Calendar, span: Span, resourceId: ResourceI
   return Math.min(halfDay(calendar.nextAfter(span.start, resourceId)), naturalStart(calendar, span, resourceId));
 }
 
-/** The last half day an FF follower of `span` may end on: the predecessor's end plus `lag`. */
-function finishFloor(calendar: Calendar, span: Span, lag: number, resourceId: ResourceId | null): HalfDay {
-  return calendar.addWorkingHalves(calendar.snapHalf(spanEnd(span), resourceId), lag * 2, resourceId);
+/**
+ * The earliest last half day an FF or SF follower of `span` may end on, plus the link's lag: FF, the
+ * predecessor's last half; SF, the working half just before its first half.
+ */
+function finishFloor(calendar: Calendar, link: Link, span: Span, resourceId: ResourceId | null): HalfDay {
+  const edge = link.kind === "SF" ? calendar.snapHalfBack(spanStart(span) - 1, resourceId) : calendar.snapHalf(spanEnd(span), resourceId);
+  return calendar.addWorkingHalves(edge, link.lag * 2, resourceId);
 }
 
 /** The earliest start (half day) `link` allows `follower`, given the predecessor's span; -Infinity if unscheduled. */
@@ -151,8 +155,9 @@ export function linkRequirement(
     }
     case "SS":
       return calendar.addWorkingHalves(calendar.snapHalf(spanStart(predecessor), resource), link.lag * 2, resource);
-    case "FF": {
-      const end = finishFloor(calendar, predecessor, link.lag, resource);
+    case "FF":
+    case "SF": {
+      const end = finishFloor(calendar, link, predecessor, resource);
       // A milestone sits on the day it may end; other tasks start early enough to end on it.
       if (follower.duration === 0) return halfDay(dayOf(end));
       return calendar.addWorkingHalves(end, -(follower.duration * 2 - 1), resource);
@@ -178,7 +183,7 @@ export function requiredStart(
 }
 
 /**
- * A leaf's own links plus its ancestors' FS and SS links (FF onto a parent stretches it instead);
+ * A leaf's own links plus its ancestors' FS and SS links (FF and SF onto a parent stretch it instead);
  * `own: false` leaves out the task's own links. Pass `into` (from `indexByFollower(state)`) when
  * asking for many tasks of one state.
  */
@@ -193,7 +198,7 @@ function collectConstraints(state: ProjectState, task: TaskRow, own: boolean, in
   for (let row: Row | undefined = task; row && steps > 0; row = row.parentId === null ? undefined : state.rows[row.parentId], steps--) {
     if (row.kind !== "task" || (!own && row === task)) continue;
     for (const link of into.get(row.id) ?? []) {
-      if (row === task || link.kind !== "FF") constraints.push(link);
+      if (row === task || !isFinishLink(link.kind)) constraints.push(link);
     }
   }
   return constraints;

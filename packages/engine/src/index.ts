@@ -13,6 +13,7 @@ export {
 export { dayOf, fromDay, halfDay, isAfternoon, toDay, weekday, type DayNum, type HalfDay, type IsoDate } from "./date";
 export {
   findLinkProblem,
+  isFinishLink,
   isLinkKindChange,
   LINK_KIND_WORDS,
   LINK_KINDS,

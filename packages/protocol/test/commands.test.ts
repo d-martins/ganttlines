@@ -26,6 +26,8 @@ describe("CommandSchema", () => {
       { type: "addLink", predecessorId: A, followerId: B, kind: "FS" },
       { type: "addLink", predecessorId: A, followerId: B, kind: "SS", lag: 1.5 },
       { type: "updateLink", predecessorId: A, followerId: B, kind: "FS", lag: -2, newKind: "FF" },
+      { type: "addLink", predecessorId: A, followerId: B, kind: "SF", lag: 1 },
+      { type: "updateLink", predecessorId: A, followerId: B, kind: "SF", newKind: "FS", reverse: true },
       { type: "removeLink", predecessorId: A, followerId: B, kind: "FF" },
       { type: "removeLink", predecessorId: A, followerId: B, kind: "FS", keepPlace: false },
       { type: "moveTask", id: A, start: "2026-10-09", half: "afternoon" },
@@ -71,7 +73,9 @@ describe("CommandSchema", () => {
 
   it("parses addLink; linkTasks no longer does", () => {
     expect(CommandSchema.safeParse({ type: "addLink", predecessorId: A, followerId: B, kind: "FF", lag: 2 }).success).toBe(true);
-    expect(CommandSchema.safeParse({ type: "addLink", predecessorId: A, followerId: B, kind: "SF" }).success).toBe(false);
+    expect(CommandSchema.safeParse({ type: "addLink", predecessorId: A, followerId: B, kind: "SF" }).success).toBe(true);
+    expect(CommandSchema.safeParse({ type: "addLink", predecessorId: A, followerId: B, kind: "XX" }).success).toBe(false);
+    expect(CommandSchema.safeParse({ type: "updateLink", predecessorId: A, followerId: B, kind: "FS", reverse: "yes" }).success).toBe(false);
     expect(CommandSchema.safeParse({ type: "linkTasks", fromId: A, toId: B }).success).toBe(false);
     expect(CommandSchema.safeParse({ type: "removePredecessor", id: A }).success).toBe(false);
     expect(CommandSchema.safeParse({ type: "setOffset", id: A, offset: 1 }).success).toBe(false);

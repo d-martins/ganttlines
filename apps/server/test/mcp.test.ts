@@ -115,7 +115,7 @@ describe("AI access: read tools", () => {
     const rows = (await call(client, "get_project", { project: "Launch" }))["rows"] as { title: string }[];
     expect(rows.find((row) => row.title === "Review")).toMatchObject({
       predecessors: [
-        { task: { id: ids.build, title: "Build" }, kind: "FF", kindInWords: "can't finish before it", lagDays: 0 },
+        { task: { id: ids.build, title: "Build" }, kind: "FF", kindInWords: "can't finish before it finishes", lagDays: 0 },
         { task: { id: ids.design, title: "Design" }, kind: "SS", kindInWords: "once it starts", lagDays: 1 },
       ].sort((a, b) => (a.task.id < b.task.id ? -1 : 1)),
       // Review can't finish before Build (Wed 14): two days end on Wed 14.

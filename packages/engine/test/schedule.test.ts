@@ -386,6 +386,78 @@ describe("constraintsFor", () => {
   });
 });
 
+describe("computeSchedule — start to finish", () => {
+  // October 2026: Mon 5, Tue 6, Wed 7 … Mon 12, Tue 13, Wed 14
+  const oct = calendar({ timeOff: [{ id: "t1", resourceId: "bo", startDate: "2026-10-06", endDate: "2026-10-06" }] });
+  const a = task("a", { userStart: "2026-10-07", duration: 3 }); // Wed 7 – Fri 9
+
+  it("SF lets the follower end as the predecessor starts", () => {
+    const schedule = computeSchedule(project(a, task("b", { userStart: "2026-10-01", duration: 2 }), link("a", "b", 0, "SF")), oct);
+    expect(datesOf(schedule, "b")).toEqual({ start: "2026-10-05", end: "2026-10-06" });
+  });
+
+  it("SF lag pushes the end later", () => {
+    const schedule = computeSchedule(project(a, task("b", { userStart: "2026-10-01", duration: 2 }), link("a", "b", 1, "SF")), oct);
+    expect(datesOf(schedule, "b")).toEqual({ start: "2026-10-06", end: "2026-10-07" });
+  });
+
+  it("SF when the predecessor starts in the afternoon", () => {
+    const afternoon = task("a", { userStart: "2026-10-07", startsAfternoon: true, duration: 3 });
+    const schedule = computeSchedule(project(afternoon, task("b", { userStart: "2026-10-01", duration: 2 }), link("a", "b", 0, "SF")), oct);
+    expect(halvesOf(schedule, "b")).toEqual({ start: "2026-10-05 pm", end: "2026-10-07 am" });
+  });
+
+  it("SF on the follower's calendar", () => {
+    const b = task("b", { userStart: "2026-10-01", duration: 1, resourceId: "bo" });
+    const schedule = computeSchedule(project(a, b, link("a", "b", 0, "SF")), oct);
+    expect(datesOf(schedule, "b")).toEqual({ start: "2026-10-05", end: "2026-10-05" });
+  });
+
+  it("SF into a milestone puts it on the morning of the day it may end", () => {
+    const schedule = computeSchedule(project(a, task("m", { userStart: "2026-10-01", duration: 0 }), link("a", "m", 0, "SF")), oct);
+    expect(halvesOf(schedule, "m")).toEqual({ start: "2026-10-06 am", end: "2026-10-06 pm" });
+  });
+
+  it("a later own start wins over SF", () => {
+    const schedule = computeSchedule(project(a, task("b", { userStart: "2026-10-12", duration: 2 }), link("a", "b", 0, "SF")), oct);
+    expect(datesOf(schedule, "b")).toEqual({ start: "2026-10-12", end: "2026-10-13" });
+  });
+
+  it("SF onto a parent stretches it, not its subtasks", () => {
+    const state = project(
+      task("p"),
+      task("c", { parentId: "p", userStart: "2026-10-05", duration: 2 }), // Mon 5 – Tue 6
+      task("x", { userStart: "2026-10-14", duration: 2 }), // Wed 14 – Thu 15
+      link("x", "p", 0, "SF"),
+    );
+    const schedule = computeSchedule(state, oct);
+    expect(datesOf(schedule, "p")).toEqual({ start: "2026-10-05", end: "2026-10-13" });
+    expect(datesOf(schedule, "c")).toEqual({ start: "2026-10-05", end: "2026-10-06" });
+    expect(constraintsFor(state, state.rows.c as TaskRow)).toEqual([]);
+  });
+
+  it("SF onto a parent without scheduled subtasks leaves it unscheduled", () => {
+    const state = project(task("p"), task("c", { parentId: "p" }), task("x", { userStart: "2026-10-14" }), link("x", "p", 0, "SF"));
+    expect(datesOf(computeSchedule(state, oct), "p")).toBeNull();
+  });
+
+  it("a parent as the predecessor uses its computed start", () => {
+    const state = project(
+      task("p"),
+      task("c", { parentId: "p", userStart: "2026-10-07", duration: 2 }), // Wed 7 – Thu 8
+      task("b", { userStart: "2026-10-01", duration: 1 }),
+      link("p", "b", 0, "SF"),
+    );
+    expect(datesOf(computeSchedule(state, oct), "b")).toEqual({ start: "2026-10-06", end: "2026-10-06" });
+  });
+
+  it("a locked SF follower that ends too early is violated", () => {
+    const state = project(a, task("b", { userStart: "2026-10-01", duration: 2, locked: true }), link("a", "b", 0, "SF"));
+    const schedule = computeSchedule(state, oct);
+    expect(violatedLinks(state, oct, schedule)).toEqual(new Set([linkKey(link("a", "b", 0, "SF"))]));
+  });
+});
+
 describe("linkFloor", () => {
   // June 2026: a runs Mon 1 – Fri 5.
   const span = computeSchedule(project(task("a", { userStart: "2026-06-01", duration: 5 })), calendar()).get("a")!.span!;
@@ -396,6 +468,11 @@ describe("linkFloor", () => {
     expect(linkFloor(calendar(), follower, link("a", "b", 3), span)).toBe(morningOf("2026-06-02"));
     expect(linkFloor(calendar(), follower, link("a", "b", 3, "SS"), span)).toBe(morningOf("2026-06-01"));
     expect(linkFloor(calendar(), follower, link("a", "b", 3, "FF"), span)).toBe(morningOf("2026-06-04"));
+  });
+
+  it("is the start that ends just before the predecessor starts for SF", () => {
+    // a starts Mon 1, so a two-day SF follower may run Thu 28 – Fri 29 May.
+    expect(linkFloor(calendar(), follower, link("a", "b", 3, "SF"), span)).toBe(morningOf("2026-05-28"));
   });
 });
 
