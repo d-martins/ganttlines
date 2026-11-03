@@ -25,7 +25,7 @@ export interface Outline {
 
 /**
  * The project as an outline: depth-first by position, numbered 1…n. While `filters` narrow it, only
- * the matching tasks and their ancestors (as context) are shown, and nothing is collapsed.
+ * the matching rows and their ancestors (as context) are shown, and nothing is collapsed.
  */
 export function outline(
   state: ProjectState,
@@ -33,7 +33,7 @@ export function outline(
   collapsed: ReadonlySet<RowId> = new Set(),
   /** resource ids of the team, to tell known people in `filters` */
   team?: ReadonlySet<string>,
-  /** tasks shown as matches while filtering, even though they no longer match */
+  /** rows shown as matches while filtering, even though they no longer match */
   keep?: ReadonlySet<RowId>,
 ): Outline {
   const tree = buildTree(state);

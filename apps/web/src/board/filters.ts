@@ -8,7 +8,7 @@ export interface BoardFilters {
   /** resource ids; "none" = unassigned */
   people: (string | "none")[];
   tags: string[];
-  /** section ids: tasks anywhere under one of them */
+  /** section ids: each shows with what's anywhere under it */
   sections: RowId[];
 }
 
@@ -36,7 +36,10 @@ export function knownFilters(state: ProjectState, f: BoardFilters, team?: Readon
 
 /**
  * Rows that match, plus the ancestors shown as context; null when not filtering (see knownFilters).
- * Only tasks match. Tasks in `keep` count as matches too (rows kept on screen after they stopped).
+ * A section whose title the search finds, or that the section filter names, matches, and every row in
+ * it passes that filter too; the other filters still pick among those rows (people and tags only ever
+ * pick tasks), so a named section shows even with nothing in it left. Rows in `keep` count as matches
+ * too (rows kept on screen after they stopped).
  */
 export function filterRows(
   state: ProjectState,
@@ -45,7 +48,6 @@ export function filterRows(
   keep?: ReadonlySet<RowId>,
 ): { matches: Set<RowId>; context: Set<RowId> } | null {
   const rows = Object.values(state.rows);
-  const tasks = rows.filter((row) => row.kind === "task");
   const known = knownFilters(state, f, team);
   const needle = known.q.trim().toLocaleLowerCase();
   const people = new Set(known.people);
@@ -64,15 +66,20 @@ export function filterRows(
     }
     return found;
   };
+  const found = (row: Readonly<Row>) => row.title.toLocaleLowerCase().includes(needle);
   const matches = new Set<RowId>();
-  for (const row of tasks) {
-    if (needle && !row.title.toLocaleLowerCase().includes(needle)) continue;
-    if (people.size > 0 && !people.has(row.resourceId ?? "none")) continue;
-    if (tags.size > 0 && !row.tags.some((tag) => tags.has(tagKey(tag)))) continue;
-    if (sections.size > 0 && !ancestors(row).some((above) => sections.has(above.id))) continue;
+  for (const row of rows) {
+    const above = ancestors(row);
+    const named = row.kind === "section" && ((needle !== "" && found(row)) || sections.has(row.id));
+    if (needle && !found(row) && !above.some((up) => up.kind === "section" && found(up))) continue;
+    if (sections.size > 0 && !sections.has(row.id) && !above.some((up) => sections.has(up.id))) continue;
+    if (row.kind === "task") {
+      if (people.size > 0 && !people.has(row.resourceId ?? "none")) continue;
+      if (tags.size > 0 && !row.tags.some((tag) => tags.has(tagKey(tag)))) continue;
+    } else if (!named && (people.size > 0 || tags.size > 0)) continue;
     matches.add(row.id);
   }
-  for (const id of keep ?? []) if (state.rows[id]?.kind === "task") matches.add(id);
+  for (const id of keep ?? []) if (state.rows[id]) matches.add(id);
   const context = new Set<RowId>();
   for (const id of matches) {
     for (const above of ancestors(state.rows[id]!)) if (!matches.has(above.id)) context.add(above.id);

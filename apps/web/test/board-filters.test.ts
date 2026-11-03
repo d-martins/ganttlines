@@ -64,19 +64,39 @@ describe("filterRows", () => {
     expect(run({ tags: ["UI", "docs"] }).matches).toEqual(["c1", "t", "ui"]);
   });
 
-  it("a section includes tasks in nested sections", () => {
-    expect(run({ sections: ["s"] }).matches).toEqual(["c1", "c2", "p", "ui"]);
-    expect(run({ sections: ["n"] }).matches).toEqual(["ui"]);
+  it("a section shows itself and everything nested in it", () => {
+    expect(run({ sections: ["s"] })).toEqual({ matches: ["c1", "c2", "n", "p", "s", "ui"], context: [] });
+    expect(run({ sections: ["n"] })).toEqual({ matches: ["n", "ui"], context: ["s"] });
   });
 
   it("filters AND together", () => {
     expect(run({ people: ["ana"], q: "child" }).matches).toEqual(["c1"]);
-    expect(run({ tags: ["ui"], sections: ["n"] }).matches).toEqual(["ui"]);
-    expect(run({ people: ["none"], sections: ["s"] }).matches).toEqual(["c2"]);
+    expect(run({ tags: ["ui"], sections: ["n"] }).matches).toEqual(["n", "ui"]);
+    expect(run({ people: ["none"], sections: ["s"] })).toEqual({ matches: ["c2", "s"], context: ["p"] });
   });
 
-  it("never matches sections themselves", () => {
-    expect(run({ q: "design" }).matches).toEqual([]);
+  it("search matches section titles: the section shows with everything inside it", () => {
+    expect(run({ q: "DESIGN" })).toEqual({ matches: ["c1", "c2", "n", "p", "s", "ui"], context: [] });
+    expect(run({ q: "nest" })).toEqual({ matches: ["n", "ui"], context: ["s"] });
+  });
+
+  it("inside a section the search matches, the other filters still pick the tasks", () => {
+    expect(run({ q: "design", people: ["ana"] })).toEqual({ matches: ["c1", "s", "ui"], context: ["n", "p"] });
+    expect(run({ q: "design", tags: ["backend"] })).toEqual({ matches: ["p", "s"], context: [] });
+    // no task inside passes: the section still shows, alone
+    expect(run({ q: "design", tags: ["docs"] })).toEqual({ matches: ["s"], context: [] });
+    expect(run({ q: "nested", sections: ["s"] })).toEqual({ matches: ["n", "ui"], context: ["s"] });
+    // a chosen section the search doesn't match is only context
+    expect(run({ q: "child", sections: ["s"] })).toEqual({ matches: ["c1", "c2"], context: ["p", "s"] });
+  });
+
+  it("an empty section shows alone, for the section filter or the search", () => {
+    const empty: ProjectState = { rows: { ...state.rows, e: section("e", { title: "Empty", position: "c0" }) }, links: {} };
+    for (const fields of [{ sections: ["e"] }, { q: "empt" }]) {
+      expect(filterRows(empty, f(fields))).toEqual({ matches: new Set(["e"]), context: new Set() });
+      expect(outline(empty, f(fields)).visible.map((entry) => [entry.row.id, entry.context])).toEqual([["e", false]]);
+    }
+    expect(boardModel(empty, new Calendar(CALENDAR), null, f({ sections: ["e"] })).count).toEqual({ matching: 0, total: 5 });
   });
 
   it("context is every ancestor of a match that isn't a match", () => {
@@ -87,13 +107,13 @@ describe("filterRows", () => {
     // Rui's parent matches; neither subtask is Rui's.
     expect(run({ people: ["rui"] })).toEqual({ matches: ["p"], context: ["s"] });
     // Parent and one subtask match: the other subtask stays hidden.
-    expect(run({ people: ["rui", "ana"], sections: ["s"] })).toEqual({ matches: ["c1", "p", "ui"], context: ["n", "s"] });
+    expect(run({ people: ["rui", "ana"], sections: ["s"] })).toEqual({ matches: ["c1", "p", "s", "ui"], context: ["n"] });
   });
 
   it("ignores unknown people and sections; with nothing known left, the filter is off", () => {
     expect(run({ people: ["ghost", "ana"] }).matches).toEqual(["c1", "ui"]);
     expect(run({ tags: ["nope", "Docs"] }).matches).toEqual(["t"]);
-    expect(run({ sections: ["missing", "n"] }).matches).toEqual(["ui"]);
+    expect(run({ sections: ["missing", "n"] }).matches).toEqual(["n", "ui"]);
     // a task id isn't a section
     expect(run({ sections: ["p"] }).matches).toEqual([]);
     expect(filterRows(state, f({ sections: ["p"] }))).toBeNull();
@@ -166,6 +186,25 @@ describe("outline and model while filtering", () => {
     expect(model.count).toEqual({ matching: 1, total: 5 });
   });
 
+  it("shows a chosen section undimmed above its tasks", () => {
+    expect(outline(state, f({ sections: ["n"] })).visible.map((entry) => [entry.row.id, entry.context])).toEqual([
+      ["s", true],
+      ["n", false],
+      ["ui", false],
+    ]);
+  });
+
+  it("a kept section stays as a match", () => {
+    const calendar = new Calendar(CALENDAR);
+    const model = boardModel(state, calendar, null, f({ q: "top" }), new Set(), undefined, new Set(["n"]));
+    expect(model.rows.map((entry) => [entry.row.id, entry.context])).toEqual([
+      ["s", true],
+      ["n", false],
+      ["t", false],
+    ]);
+    expect(model.count).toEqual({ matching: 1, total: 5 });
+  });
+
   it("rows aren't context when not filtering", () => {
     const { visible } = outline(state);
     expect(visible.every((entry) => !entry.context)).toBe(true);
@@ -188,6 +227,9 @@ describe("outline and model while filtering", () => {
     expect(boardModel(state, calendar, null).count).toEqual({ matching: 5, total: 5 });
     expect(boardModel(state, calendar, null, f({ tags: ["ui"] })).count).toEqual({ matching: 2, total: 5 });
     expect(boardModel(state, calendar, null, f({ q: "zzz" })).count).toEqual({ matching: 0, total: 5 });
+    // matching sections show but aren't counted
+    expect(boardModel(state, calendar, null, f({ sections: ["s"] })).count).toEqual({ matching: 4, total: 5 });
+    expect(boardModel(state, calendar, null, f({ q: "design" })).count).toEqual({ matching: 4, total: 5 });
   });
 });
 
