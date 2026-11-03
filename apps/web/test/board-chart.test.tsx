@@ -183,7 +183,7 @@ describe("chart editing", () => {
     fireEvent.pointerMove(window, { clientX: HOOKS_RIGHT_HALF, clientY: HOOKS_Y });
     expect(targetMarker()).toHaveAttribute("data-end", "end");
     expect(targetMarker()).toHaveAttribute("cx", "1408");
-    expect(kindLabel()).toHaveTextContent("can't finish before it");
+    expect(kindLabel()).toHaveTextContent("can't finish before it finishes");
     fireEvent.keyDown(window, { key: "Escape" });
     expect(targetMarker()).toBeNull();
     expect(kindLabel()).toBeNull();

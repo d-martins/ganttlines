@@ -30,7 +30,7 @@ describe("history of links", () => {
     expect(describeChange(created(0, "SF"), names, "p")).toBe("“Build” now waits on it, can't finish before it starts");
     expect(describeChange(removed, names, "f")).toBe("no longer waits on “Design”");
     expect(describeChange(lag, names, "f")).toBe("changed the delay after “Design” to 3 days");
-    expect(describeChange(created(2, "FF"), names, "p")).toBe("“Build” now waits on it, can't finish before it");
+    expect(describeChange(created(2, "FF"), names, "p")).toBe("“Build” now waits on it, can't finish before it finishes");
     expect(describeChange(removed, names, "p")).toBe("“Build” no longer waits on it");
     expect(describeChange(lag, names, "p")).toBe("changed the delay of “Build”'s link to 3 days");
     expect(describeChange({ ...lag, after: -2 }, names, "f")).toBe("now overlaps “Design” by 2 days");

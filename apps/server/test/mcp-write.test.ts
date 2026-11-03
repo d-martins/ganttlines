@@ -289,7 +289,7 @@ describe("AI access: editing plans", () => {
     // L starts after A finishes (fine) but finishes on Mon 12, before C does on Fri 16.
     const linked = await call(client, "update_task", { project: "Launch", task: "L", predecessors: [{ task: "A" }, { task: "C", kind: "FF" }] });
     expect(linked["error"]).toBeUndefined();
-    expect(linked["notes"]).toEqual(["“L” is locked and starts too early for its link to “C” (can't finish before it), shown in red on the board: unlock it, or move it later."]);
+    expect(linked["notes"]).toEqual(["“L” is locked and starts too early for its link to “C” (can't finish before it finishes), shown in red on the board: unlock it, or move it later."]);
     const task = linked["task"] as { startsTooEarly?: boolean; predecessors: { task: { title: string }; startsTooEarly?: boolean }[] };
     expect(task.startsTooEarly).toBe(true);
     expect(task.predecessors.find((entry) => entry.task.title === "C")).toMatchObject({ kind: "FF", startsTooEarly: true });

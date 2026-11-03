@@ -12,7 +12,7 @@ export const LINK_KINDS: readonly LinkKind[] = ["FS", "SS", "FF", "SF"];
 export const LINK_KIND_WORDS: Readonly<Record<LinkKind, string>> = {
   FS: "after it finishes",
   SS: "once it starts",
-  FF: "can't finish before it",
+  FF: "can't finish before it finishes",
   SF: "can't finish before it starts",
 };
 
