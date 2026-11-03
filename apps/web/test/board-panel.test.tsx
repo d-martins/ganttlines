@@ -289,6 +289,18 @@ describe("details panel", () => {
     expect(within(ui!).getByRole("button", { name: "Remove link with #2 ui" })).toBeInTheDocument();
     expect(within(qa!).getByRole("combobox", { name: "Link with #4 qa: this task" })).toHaveDisplayValue("starts before");
     expect(within(qa!).getByRole("combobox", { name: "Link with #4 qa: the other task" })).toHaveDisplayValue("started");
+    // Fits on one line: the selects size to their words, the task takes the rest and truncates.
+    for (const line of [ui!, qa!]) {
+      expect(line).toHaveClass("flex");
+      for (const select of within(line).getAllByRole("combobox")) {
+        expect(select).not.toHaveClass("w-full");
+        expect(select).toHaveClass("shrink-0");
+      }
+      const taskButton = within(line).getByRole("button", { name: /: change the task$/ });
+      expect(taskButton).toHaveClass("min-w-0", "flex-1");
+      expect(taskButton.querySelector(".truncate")).not.toBeNull();
+    }
+    expect(within(ui!).getByRole("button", { name: "Link with #2 ui: change the task" })).toHaveAttribute("title", "#2 ui");
     // No delay box: delays change by dragging.
     expect(within(links()).queryByRole("spinbutton")).not.toBeInTheDocument();
     expect(within(panel()).queryByRole("spinbutton", { name: /delay/i })).not.toBeInTheDocument();
@@ -339,10 +351,26 @@ describe("details panel", () => {
     await user.type(screen.getByRole("combobox", { name: "Find a task to link" }), "docs{Enter}");
     expect(sentCommands().slice(before)).toEqual([
       { type: "removeLink", predecessorId: "ui", followerId: "hooks", kind: "FS", keepPlace: false },
-      { type: "addLink", predecessorId: "docs", followerId: "hooks", kind: "FS" },
+      { type: "addLink", predecessorId: "docs", followerId: "hooks", kind: "FS", lag: 2 }, // the delay carries over
     ]);
     await waitFor(() => expect(within(panel()).getByRole("button", { name: "Link with #5 docs: change the task" })).toHaveFocus());
     expect(within(panel()).queryByRole("button", { name: /^Link with #2 ui/ })).not.toBeInTheDocument();
+  });
+
+  it("picking another task keeps the delay", async () => {
+    const rows = [...LINK_ROWS, task("docs", { parentId: "x", position: "a3", userStart: "2026-10-22", duration: 1 })];
+    const { user } = await panelBoard(rows, ADMIN, [], [{ predecessorId: "ui", followerId: "hooks", kind: "FS", lag: -1 }, { predecessorId: "hooks", followerId: "qa", kind: "SS", lag: 1.5 }]);
+    await selectRow(user, "hooks");
+    await user.click(within(panel()).getByRole("button", { name: "Link with #4 qa: change the task" }));
+    await user.type(screen.getByRole("combobox", { name: "Find a task to link" }), "docs{Enter}");
+    expect(sentCommands().slice(-2)).toEqual([
+      { type: "removeLink", predecessorId: "hooks", followerId: "qa", kind: "SS", keepPlace: false },
+      { type: "addLink", predecessorId: "hooks", followerId: "docs", kind: "SS", lag: 1.5 },
+    ]);
+    // An overlap (FS only) carries over too.
+    await user.click(within(panel()).getByRole("button", { name: "Link with #2 ui: change the task" }));
+    await user.type(screen.getByRole("combobox", { name: "Find a task to link" }), "qa{Enter}");
+    expect(sentCommands().at(-1)).toEqual({ type: "addLink", predecessorId: "qa", followerId: "hooks", kind: "FS", lag: -1 });
   });
 
   it("goes to the linked task from its picker", async () => {
@@ -364,6 +392,7 @@ describe("details panel", () => {
     expect(screen.getByRole("combobox", { name: "Find a task to link" })).toHaveFocus();
     await user.keyboard("{Escape}");
     expect(within(panel()).queryByText("None")).not.toBeInTheDocument();
+    for (const select of within(lines()[0]!).getAllByRole("combobox")) expect(select).not.toHaveClass("w-full"); // looks like the other lines
     expect(within(panel()).getByRole("combobox", { name: "New link: this task" })).toHaveDisplayValue("starts after");
     expect(within(panel()).getByRole("button", { name: "New link: choose a task" })).toHaveTextContent("choose a task…");
     expect(within(panel()).getByRole("combobox", { name: "New link: the other task" })).toHaveDisplayValue("finished");

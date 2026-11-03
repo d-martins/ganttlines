@@ -21,9 +21,9 @@ import { toast } from "../../ui/toast";
 import { END_WORDS, lineOf, linkOf, WHEN_WORDS, type LinkLine, type LinkShape } from "../link-phrases";
 import { useSelection } from "../selection";
 import { TaskPicker } from "../task-picker";
-import { INPUT } from "./commit-input";
 
-const SELECT = `${INPUT} w-auto min-w-0 shrink-0`;
+// Sized to their words (not the panel's full-width inputs), so a line fits: the task takes what's left.
+const SELECT = "shrink-0 rounded-md border border-border-strong bg-bg px-1.5 py-1 text-sm text-text";
 const TASK_BUTTON = "flex min-w-0 flex-1 items-center gap-1 rounded-md border border-border-strong bg-bg px-2 py-1 text-left text-sm hover:bg-surface-2";
 
 type Control = "when" | "end" | "task";
@@ -78,7 +78,7 @@ function LineControls({
   removeMarker?: boolean;
 }) {
   return (
-    <li className="flex items-center gap-1 text-sm">
+    <li data-link-line className="flex min-w-0 items-center gap-1 text-sm">
       <WordSelect value={line.when} words={WHEN_WORDS} label={`${label}: this task`} selectRef={refs.when} onChange={(when) => onLine({ ...line, when })} />
       {task}
       <WordSelect value={line.end} words={END_WORDS} label={`${label}: the other task`} selectRef={refs.end} onChange={(end) => onLine({ ...line, end })} />
@@ -165,7 +165,9 @@ export function LinksSection({
    */
   const changeTask = (link: Link, otherId: RowId) => {
     const remove: Command = { type: "removeLink", predecessorId: link.predecessorId, followerId: link.followerId, kind: link.kind, keepPlace: false };
-    const add = { type: "addLink" as const, ...between(otherId, link.followerId === task.id), kind: link.kind };
+    // The delay carries over (an overlap only where the kind allows one).
+    const lag = link.kind === "FS" ? link.lag : Math.max(0, link.lag);
+    const add = { type: "addLink" as const, ...between(otherId, link.followerId === task.id), kind: link.kind, ...(lag !== 0 ? { lag } : {}) };
     const removed = applyCommand(state, calendar, remove);
     const checked = removed.ok ? applyCommand(removed.state, calendar, add) : removed;
     if (!checked.ok) {
@@ -351,7 +353,7 @@ function LinkLineEditor({
             </button>
           }
           trigger={
-            <button ref={taskButton} type="button" aria-label={`${label}: change the task`} className={TASK_BUTTON}>
+            <button ref={taskButton} type="button" aria-label={`${label}: change the task`} title={name} className={TASK_BUTTON}>
               <span className="truncate">{name}</span>
               <ChevronDown aria-hidden size={13} className="ml-auto shrink-0 text-muted" />
             </button>
