@@ -90,16 +90,32 @@ describe("filterRows", () => {
     expect(run({ people: ["rui", "ana"], sections: ["s"] })).toEqual({ matches: ["c1", "p", "ui"], context: ["n", "s"] });
   });
 
-  it("ignores unknown people, tags and sections; with nothing known left, the filter is off", () => {
+  it("ignores unknown people and sections; with nothing known left, the filter is off", () => {
     expect(run({ people: ["ghost", "ana"] }).matches).toEqual(["c1", "ui"]);
     expect(run({ tags: ["nope", "Docs"] }).matches).toEqual(["t"]);
     expect(run({ sections: ["missing", "n"] }).matches).toEqual(["ui"]);
     // a task id isn't a section
     expect(run({ sections: ["p"] }).matches).toEqual([]);
     expect(filterRows(state, f({ sections: ["p"] }))).toBeNull();
-    expect(filterRows(state, f({ people: ["ghost"], tags: ["nope"], sections: ["missing"] }))).toBeNull();
+    expect(filterRows(state, f({ people: ["ghost"], sections: ["missing"] }))).toBeNull();
     // only the unknown part drops: the rest still applies
     expect(run({ people: ["ghost"], q: "top" }).matches).toEqual(["t"]);
+  });
+
+  it("a tag nobody here uses stays active and matches nothing", () => {
+    expect(filterRows(state, f({ tags: ["nope"] }))).toEqual({ matches: new Set(), context: new Set() });
+    expect(filterRows(state, f({ people: ["ghost"], tags: ["nope"] }))).toEqual({ matches: new Set(), context: new Set() });
+  });
+
+  it("removing a tag from its only task keeps the tag filter on, with no matches", () => {
+    const calendar = new Calendar(CALENDAR);
+    const before = { rows: { x: task("x", { tags: ["UI"] }), y: task("y") }, links: {} };
+    expect(boardModel(before, calendar, null, f({ tags: ["UI"] })).count).toEqual({ matching: 1, total: 2 });
+    const after = { rows: { ...before.rows, x: task("x", { tags: [] }) }, links: {} };
+    expect(filterRows(after, f({ tags: ["UI"] }))).toEqual({ matches: new Set(), context: new Set() });
+    const model = boardModel(after, calendar, null, f({ tags: ["UI"] }));
+    expect(model.count).toEqual({ matching: 0, total: 2 });
+    expect(model.rows).toEqual([]);
   });
 
   it("knows the team's people even without tasks here", () => {

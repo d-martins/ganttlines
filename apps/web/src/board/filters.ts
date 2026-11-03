@@ -20,8 +20,8 @@ export function isFiltering(f: BoardFilters): boolean {
 
 /**
  * Rows that match, plus the ancestors shown as context; null when not filtering. Only tasks match.
- * People, tags and sections this board doesn't know are ignored (people are known from `team` when
- * given, else from this board's tasks), so a link naming them never empties the board.
+ * People and sections this board doesn't know are ignored (people are known from `team` when given,
+ * else from this board's tasks), so a link naming them never empties the board.
  */
 export function filterRows(state: ProjectState, f: BoardFilters, team?: ReadonlySet<string>): { matches: Set<RowId>; context: Set<RowId> } | null {
   const rows = Object.values(state.rows);
@@ -29,8 +29,8 @@ export function filterRows(state: ProjectState, f: BoardFilters, team?: Readonly
   const needle = f.q.trim().toLocaleLowerCase();
   const knownPeople = team ?? new Set(tasks.flatMap((row) => (row.resourceId === null ? [] : [row.resourceId])));
   const people = new Set(f.people.filter((id) => id === "none" || knownPeople.has(id)));
-  const boardTags = new Set(tasks.flatMap((row) => row.tags.map(tagKey)));
-  const tags = new Set(f.tags.map(tagKey).filter((key) => boardTags.has(key)));
+  // Tags are text: one nobody here uses still filters (to nothing), so it never drops out.
+  const tags = new Set(f.tags.map(tagKey).filter((key) => key !== ""));
   const sections = new Set(f.sections.filter((id) => state.rows[id]?.kind === "section"));
   if (!needle && people.size === 0 && tags.size === 0 && sections.size === 0) return null;
 
