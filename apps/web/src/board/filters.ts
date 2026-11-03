@@ -99,3 +99,11 @@ export function withFilters(search: BoardSearch, f: BoardFilters): BoardSearch {
   const { q: _q, people: _people, tags: _tags, sections: _sections, ...rest } = search;
   return { ...rest, ...searchFromFilters(f) };
 }
+
+/** Whether the tag filter includes `tag` (in any spelling). */
+export const hasTag = (f: BoardFilters, tag: string): boolean => f.tags.some((entry) => tagKey(entry) === tagKey(tag));
+
+/** The filters with `tag` added to the tag filter, or taken out when it's there (in any spelling). */
+export function toggleTag(f: BoardFilters, tag: string): BoardFilters {
+  return { ...f, tags: hasTag(f, tag) ? f.tags.filter((entry) => tagKey(entry) !== tagKey(tag)) : [...f.tags, tag] };
+}

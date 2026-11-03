@@ -10,6 +10,7 @@ import type { BarStyle } from "../view-store";
 import { BarMenu } from "./bar-menu";
 import { ActualTrack, BAR_HEIGHT, barDetails, DOT_GAP, DOT_REACH, DOT_SIZE, extent, GhostBar, ROW_HEIGHT, RowBar } from "./bars";
 import { dragCommand, edgeAt, linkKindOf, startAt, stepHalf, useChartDrag, type ChartDrag, type DragKind, type LinkEnd } from "./drag";
+import { TagChips, type TagFilter } from "./tag-chips";
 import type { Timeline } from "./timeline";
 import { AUTO_SCROLL_STEP, AUTO_SCROLL_TICK_MS, edgePush, HEADER_HEIGHT } from "../auto-scroll";
 
@@ -51,6 +52,7 @@ export function ChartRows({
   timeline,
   style,
   visibleLeft,
+  tagFilter,
 }: {
   /** the rendered window (already showing any drag preview) */
   rows: readonly BoardRow[];
@@ -61,6 +63,8 @@ export function ChartRows({
   style: BarStyle;
   /** chart x of the first visible pixel (the list covers what's left of it) */
   visibleLeft: number;
+  /** what a click on a task's tag does: toggles it in the board's filter */
+  tagFilter: TagFilter;
 }) {
   const board = useBoard();
   const { state, resources, resourceMap, canEdit, canCreateResources } = board;
@@ -249,6 +253,7 @@ export function ChartRows({
                 resources={resourceMap}
                 titleGap={editable ? 18 : 6}
                 visibleLeft={visibleLeft}
+                tags={task && task.tags.length > 0 ? <TagChips title={row.title} tags={task.tags} filter={tagFilter} /> : null}
                 shape={
                   editable
                     ? {

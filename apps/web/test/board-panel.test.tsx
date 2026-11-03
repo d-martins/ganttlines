@@ -466,6 +466,97 @@ describe("details panel", () => {
     expect(panel()).toHaveAccessibleName("Details of “ui”");
   });
 
+  describe("tags", () => {
+    const tagsBoard = async (tags: string[] = [], user = ADMIN, known: string[] = ["UI", "UX research", "Q4 · must-have", "Back end"]) => {
+      const rows = [ROWS[0]!, ROWS[1]!, task("hooks", { parentId: "x", position: "a1", userStart: "2026-10-12", duration: 2, tags })];
+      const app = await panelBoard(rows, user);
+      const tagRequests = vi.fn(() => ({ body: { tags: known } }));
+      app.api.on("GET /api/tags", tagRequests);
+      await selectRow(app.user, "hooks");
+      return { ...app, tagRequests };
+    };
+    const tagSection = () => within(panel()).getByRole("heading", { name: "Tags" }).closest("section")!;
+    const tagInput = () => within(tagSection()).getByRole("combobox", { name: "Add tag" });
+    const chips = () => within(tagSection()).queryAllByRole("listitem").map((item) => item.querySelector("[data-tag]")!.textContent);
+    const lastSetTags = () => sentCommands().filter((command) => command.type === "setTags").at(-1);
+
+    it("sits above Links: a borderless Add tag until focused", async () => {
+      const { user } = await tagsBoard();
+      const headings = within(panel()).getAllByRole("heading").map((heading) => heading.textContent);
+      expect(headings.indexOf("Tags")).toBe(headings.indexOf("Links") - 1);
+      expect(chips()).toEqual([]);
+      expect(tagInput()).toHaveAttribute("placeholder", "Add tag");
+      expect(tagInput().className).toContain("border-transparent");
+      expect(tagInput().className).toContain("focus:border-border-strong");
+      await user.click(tagInput());
+      expect(within(tagSection()).queryByRole("listbox")).not.toBeInTheDocument();
+    });
+
+    it('typing lists the matching workspace tags, then + Create "…"', async () => {
+      const { user } = await tagsBoard();
+      await user.type(tagInput(), "u");
+      const options = await within(tagSection()).findAllByRole("option");
+      expect(options.map((option) => option.textContent)).toEqual(["UI", "UX research", "Q4 · must-have", '+ Create "u"']);
+      expect(options[0]).toHaveAttribute("aria-selected", "true");
+    });
+
+    it("Enter adds the highlighted tag, in the workspace's spelling", async () => {
+      const { user } = await tagsBoard(["Docs"]);
+      await user.type(tagInput(), "ui");
+      expect((await within(tagSection()).findAllByRole("option")).map((option) => option.textContent)).toEqual(["UI"]);
+      await user.keyboard("{Enter}");
+      expect(lastSetTags()).toEqual({ type: "setTags", id: "hooks", tags: ["Docs", "UI"] });
+      expect(tagInput()).toHaveValue("");
+    });
+
+    it("creates a new tag, and the arrow keys move the highlight", async () => {
+      const { user } = await tagsBoard();
+      await user.type(tagInput(), "back");
+      await within(tagSection()).findAllByRole("option");
+      await user.keyboard("{ArrowDown}{Enter}");
+      expect(lastSetTags()).toEqual({ type: "setTags", id: "hooks", tags: ["back"] });
+    });
+
+    it("× and Backspace in the empty input remove tags", async () => {
+      const { user } = await tagsBoard(["UI", "Docs", "Back end"]);
+      expect(chips()).toEqual(["UI", "Docs", "Back end"]);
+      await user.click(within(tagSection()).getByRole("button", { name: "Remove the tag “Docs”" }));
+      expect(lastSetTags()).toEqual({ type: "setTags", id: "hooks", tags: ["UI", "Back end"] });
+      await user.click(tagInput());
+      await user.keyboard("{Backspace}");
+      expect(lastSetTags()).toEqual({ type: "setTags", id: "hooks", tags: ["UI"] });
+    });
+
+    it("reorders the chips by dragging their handle", async () => {
+      await tagsBoard(["UI", "Docs", "Back end"]);
+      within(tagSection())
+        .getAllByRole("listitem")
+        .forEach((item, index) => {
+          item.getBoundingClientRect = () => ({ top: 0, bottom: 20, left: index * 60, right: index * 60 + 50, width: 50, height: 20, x: index * 60, y: 0, toJSON: () => ({}) });
+        });
+      fireEvent.pointerDown(within(tagSection()).getByRole("button", { name: "Move the tag “UI”" }), { button: 0, clientX: 5, clientY: 10 });
+      fireEvent.pointerMove(window, { clientX: 100, clientY: 10 });
+      fireEvent.pointerMove(window, { clientX: 170, clientY: 10 });
+      fireEvent.pointerUp(window, { clientX: 170, clientY: 10 });
+      expect(lastSetTags()).toEqual({ type: "setTags", id: "hooks", tags: ["Docs", "Back end", "UI"] });
+    });
+
+    it("viewers see the chips only, and don't fetch the workspace's tags", async () => {
+      const { tagRequests } = await tagsBoard(["UI", "Docs"], VIEWER);
+      expect(chips()).toEqual(["UI", "Docs"]);
+      expect(within(tagSection()).queryByRole("combobox")).not.toBeInTheDocument();
+      expect(within(tagSection()).queryByRole("button")).not.toBeInTheDocument();
+      expect(tagRequests).not.toHaveBeenCalled();
+    });
+
+    it("sections have no Tags section", async () => {
+      const { user } = await panelBoard();
+      await user.dblClick(rowOf("x").querySelector('[aria-label^="Row "]')!);
+      await screen.findByRole("complementary", { name: /^Details of/ });
+      expect(within(panel()).queryByRole("heading", { name: "Tags" })).not.toBeInTheDocument();
+    });
+  });
+
   it("is read-only for viewers, who can still comment", async () => {
     const { user } = await panelBoard(ROWS, VIEWER);
     await selectRow(user, "hooks");

@@ -15,7 +15,8 @@ import { today } from "./format";
 import { useBoard } from "./board-context";
 import { useCollapse, useCollapsed } from "./collapse";
 import { FilterBar } from "./filter-bar";
-import { filterRows, filtersFromSearch, knownFilters, searchFromFilters, withFilters, type BoardFilters } from "./filters";
+import { filterRows, filtersFromSearch, hasTag, knownFilters, searchFromFilters, toggleTag, withFilters, type BoardFilters } from "./filters";
+import type { TagFilter } from "./chart/tag-chips";
 import { useLinger } from "./linger";
 import { ListColumnHeaders, ListHeader, ListRows, useListKeys } from "./list/task-list";
 import { useSelection } from "./selection";
@@ -111,6 +112,7 @@ export function Board({
       void navigate({ to: ".", search: (previous: BoardSearch) => withFilters(previous, change(filtersFromSearch(previous))), replace: true }),
     [navigate],
   );
+  const tagFilter = useMemo<TagFilter>(() => ({ active: (tag) => hasTag(filters, tag), toggle: (tag) => updateFilters((current) => toggleTag(current, tag)) }), [filters, updateFilters]);
   const team = useMemo(() => new Set(resources.map((resource) => resource.id)), [resources]);
   const { selectedId, select, centerRequest } = useSelection();
   // A row an edit takes out of the filter stays while it is selected, and a little after.
@@ -372,7 +374,7 @@ export function Board({
               ) : null}
               <div aria-hidden className="absolute top-0 w-0.5 bg-[var(--today)]" style={{ left: timeline.x(todayDay) + timeline.dayWidth / 2 - 1, height: bodyHeight }} />
               <Dependencies rows={model.rows} links={model.links} firstRow={firstRow} lastRow={lastRow} timeline={timeline} style={barStyle} />
-              <ChartRows rows={shown} allRows={model.rows} firstRow={firstRow} timeline={timeline} style={barStyle} visibleLeft={viewport.left} />
+              <ChartRows rows={shown} allRows={model.rows} firstRow={firstRow} timeline={timeline} style={barStyle} visibleLeft={viewport.left} tagFilter={tagFilter} />
             </div>
             </DayMenu>
           </div>

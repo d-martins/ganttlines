@@ -58,6 +58,19 @@ describe("history of links", () => {
   });
 });
 
+describe("history of tags", () => {
+  const names = { state: { rows: {}, links: {} }, resources: new Map() };
+  const tags = (before: string[], after: string[]) => describeChange({ rowId: "t", field: "tags", before, after } as Change, names, "t");
+
+  it("names each tag added or removed; a pure reorder says so", () => {
+    expect(tags([], ["UI"])).toBe("tagged it UI");
+    expect(tags(["UI"], [])).toBe("removed the tag UI");
+    expect(tags(["UI"], ["UI", "Docs", "Back end"])).toBe("tagged it Docs, tagged it Back end");
+    expect(tags(["UI", "Docs"], ["Back end", "UI"])).toBe("tagged it Back end, removed the tag Docs");
+    expect(tags(["UI", "Docs"], ["Docs", "UI"])).toBe("reordered its tags");
+  });
+});
+
 describe("history of a turned-around link", () => {
   const names = { state: { rows: { p: task("p", { title: "Design" }), f: task("f", { title: "Build" }) }, links: {} }, resources: new Map() };
   const was = { predecessorId: "p", followerId: "f", kind: "FS" as const };

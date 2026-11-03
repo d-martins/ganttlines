@@ -312,6 +312,67 @@ describe("chart editing", () => {
   });
 });
 
+describe("tags on the chart", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 8, 29, 12));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    useBoardView.getState().setBarStyle("compact");
+  });
+
+  const TAGGED = [
+    section("x", { position: "a0" }),
+    task("ui", { parentId: "x", position: "a0", userStart: "2026-09-30", duration: 5, tags: ["UI", "Docs", "Back end"] }),
+    task("hooks", { parentId: "x", position: "a1", userStart: "2026-10-12", duration: 2, tags: ["docs"] }),
+  ];
+  const rowOf = (name: RegExp) => (screen.queryByRole("button", { name }) ?? screen.getByRole("img", { name })).parentElement!;
+  const chipsOf = (name: RegExp) => within(rowOf(name)).queryAllByRole("button", { name: /^Filter by the tag/ }).map((chip) => chip.textContent);
+
+  it.each(["compact", "roomy"] as const)("shows the first two tags beside the title, then +X (%s bars)", async (style) => {
+    useBoardView.getState().setBarStyle(style);
+    await chartBoard(TAGGED);
+    expect(chipsOf(/^ui,/)).toEqual(["UI", "Docs"]);
+    expect(within(rowOf(/^ui,/)).getByRole("button", { name: "1 more tag" })).toHaveTextContent("+1");
+    expect(chipsOf(/^hooks,/)).toEqual(["docs"]);
+    expect(within(rowOf(/^hooks,/)).queryByRole("button", { name: /more tag/ })).not.toBeInTheDocument();
+  });
+
+  it("hovering +X lists all the task's tags", async () => {
+    const { user } = await chartBoard(TAGGED);
+    await user.hover(within(rowOf(/^ui,/)).getByRole("button", { name: "1 more tag" }));
+    const popover = await screen.findByRole("dialog", { name: "Tags of “ui”" });
+    expect(within(popover).getAllByRole("button").map((chip) => chip.textContent)).toEqual(["UI", "Docs", "Back end"]);
+  });
+
+  it("clicking a tag toggles it in the filter, and filtered tags look like the filter's chips (viewers too)", async () => {
+    const { user, router } = await chartBoard(TAGGED, VIEWER);
+    const docs = () => within(rowOf(/^ui,/)).getByRole("button", { name: "Filter by the tag “Docs”" });
+    expect(docs()).toHaveAttribute("aria-pressed", "false");
+    await user.click(docs());
+    await waitFor(() => expect(router.state.location.search).toEqual({ tags: ["Docs"] }));
+    expect(docs()).toHaveAttribute("aria-pressed", "true");
+    expect(docs().className).toContain("bg-accent-soft");
+    // the same tag, spelled differently on another task, is the same filter
+    expect(within(rowOf(/^hooks,/)).getByRole("button", { name: "Filter by the tag “docs”" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(within(rowOf(/^ui,/)).getByRole("button", { name: "Filter by the tag “UI”" }));
+    await waitFor(() => expect(router.state.location.search).toEqual({ tags: ["Docs", "UI"] }));
+    await user.click(docs());
+    await waitFor(() => expect(router.state.location.search).toEqual({ tags: ["UI"] }));
+    expect(docs()).toHaveAttribute("aria-pressed", "false");
+    expect(sentCommands()).toEqual([]);
+  });
+
+  it("a click in the +X popover filters too", async () => {
+    const { user, router } = await chartBoard(TAGGED);
+    await user.click(within(rowOf(/^ui,/)).getByRole("button", { name: "1 more tag" }));
+    const popover = await screen.findByRole("dialog", { name: "Tags of “ui”" });
+    await user.click(within(popover).getByRole("button", { name: "Filter by the tag “Back end”" }));
+    await waitFor(() => expect(router.state.location.search).toEqual({ tags: ["Back end"] }));
+  });
+});
+
 describe("toolsLeft", () => {
   it("puts a bar's quick tools left of its start dot, 4 px clear, or past its end dot when the chart's edge leaves no room", () => {
     expect(toolsLeft({ left: 200, right: 300 })).toBe(136); // tools 136–180, start dot 186–196

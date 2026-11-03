@@ -18,6 +18,7 @@ import { useSelection } from "../selection";
 import { Activity } from "./activity";
 import { CommitInput, INPUT } from "./commit-input";
 import { LinksSection } from "./links-section";
+import { TagsSection } from "./tags-section";
 import { Comments } from "./comments";
 import { useCapabilities } from "../../workspace";
 
@@ -214,6 +215,11 @@ export function DetailsPanel({ numbers }: { numbers: ReadonlyMap<RowId, number> 
         {row.kind === "task" ? <Description task={row} maxHeight={halfHeight} /> : null}
         {row.kind === "task" ? <TaskFields task={row} isParent={isParent} schedule={schedule} numbers={numbers} /> : null}
       </div>
+      {row.kind === "task" ? (
+        <Section title="Tags">
+          <TagsSection key={row.id} task={row} />
+        </Section>
+      ) : null}
       {row.kind === "task" ? (
         <Section title="Links">
           <LinksSection key={row.id} task={row} state={state} numbers={numbers} canEdit={board.canEdit} run={run} calendar={calendar} schedule={schedule} />

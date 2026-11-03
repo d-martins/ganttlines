@@ -17,6 +17,8 @@ interface Option {
 }
 
 const CONTENT = "z-50 max-h-80 min-w-44 overflow-y-auto rounded-md border border-border bg-bg p-1 text-sm text-text shadow-lg";
+/** A filter in use (the filter chips, and tags on the chart that are filtered by). */
+export const ACTIVE_CHIP = "border-accent/40 bg-accent-soft text-text";
 const ITEM = "flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 outline-none data-[highlighted]:bg-surface-2";
 
 /**
@@ -62,7 +64,7 @@ export function FilterBar({
     <div role="toolbar" aria-label="Filters" className="flex min-h-9 shrink-0 flex-wrap items-center gap-1.5 border-b border-border bg-surface px-2 py-1 text-xs">
       <SearchBox value={filters.q} onChange={(q) => onUpdate((current) => ({ ...current, q }))} />
       {chips.map(({ part, label }) => (
-        <span key={part} className="flex items-center rounded-full border border-accent/40 bg-accent-soft text-text">
+        <span key={part} className={`flex items-center rounded-full border ${ACTIVE_CHIP}`}>
           <FilterMenu
             part={part}
             items={items}
