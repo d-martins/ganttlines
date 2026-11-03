@@ -557,6 +557,73 @@ describe("details panel", () => {
     });
   });
 
+  describe("sections and the More actions menu", () => {
+    const openSection = async (user: Awaited<ReturnType<typeof panelBoard>>["user"]) => {
+      await user.dblClick(rowOf("x").querySelector('[aria-label^="Row "]')!);
+      await screen.findByRole("complementary", { name: /^Details of/ });
+    };
+
+    it("a section has a description box that saves with setDescription", async () => {
+      const { user } = await panelBoard();
+      await openSection(user);
+      await user.type(within(panel()).getByRole("textbox", { name: "Description" }), "The first release");
+      await user.click(within(panel()).getByRole("textbox", { name: "Task title" })); // leaving saves it
+      expect(sentCommands().at(-1)).toEqual({ type: "setDescription", id: "x", description: "The first release" });
+    });
+
+    it("a section has Comments, posted against the section", async () => {
+      const { api, user } = await panelBoard();
+      const posted: unknown[] = [];
+      api.on(`POST /api/projects/${PROJECT_ID}/comments`, (body) => {
+        posted.push(body);
+        return { status: 201, body: { comment: comment("c9", { taskId: "x", body: (body as { body: string }).body, mine: true, author: { userId: ADMIN.id, label: ADMIN.name } }) } };
+      });
+      await openSection(user);
+      expect(within(panel()).getByRole("tab", { name: "Comments" })).toHaveAttribute("aria-selected", "true");
+      await user.type(within(panel()).getByRole("textbox", { name: "Write a comment" }), "kick-off monday{Control>}{Enter}{/Control}");
+      await waitFor(() => expect(posted).toEqual([{ taskId: "x", body: "kick-off monday" }]));
+      expect(await within(panel()).findByText("kick-off monday")).toBeInTheDocument();
+    });
+
+    it("has no Delete button at the bottom: it lives in the header's More actions menu", async () => {
+      const { user } = await panelBoard();
+      await selectRow(user, "hooks");
+      expect(within(panel()).queryByRole("button", { name: /^Delete (task|section)$/ })).not.toBeInTheDocument();
+      const more = within(panel()).getByRole("button", { name: "More actions" });
+      const close = within(panel()).getByRole("button", { name: "Close details (Esc)" });
+      expect(more.closest("header")).toBe(close.closest("header"));
+      await openSection(user);
+      expect(within(panel()).queryByRole("button", { name: /^Delete (task|section)$/ })).not.toBeInTheDocument();
+    });
+
+    it("More actions → Delete section deletes the section and closes the panel", async () => {
+      const { user } = await panelBoard();
+      await openSection(user);
+      await user.click(within(panel()).getByRole("button", { name: "More actions" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Delete section" }));
+      expect(sentCommands().at(-1)).toEqual({ type: "deleteRows", ids: ["x"] });
+      expect(await screen.findByText("Deleted “x” and 2 rows inside")).toBeInTheDocument();
+      await waitFor(() => expect(screen.queryByRole("complementary")).not.toBeInTheDocument());
+    });
+
+    it("More actions → Delete task deletes the task and closes the panel", async () => {
+      const { user } = await panelBoard();
+      await selectRow(user, "hooks");
+      await user.click(within(panel()).getByRole("button", { name: "More actions" }));
+      expect(screen.queryByRole("menuitem", { name: "Delete section" })).not.toBeInTheDocument();
+      await user.click(await screen.findByRole("menuitem", { name: "Delete task" }));
+      expect(sentCommands().at(-1)).toEqual({ type: "deleteRows", ids: ["hooks"] });
+      expect(await screen.findByText("Deleted “hooks”")).toBeInTheDocument();
+      await waitFor(() => expect(screen.queryByRole("complementary")).not.toBeInTheDocument());
+    });
+
+    it("viewers get no More actions menu", async () => {
+      const { user } = await panelBoard(ROWS, VIEWER);
+      await selectRow(user, "hooks");
+      expect(within(panel()).queryByRole("button", { name: "More actions" })).not.toBeInTheDocument();
+    });
+  });
+
   it("is read-only for viewers, who can still comment", async () => {
     const { user } = await panelBoard(ROWS, VIEWER);
     await selectRow(user, "hooks");
