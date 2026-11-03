@@ -326,16 +326,21 @@ describe("lingering rows", () => {
     expect([...hook.result.current]).toEqual(["b"]);
   });
 
-  it("a row that matches again stays, and isn't removed later", async () => {
+  it("a row that matches again stays, and its first removal is called off", async () => {
     vi.useFakeTimers();
     const hook = await linger({ matches: ids("a"), focused: "a" });
     hook.rerender({ matches: ids(), focused: "a" });
-    hook.rerender({ matches: ids(), focused: null });
+    hook.rerender({ matches: ids(), focused: null }); // removal due in 5 s
     act(() => vi.advanceTimersByTime(2_000));
-    hook.rerender({ matches: ids("a"), focused: null });
-    act(() => vi.advanceTimersByTime(10_000));
-    hook.rerender({ matches: ids("a"), focused: null });
+    hook.rerender({ matches: ids("a"), focused: null }); // matches again
     expect([...hook.result.current]).toEqual(["a"]);
+    // Stops matching again while selected, then is let go: only the new 5 s count.
+    hook.rerender({ matches: ids(), focused: "a" });
+    hook.rerender({ matches: ids(), focused: null });
+    act(() => vi.advanceTimersByTime(4_900)); // past when the first removal was due
+    expect([...hook.result.current]).toEqual(["a"]);
+    act(() => vi.advanceTimersByTime(200));
+    expect([...hook.result.current]).toEqual([]);
   });
 
   it("a changed filter doesn't keep the focused row", async () => {
