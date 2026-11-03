@@ -104,6 +104,14 @@ describe("the workspace file", () => {
     expect(after).toEqual(before);
   });
 
+  it("imports a version 2 file with a start-to-finish link", async () => {
+    const { source } = await filledSource();
+    const file = JSON.parse(JSON.stringify(source.exportFile())) as Record<string, any>;
+    file.projects[0].rows.push({ ...file.projects[0].rows[0], id: B, position: "a1" });
+    file.projects[0].links.push({ predecessorId: A, followerId: B, kind: "SF", lag: 1 });
+    await expect(readWorkspaceFile(JSON.stringify(file))).resolves.toMatchObject({ projects: [expect.objectContaining({ links: [{ predecessorId: A, followerId: B, kind: "SF", lag: 1 }] })] });
+  });
+
   it("clears the workspace", async () => {
     const { source } = await filledSource();
     await source.clear();

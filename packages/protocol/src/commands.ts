@@ -14,7 +14,7 @@ const halfDays = z
   .min(0.5)
   .max(MAX_DURATION)
   .refine((days) => Number.isInteger(days * 2), "Use whole or half days");
-const linkKind = z.enum(["FS", "SS", "FF"]);
+const linkKind = z.enum(["FS", "SS", "FF", "SF"]);
 /** Working days in half steps; the engine checks which kinds may be negative. */
 const lag = z
   .number()
@@ -46,7 +46,7 @@ export const CommandSchema = z.discriminatedUnion("type", [
   cmd("convertMilestone", { id, milestone: z.boolean() }),
   cmd("setLocked", { id, locked: z.boolean() }),
   cmd("addLink", { predecessorId: id, followerId: id, kind: linkKind, lag: lag.optional() }),
-  cmd("updateLink", { predecessorId: id, followerId: id, kind: linkKind, lag: lag.optional(), newKind: linkKind.optional() }),
+  cmd("updateLink", { predecessorId: id, followerId: id, kind: linkKind, lag: lag.optional(), newKind: linkKind.optional(), reverse: z.boolean().optional() }),
   cmd("removeLink", { predecessorId: id, followerId: id, kind: linkKind, keepPlace: z.boolean().optional() }),
   cmd("indent", { id }),
   cmd("outdent", { id }),

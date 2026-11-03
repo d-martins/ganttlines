@@ -39,7 +39,8 @@ describe("WorkspaceFile", () => {
     const link = { predecessorId: A, followerId: B, kind: "SS", lag: 1.5 };
     expect(WorkspaceFile.safeParse(file(2, [taskRow(A), taskRow(B)], [link])).success).toBe(true);
     expect(WorkspaceFile.safeParse(file(2, [taskRow(A), taskRow(B, { predecessorId: A })], [])).success).toBe(false);
-    expect(WorkspaceFile.safeParse(file(2, [taskRow(A)], [{ ...link, kind: "SF" }])).success).toBe(false);
+    expect(WorkspaceFile.safeParse(file(2, [taskRow(A), taskRow(B)], [{ ...link, kind: "SF" }])).success).toBe(true);
+    expect(WorkspaceFile.safeParse(file(2, [taskRow(A)], [{ ...link, kind: "XX" }])).success).toBe(false);
     expect(WorkspaceFile.safeParse(file(2, [taskRow(A)])).success).toBe(false);
     expect(WorkspaceFile.safeParse(file(1, [taskRow(A)], [])).success).toBe(false);
   });

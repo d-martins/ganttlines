@@ -145,7 +145,7 @@ async function editProject(tools: ToolContext, ref: string): Promise<BoardEdit> 
 
 const Predecessor = z.object({
   task: z.string().min(1).describe("the task (id or title) this one waits on"),
-  kind: z.enum(["FS", "SS", "FF"]).optional().describe("FS: starts after it finishes (default); SS: starts once it starts; FF: can't finish before it"),
+  kind: z.enum(["FS", "SS", "FF", "SF"]).optional().describe("FS: starts after it finishes (default); SS: starts once it starts; FF: can't finish before it finishes; SF: can't finish before it starts"),
   lagDays: LAG.optional().describe("working days of delay (default 0, or as it was); negative overlaps, FS only"),
 });
 type Predecessor = z.infer<typeof Predecessor>;
@@ -538,7 +538,7 @@ async function applyTaskFields(
       const lag = (link?.lag ?? 0) + (afternoon ? 0.5 : -0.5);
       const predecessor = link ? edit.row(link.predecessorId)?.span : null;
       let followsByLag = false;
-      // Only a lone FS link (SS and FF can't go below 0) on an unlocked leaf, within MAX_LAG.
+      // Only a lone FS link (SS, FF and SF can't go below 0) on an unlocked leaf, within MAX_LAG.
       if (link?.kind === "FS" && predecessor && others.length === 0 && Math.abs(lag) <= MAX_LAG && !entry.isParent && row.kind === "task" && !row.locked) {
         // It must decide the start now, and the moved lag must put it on the asked half (not held at the overlap floor).
         const calendar = await edit.calendar();

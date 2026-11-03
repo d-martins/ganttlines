@@ -297,6 +297,24 @@ describe("AI access: editing plans", () => {
     await client.close();
   });
 
+  it("update_task predecessors with kind SF; get_board shows it in words", async () => {
+    const { client } = await editorsApp();
+    await call(client, "add_tasks", {
+      project: "Launch",
+      tasks: [
+        { title: "A", start: "2026-10-12", durationDays: 2 },
+        { title: "F", start: "2026-10-05", durationDays: 2 },
+      ],
+    });
+    const updated = await call(client, "update_task", { project: "Launch", task: "F", predecessors: [{ task: "A", kind: "SF" }] });
+    expect(updated["error"]).toBeUndefined();
+    expect((updated["task"] as { predecessors: unknown[] }).predecessors).toEqual([on("A", { kind: "SF", kindInWords: "can't finish before it starts", lagDays: 0 })]);
+    const board = (await call(client, "get_project", { project: "Launch" }))["rows"] as { title: string }[];
+    expect(board.find((row) => row.title === "F")).toMatchObject({ predecessors: [on("A", { kind: "SF", kindInWords: "can't finish before it starts" })] });
+    expect(board.find((row) => row.title === "A")).toMatchObject({ followers: [expect.objectContaining({ kind: "SF", kindInWords: "can't finish before it starts" })] });
+    await client.close();
+  });
+
   it("update_task predecessors replaces the links (one removed, one kept with a new lag, one added SS)", async () => {
     const { client } = await editorsApp();
     const added = await call(client, "add_tasks", {

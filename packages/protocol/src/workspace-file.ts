@@ -36,7 +36,7 @@ const TaskRowV1 = z.strictObject({
   predecessorId: id.nullable(),
   offset: halfSteps(z.number().min(-MAX_LAG).max(MAX_LAG)),
 });
-const LinkRecord = z.strictObject({ predecessorId: id, followerId: id, kind: z.enum(["FS", "SS", "FF"]), lag: halfSteps(z.number().min(-MAX_LAG).max(MAX_LAG)) });
+const LinkRecord = z.strictObject({ predecessorId: id, followerId: id, kind: z.enum(["FS", "SS", "FF", "SF"]), lag: halfSteps(z.number().min(-MAX_LAG).max(MAX_LAG)) });
 
 const workspaceFields = {
   format: z.literal("ganttlines-workspace"),
