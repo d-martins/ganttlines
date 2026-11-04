@@ -25,6 +25,8 @@ const isWidth = (value: unknown): value is number => typeof value === "number" &
 
 /** `min` fits every list column (see COLUMNS in list/task-list.tsx: 412 px of columns + 8 px padding). */
 export const LIST_WIDTH = { min: 420, max: 900, initial: 500 } as const;
+/** What the "Can slip" column adds to the list while Critical path is on. */
+export const SLIP_COLUMN = 104;
 
 const isStep = (value: unknown): value is number => typeof value === "number" && (ZOOM_STEPS as readonly number[]).includes(value);
 

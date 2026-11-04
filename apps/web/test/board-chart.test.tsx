@@ -4,6 +4,7 @@ import type { ProjectStateDto } from "@ganttlines/protocol";
 import { act, fireEvent, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { toolsLeft } from "../src/board/chart/chart-rows";
+import { isCriticalPathOn, useCriticalPathView } from "../src/board/critical-path-view";
 import { linkPath } from "../src/board/chart/dependencies";
 import { formatDay } from "../src/board/format";
 import { useBoardView } from "../src/board/view-store";
@@ -448,6 +449,95 @@ describe("milestones being aimed at", () => {
   it("a board with no targets has no outlines", async () => {
     await chartBoard(AIMED());
     expect(document.querySelector("[data-slack]")).toBeNull();
+  });
+});
+
+describe("the Critical path button", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 8, 29, 12));
+    localStorage.clear();
+    useCriticalPathView.setState({ on: {} });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    useCriticalPathView.setState({ on: {} });
+  });
+
+  const PLAN = [
+    section("x", { position: "a0" }),
+    task("tight", { parentId: "x", position: "a0", userStart: "2026-10-12", duration: 2, targetId: "cut" }),
+    task("loose", { parentId: "x", position: "a1", userStart: "2026-10-12", duration: 1, targetId: "cut" }),
+    task("late", { parentId: "x", position: "a2", userStart: "2026-10-12", duration: 3, targetId: "cut" }),
+    task("after", { parentId: "x", position: "a3", userStart: "2026-10-12", duration: 8 }),
+    task("cut", { parentId: "x", position: "a4", userStart: "2026-10-13", duration: 0 }),
+  ];
+  const FEEDS: Link[] = [{ predecessorId: "first", followerId: "tight2", kind: "FS", lag: 0 }];
+  const button = () => screen.getByRole("button", { name: "Critical path" });
+  const bar = (name: string) => screen.getByRole("button", { name: new RegExp(`^${name}, `) });
+  const canSlip = (name: string) => within(rowNamed(name)).queryByRole("gridcell", { name: /^Can slip/ });
+  const rowNamed = (name: string) => screen.getAllByRole("row").find((row) => within(row).queryByText(name, { exact: true }))!;
+
+  it("is off by default: no column, no zero outlines, no critical links", async () => {
+    await chartBoard(PLAN);
+    expect(button()).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByText("Can slip")).not.toBeInTheDocument();
+    expect(bar("tight")).not.toHaveAttribute("data-slack");
+    expect(document.querySelector("[data-critical]")).toBeNull();
+  });
+
+  it("on: the column follows AWD, naming a milestone limit", async () => {
+    const { user } = await chartBoard(PLAN);
+    await user.click(button());
+    expect(button()).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("AWD").nextElementSibling).toHaveTextContent("Can slip");
+    expect(screen.getByRole("columnheader", { name: "Can slip" })).toBeInTheDocument();
+    expect(canSlip("tight")).toHaveTextContent("0 days · cut");
+    expect(canSlip("loose")).toHaveTextContent("1 day · cut");
+    expect(canSlip("late")).toHaveTextContent("−1 day · cut");
+    expect(canSlip("after")).toHaveTextContent("0 days");
+    expect(canSlip("after")).toHaveAttribute("title", "Limited by the end of the board");
+  });
+
+  it("0 days gets the amber outline, below 0 the red, fills unchanged", async () => {
+    const { user } = await chartBoard(PLAN);
+    const fill = bar("tight").style.background;
+    await user.click(button());
+    expect(bar("tight")).toHaveAttribute("data-slack", "zero");
+    expect(bar("late")).toHaveAttribute("data-slack", "late");
+    expect(bar("loose")).not.toHaveAttribute("data-slack");
+    expect(bar("tight").style.background).toBe(fill);
+  });
+
+  it("links with no room are marked; others aren't", async () => {
+    const rows = [
+      section("x", { position: "a0" }),
+      task("first", { parentId: "x", position: "a0", userStart: "2026-10-05", duration: 1 }),
+      task("tight2", { parentId: "x", position: "a1", userStart: "2026-10-05", duration: 1 }),
+      task("spare", { parentId: "x", position: "a2", userStart: "2026-10-05", duration: 1 }),
+      task("end", { parentId: "x", position: "a3", userStart: "2026-10-05", duration: 5 }),
+    ];
+    const links: Link[] = [...FEEDS, { predecessorId: "first", followerId: "end", kind: "SS", lag: 0 }, { predecessorId: "spare", followerId: "end", kind: "FF", lag: 0 }];
+    const { user } = await chartBoard(rows, ADMIN, links);
+    await user.click(button());
+    const marked = [...document.querySelectorAll("[data-testid=dependency]")].filter((path) => path.hasAttribute("data-critical"));
+    expect(marked).toHaveLength(1);
+  });
+
+  it("is remembered per project, and sends no command", async () => {
+    const { user } = await chartBoard(PLAN);
+    const before = sentCommands().length;
+    await user.click(button());
+    expect(sentCommands()).toHaveLength(before);
+    expect(JSON.parse(localStorage.getItem("gp.criticalPath")!)).toEqual({ [PROJECT_ID]: true });
+    expect(isCriticalPathOn(PROJECT_ID)).toBe(true);
+    expect(isCriticalPathOn("another")).toBe(false);
+  });
+
+  it("viewers can use it", async () => {
+    const { user } = await chartBoard(PLAN, VIEWER);
+    await user.click(button());
+    expect(screen.getByRole("columnheader", { name: "Can slip" })).toBeInTheDocument();
   });
 });
 

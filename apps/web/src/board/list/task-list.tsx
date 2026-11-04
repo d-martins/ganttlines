@@ -1,3 +1,6 @@
+import type { Slack } from "@ganttlines/engine";
+import { useCriticalPath } from "../critical-path-view";
+import { formatSlack, useSlack } from "../slack";
 import type { Calendar, RowId } from "@ganttlines/engine";
 import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, GripVertical, LocateFixed, IndentDecrease, IndentIncrease, MessageSquare, PanelRightOpen, Plus, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState, type HTMLAttributes, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type Ref } from "react";
@@ -21,11 +24,14 @@ import { useCapabilities } from "../../workspace";
  * Fixed columns + the title's minimum + padding = LIST_WIDTH.min, so no column is ever cut off.
  */
 const COLUMNS = "grid grid-cols-[40px_minmax(96px,1fr)_120px_40px_40px_76px] items-center";
+/** The same, with "Can slip" after AWD; SLIP_COLUMN in view-store.ts is its 104 px. */
+const COLUMNS_WITH_SLIP = "grid grid-cols-[40px_minmax(96px,1fr)_120px_40px_40px_104px_76px] items-center";
 const INDENT = 16;
 
 /** Outline tools and the column headings; reordering and collapsing are off while filtering. */
 export function ListHeader({ filtering }: { filtering: boolean }) {
   const { canEdit, sync, state } = useBoard();
+  const critical = useCriticalPath(sync.projectId);
   const run = useRun();
   const selectedId = useSelection((selection) => selection.selectedId);
   // Collapse every row that has children; expand everything (including rows inside collapsed ones).
@@ -56,7 +62,7 @@ export function ListHeader({ filtering }: { filtering: boolean }) {
         </IconButton>
       </div>
       {/* Visual column headings; assistive tech gets ListColumnHeaders inside the grid instead. */}
-      <div aria-hidden className={`${COLUMNS} h-6 px-1 text-xs font-semibold text-muted`}>
+      <div aria-hidden className={`${critical ? COLUMNS_WITH_SLIP : COLUMNS} h-6 px-1 text-xs font-semibold text-muted`}>
         <span className="pr-2 text-right">#</span>
         <span>Task</span>
         <span>Assignee</span>
@@ -66,6 +72,7 @@ export function ListHeader({ filtering }: { filtering: boolean }) {
         <span title="Actual work days" className="px-1 text-right">
           AWD
         </span>
+        {critical ? <span className="px-1 text-right">Can slip</span> : null}
         <span />
       </div>
     </div>
@@ -166,9 +173,11 @@ interface DragState {
 
 /** The list's column headers for assistive tech (the visible headings sit outside the grid, in the sticky header). */
 export function ListColumnHeaders() {
+  const { sync } = useBoard();
+  const critical = useCriticalPath(sync.projectId);
   return (
     <div role="row" aria-rowindex={1} className="sr-only">
-      {["Row number", "Task", "Assignee", "Working days", "Actual work days", "Actions"].map((name) => (
+      {["Row number", "Task", "Assignee", "Working days", "Actual work days", ...(critical ? ["Can slip"] : []), "Actions"].map((name) => (
         <span key={name} role="columnheader">
           {name}
         </span>
@@ -196,6 +205,8 @@ export function ListRows({
   filtering: boolean;
 }) {
   const board = useBoard();
+  const critical = useCriticalPath(board.sync.projectId);
+  const slack = useSlack();
   const capabilities = useCapabilities();
   const comments = useQuery({ ...commentCounts(board.sync.projectId), enabled: capabilities.comments }).data;
   const { state, calendar, resources, resourceMap, canEdit, canCreateResources } = board;
@@ -287,7 +298,7 @@ export function ListRows({
               center(row.id);
               select(row.id, true);
             }}
-            className={`group ${COLUMNS} absolute right-0 left-0 px-1 text-sm ${selected ? "bg-accent-soft" : "hover:bg-surface-2"} ${drag?.id === row.id ? "opacity-50" : entry.context ? "opacity-45" : ""}`}
+            className={`group ${critical ? COLUMNS_WITH_SLIP : COLUMNS} absolute right-0 left-0 px-1 text-sm ${selected ? "bg-accent-soft" : "hover:bg-surface-2"} ${drag?.id === row.id ? "opacity-50" : entry.context ? "opacity-45" : ""}`}
             style={{ top: (firstRow + index) * rowHeight, height: rowHeight }}
           >
             <span role="gridcell" aria-label={`Row ${entry.number}`} className="relative pr-2 text-right text-xs text-muted tabular-nums">
@@ -501,6 +512,7 @@ export function ListRows({
                 </CellButton>
               )}
             </span>
+            {critical ? <SlipCell entry={entry} slack={entry.fromBaseline ? undefined : slack.get(row.id)} /> : null}
             <span role="gridcell" className={`flex justify-end gap-1 ${selected ? "" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"}`}>
               <RowActions id={row.id} title={row.title} />
             </span>
@@ -526,6 +538,21 @@ export function ListRows({
 }
 
 /** A value that opens its editor on a click or Space / Enter (if editable); the click also selects the row. */
+/** "0 days · 8.10": how far the row can slip, naming the milestone that limits it. */
+function SlipCell({ entry, slack }: { entry: BoardRow; slack: Slack | undefined }) {
+  const { state } = useBoard();
+  if (!slack) return <span role="gridcell" aria-label={`Can slip: nothing for ${entry.row.title || "this row"}`} />;
+  const amount = formatSlack(slack.halves);
+  const limitTitle = slack.limit.kind === "end" ? null : state.rows[slack.limit.id]?.title || "Untitled";
+  const shown = slack.limit.kind === "milestone" ? `${amount} · ${limitTitle}` : amount;
+  const tone = slack.halves < 0 ? "font-semibold text-[var(--slack-late)]" : slack.halves === 0 ? "font-semibold text-[var(--slack-zero)]" : "text-muted";
+  return (
+    <span role="gridcell" aria-label={`Can slip ${shown}`} title={limitTitle ? `Limited by ${limitTitle}` : "Limited by the end of the board"} className={`truncate px-1 text-right text-xs tabular-nums ${tone}`}>
+      {shown}
+    </span>
+  );
+}
+
 function CellButton({
   editable,
   label,

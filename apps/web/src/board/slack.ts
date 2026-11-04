@@ -1,6 +1,7 @@
-import { buildTree, childrenOf, computeSchedule, computeSlack, CycleError, isParentTask, type ProjectState, type RowId, type Schedule, type SlackMap } from "@ganttlines/engine";
+import { buildTree, childrenOf, computeSchedule, computeSlack, criticalLinks, CycleError, isParentTask, type LinkKey, type ProjectState, type RowId, type Schedule, type SlackMap } from "@ganttlines/engine";
 import { useMemo } from "react";
 import { useBoard } from "./board-context";
+import { useCriticalPath } from "./critical-path-view";
 
 const NO_SLACK: SlackMap = new Map();
 
@@ -26,6 +27,19 @@ export function useSlack(): SlackMap {
     const schedule = scheduleOf(state, calendar);
     return schedule ? computeSlack(state, calendar, schedule) : NO_SLACK;
   }, [state, calendar]);
+}
+
+const NO_LINKS: ReadonlySet<LinkKey> = new Set();
+
+/** The links a slip passes straight through, while the Critical path button is on. */
+export function useCriticalLinks(): ReadonlySet<LinkKey> {
+  const { state, calendar, sync } = useBoard();
+  const slack = useSlack();
+  const on = useCriticalPath(sync.projectId);
+  return useMemo(() => {
+    const schedule = on ? scheduleOf(state, calendar) : null;
+    return schedule ? criticalLinks(state, calendar, schedule, slack) : NO_LINKS;
+  }, [on, state, calendar, slack]);
 }
 
 /** Where a milestone made on the go lands: right after the last one being aimed at, else at the end of the board. */

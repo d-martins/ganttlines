@@ -22,7 +22,8 @@ import { useLinger } from "./linger";
 import { ListColumnHeaders, ListHeader, ListRows, useListKeys } from "./list/task-list";
 import { useSelection } from "./selection";
 import { boardModel, type CompareMode } from "./model";
-import { useBoardView } from "./view-store";
+import { LIST_WIDTH, SLIP_COLUMN, useBoardView } from "./view-store";
+import { useCriticalPath } from "./critical-path-view";
 
 type DetailsPanelType = typeof import("./panel/details-panel").DetailsPanel;
 /** The details panel brings the rich-text editor along: a separate download, fetched once a board is shown. */
@@ -89,8 +90,11 @@ export function Board({
   highlights: readonly HighlightDto[];
   baseline: { mode: CompareMode; tasks: readonly BaselineTaskDto[] } | null;
 }) {
-  const { dayWidth, barStyle, showWeekends, listWidth, todayRequest, setListWidth } = useBoardView();
+  const { dayWidth, barStyle, showWeekends, listWidth: chosenWidth, todayRequest, setListWidth } = useBoardView();
   const { canEdit, canEditCalendar, sync } = useBoard();
+  // The "Can slip" column gets its room without touching the width chosen for the list.
+  const critical = useCriticalPath(sync.projectId);
+  const listWidth = critical ? Math.max(chosenWidth, LIST_WIDTH.min + SLIP_COLUMN) : chosenWidth;
   const collapsed = useCollapsed(sync.projectId);
   // Collapsed rows deleted since are forgotten (once the board has rows to compare with).
   useEffect(() => {
