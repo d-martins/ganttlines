@@ -97,6 +97,7 @@ export function Board({
   }, [state.rows, sync.projectId]);
   // While a bar is dragged, show the board as the drop would leave it (successors pushed and all).
   const dragCommand = useChartDrag((store) => store.drag?.command ?? null);
+  const barMenuOpen = useChartDrag((store) => store.menuFor !== null);
   const displayed = useMemo(() => {
     if (!dragCommand) return state;
     const result = applyCommand(state, calendar, dragCommand);
@@ -345,7 +346,8 @@ export function Board({
             </div>
             <DayMenu
               projectId={sync.projectId}
-              enabled={canEdit}
+              // React events from the bar's menu bubble here through its portal: a right-click or long-press in it isn't one on a day.
+              enabled={canEdit && !barMenuOpen}
               canEditCalendar={canEditCalendar}
               dayAt={(clientX) => timeline.dayAt(clientX - (chartBody.current?.getBoundingClientRect().left ?? 0))}
               highlights={highlightDays}

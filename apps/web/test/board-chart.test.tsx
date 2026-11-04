@@ -1,7 +1,7 @@
 import type { Command, Link } from "@ganttlines/engine";
 import { toDay } from "@ganttlines/engine";
 import type { ProjectStateDto } from "@ganttlines/protocol";
-import { fireEvent, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { toolsLeft } from "../src/board/chart/chart-rows";
 import { linkPath } from "../src/board/chart/dependencies";
@@ -575,9 +575,82 @@ describe("tags in the bar's menu", () => {
   it("the items still work after typing", async () => {
     const { user, menu, input } = await openMenu();
     await user.click(input);
+    await user.keyboard("half a tag");
     await user.click(within(menu).getByRole("menuitem", { name: "Duplicate" }));
     expect(sentCommands().at(-1)).toMatchObject({ type: "duplicateTask", id: "ui" });
     await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+  });
+
+  describe("with a tag filter on", () => {
+    const filtered = (tags = ["UI"]) => `?tags=${encodeURIComponent(JSON.stringify(tags))}`;
+    const uiOptions = () => screen.queryByRole("button", { name: "Options for “ui”", hidden: true });
+
+    async function openFiltered() {
+      const app = await chartBoard(TAGGED, ADMIN, [], filtered());
+      await app.user.click(uiOptions()!);
+      return { ...app, menu: await screen.findByRole("menu") };
+    }
+
+    it("removing the filtered tag keeps the menu and the row, and focus stays in the menu", async () => {
+      const { user, menu } = await openFiltered();
+      await user.click(within(menu).getByRole("button", { name: "Remove the tag “UI”" }));
+      expect(setTags()).toEqual([{ type: "setTags", id: "ui", tags: ["BE"] }]);
+      expect(screen.getByRole("menu")).toBe(menu);
+      expect(uiOptions()).toBeInTheDocument();
+      expect(within(menu).getByRole("combobox", { name: "Add tag" })).toHaveFocus();
+    });
+
+    it("the row leaves 5 s after the menu closes and another row is selected", async () => {
+      const { user, menu } = await openFiltered();
+      await user.click(within(menu).getByRole("button", { name: "Remove the tag “UI”" }));
+      await user.keyboard("{Escape}");
+      await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+      expect(uiOptions()).toBeInTheDocument();
+      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+      fireEvent.click(document.querySelector('[data-chart-body] [data-row="0"]')!); // the section above it
+      act(() => void vi.advanceTimersByTime(4999));
+      expect(uiOptions()).toBeInTheDocument();
+      act(() => void vi.advanceTimersByTime(1));
+      expect(uiOptions()).not.toBeInTheDocument();
+    });
+
+    it("a row that goes away takes its menu with it: bringing the row back doesn't reopen it", async () => {
+      const { router } = await openFiltered();
+      await act(() => router.navigate({ to: ".", search: { tags: ["release"] } as never }));
+      await waitFor(() => expect(uiOptions()).not.toBeInTheDocument());
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+      await act(() => router.navigate({ to: ".", search: {} as never }));
+      await waitFor(() => expect(uiOptions()).toBeInTheDocument());
+      await act(async () => {});
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("the day menu under the chart", () => {
+    const dayMenuItem = () => screen.queryByRole("menuitem", { name: "Highlight this day…", hidden: true });
+
+    it("a right-click in the tag box leaves the browser's own menu alone", async () => {
+      const { input } = await openMenu();
+      expect(fireEvent.contextMenu(input, { clientX: 100, clientY: 5 })).toBe(true); // true: not default-prevented
+      await act(async () => {});
+      expect(dayMenuItem()).not.toBeInTheDocument();
+    });
+
+    it("a touch long-press in the tag box doesn't open it", async () => {
+      const { input } = await openMenu();
+      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+      fireEvent.pointerDown(input, { pointerType: "touch", button: 0, clientX: 100, clientY: 5 });
+      act(() => void vi.advanceTimersByTime(800));
+      expect(dayMenuItem()).not.toBeInTheDocument();
+    });
+
+    it("opens again once the menu has closed", async () => {
+      const { user } = await openMenu();
+      await user.keyboard("{Escape}");
+      await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+      fireEvent.contextMenu(document.querySelector("[data-chart-body]")!, { clientX: 100, clientY: 5 });
+      expect(await screen.findByRole("menuitem", { name: "Highlight this day…" })).toBeInTheDocument();
+    });
   });
 });
 

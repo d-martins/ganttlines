@@ -1,6 +1,6 @@
 import { fromDay, LINK_KIND_WORDS, spanEnd, spanStart, type Command, type DayNum, type LinkKind, type RowId } from "@ganttlines/engine";
 import { UserRound } from "lucide-react";
-import { useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { AssigneePicker } from "../assignee-picker";
 import { runCommand, useBoard } from "../board-context";
 import { addAtEnd, deleteRow } from "../list/list-actions";
@@ -74,7 +74,19 @@ export function ChartRows({
   const select = useSelection((selection) => selection.select);
   const drag = useChartDrag((store) => store.drag);
   const [hover, setHover] = useState<{ index: number; day: DayNum } | null>(null);
-  const [menuFor, setMenuFor] = useState<RowId | null>(null);
+  const menuFor = useChartDrag((store) => store.menuFor);
+  const setMenuFor = (menuFor: RowId | null) => useChartDrag.setState({ menuFor });
+  // Selected, so an edit in the menu that takes the row out of a filter doesn't take the row, and the menu, away at once.
+  const openMenu = (id: RowId) => {
+    select(id, false);
+    setMenuFor(id);
+  };
+  // A row that goes away takes its menu along: it must not open by itself when the row comes back.
+  const menuRowShown = rows.some((entry) => entry.row.id === menuFor && entry.span !== null);
+  useEffect(() => {
+    if (menuFor !== null && !menuRowShown) setMenuFor(null);
+  }, [menuFor, menuRowShown]);
+  useEffect(() => () => setMenuFor(null), []);
   const rowHeight = ROW_HEIGHT[style];
   const barHeight = BAR_HEIGHT[style];
   // Handlers run long after render (window listeners): read the latest values through refs.
@@ -189,7 +201,7 @@ export function ChartRows({
         if (start !== spanStart(span)) run({ type: "moveTask", id: row.id, ...startAt(start) });
       }
     } else if (event.key === "Enter" || event.key === " ") {
-      setMenuFor(row.id);
+      openMenu(row.id);
     } else if (event.key === "Delete" || event.key === "Backspace") {
       deleteRow(latest.current.board, row);
     } else if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
@@ -321,7 +333,7 @@ export function ChartRows({
                         </button>
                       }
                     />
-                    <BarMenu task={task!} isParent={entry.isParent} open={menuFor === row.id} onOpenChange={(open) => setMenuFor(open ? row.id : null)} />
+                    <BarMenu task={task!} isParent={entry.isParent} open={menuFor === row.id} onOpenChange={(open) => (open ? openMenu(row.id) : setMenuFor(null))} />
                   </div>
                 </div>
               </>

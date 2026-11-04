@@ -24,7 +24,11 @@ export type LinkEnd = "start" | "end";
 /** The kind of a link from the predecessor's end `from` to the follower's end `to`. */
 export const linkKindOf = (from: LinkEnd, to: LinkEnd): LinkKind => (from === "end" ? (to === "start" ? "FS" : "FF") : to === "start" ? "SS" : "SF");
 
-export const useChartDrag = create<{ drag: ChartDrag | null }>(() => ({ drag: null }));
+export const useChartDrag = create<{
+  drag: ChartDrag | null;
+  /** the row whose spanner menu is open */
+  menuFor: RowId | null;
+}>(() => ({ drag: null, menuFor: null }));
 
 /** Drags and arrow keys work in half days where a day column is wide enough (day zoom); otherwise in whole days. */
 export const snapsToHalves = (timeline: Timeline) => timeline.dayWidth >= DAY_WIDTH.day;
