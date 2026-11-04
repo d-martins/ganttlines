@@ -24,6 +24,7 @@ import { useSelection } from "./selection";
 import { boardModel, type CompareMode } from "./model";
 import { LIST_WIDTH, SLIP_COLUMN, useBoardView } from "./view-store";
 import { useCriticalPath } from "./critical-path-view";
+import { boardSchedule } from "./slack";
 
 type DetailsPanelType = typeof import("./panel/details-panel").DetailsPanel;
 /** The details panel brings the rich-text editor along: a separate download, fetched once a board is shown. */
@@ -94,7 +95,8 @@ export function Board({
   const { canEdit, canEditCalendar, sync } = useBoard();
   // The "Can slip" column gets its room without touching the width chosen for the list.
   const critical = useCriticalPath(sync.projectId);
-  const listWidth = critical ? Math.max(chosenWidth, LIST_WIDTH.min + SLIP_COLUMN) : chosenWidth;
+  const slipRoom = critical ? SLIP_COLUMN : 0;
+  const listWidth = Math.min(chosenWidth + slipRoom, LIST_WIDTH.max + slipRoom);
   const collapsed = useCollapsed(sync.projectId);
   // Collapsed rows deleted since are forgotten (once the board has rows to compare with).
   useEffect(() => {
@@ -128,7 +130,7 @@ export function Board({
     () => boardModel(displayed, calendar, baseline, filters, collapsed, team, shownMatches),
     [displayed, calendar, baseline, filters, collapsed, team, shownMatches],
   );
-  const milestones = useMemo(() => aimedMilestones(state, model.rows), [state, model.rows]);
+  const milestones = useMemo(() => aimedMilestones(displayed, boardSchedule(displayed, calendar), model.rows), [displayed, calendar, model.rows]);
   const known = useMemo(() => knownFilters(state, filters, team), [state, filters, team]);
   const DetailsPanel = useDetailsPanel();
   const onListKey = useListKeys(model.rows, model.filtering);
@@ -286,7 +288,7 @@ export function Board({
   const startResize = (event: ReactPointerEvent) => {
     event.preventDefault();
     const startX = event.clientX;
-    const startWidth = listWidth;
+    const startWidth = chosenWidth;
     const move = (moveEvent: PointerEvent) => setListWidth(startWidth + moveEvent.clientX - startX);
     const up = () => {
       window.removeEventListener("pointermove", move);

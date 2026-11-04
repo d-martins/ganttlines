@@ -548,6 +548,8 @@ describe("details panel", () => {
       expect(date).toHaveValue("2026-10-13");
       const created = (lastCommand() as { newId: string }).newId;
       fireEvent.change(date, { target: { value: "2026-10-20" } });
+      expect(lastCommand()).toMatchObject({ type: "createTargetMilestone" }); // nothing moves until it's committed
+      fireEvent.keyDown(date, { key: "Enter" });
       expect(lastCommand()).toEqual({ type: "moveTask", id: created, start: "2026-10-20" });
       await user.click(within(panel()).getByRole("combobox", { name: "Add tag" }));
       expect(within(aimSection()).queryByLabelText("Milestone date")).not.toBeInTheDocument();

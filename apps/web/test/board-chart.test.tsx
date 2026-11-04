@@ -5,6 +5,7 @@ import { act, fireEvent, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { toolsLeft } from "../src/board/chart/chart-rows";
 import { isCriticalPathOn, useCriticalPathView } from "../src/board/critical-path-view";
+import { LIST_WIDTH, SLIP_COLUMN } from "../src/board/view-store";
 import { linkPath } from "../src/board/chart/dependencies";
 import { formatDay } from "../src/board/format";
 import { useBoardView } from "../src/board/view-store";
@@ -446,6 +447,31 @@ describe("milestones being aimed at", () => {
     expect(bar("feeder")).toHaveAttribute("data-slack", "late");
   });
 
+  it("keeps the line when the milestone's section is collapsed", async () => {
+    const rows = [
+      section("work", { position: "a0" }),
+      task("ui", { parentId: "work", position: "a0", userStart: "2026-10-12", duration: 1, targetId: "cut" }),
+      section("dates", { position: "a1" }),
+      task("cut", { parentId: "dates", position: "a0", userStart: "2026-10-14", duration: 0 }),
+    ];
+    const { user } = await chartBoard(rows);
+    await user.click(screen.getByRole("button", { name: "Collapse all" }));
+    expect(screen.queryByRole("button", { name: /^cut, / })).not.toBeInTheDocument();
+    expect(lines()).toHaveLength(1);
+    expect(flags()).toEqual(["cut"]);
+  });
+
+  it("a miss is outlined even when a locked follower is the tighter limit", async () => {
+    const rows = [
+      section("x", { position: "a0" }),
+      task("ui", { parentId: "x", position: "a0", userStart: "2026-10-12", duration: 3, targetId: "cut" }),
+      task("cut", { parentId: "x", position: "a1", userStart: "2026-10-13", duration: 0 }),
+      task("held", { parentId: "x", position: "a2", userStart: "2026-10-13", duration: 1, locked: true }),
+    ];
+    await chartBoard(rows, ADMIN, [{ predecessorId: "ui", followerId: "held", kind: "FS", lag: 0 }]);
+    expect(bar("ui")).toHaveAttribute("data-slack", "late");
+  });
+
   it("a board with no targets has no outlines", async () => {
     await chartBoard(AIMED());
     expect(document.querySelector("[data-slack]")).toBeNull();
@@ -522,6 +548,15 @@ describe("the Critical path button", () => {
     await user.click(button());
     const marked = [...document.querySelectorAll("[data-testid=dependency]")].filter((path) => path.hasAttribute("data-critical"));
     expect(marked).toHaveLength(1);
+  });
+
+  it("gives the column its own room, leaving the chosen list width alone", async () => {
+    const { user } = await chartBoard(PLAN);
+    const listWidth = () => screen.getByRole("treegrid", { name: "Tasks" }).closest<HTMLElement>("[style*=width]")!.style.width;
+    expect(listWidth()).toBe(`${LIST_WIDTH.initial}px`);
+    await user.click(button());
+    expect(listWidth()).toBe(`${LIST_WIDTH.initial + SLIP_COLUMN}px`);
+    expect(useBoardView.getState().listWidth).toBe(LIST_WIDTH.initial);
   });
 
   it("is remembered per project, and sends no command", async () => {

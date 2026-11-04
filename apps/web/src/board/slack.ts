@@ -1,9 +1,6 @@
-import { buildTree, childrenOf, computeSchedule, computeSlack, criticalLinks, CycleError, isParentTask, type LinkKey, type ProjectState, type RowId, type Schedule, type SlackMap } from "@ganttlines/engine";
-import { useMemo } from "react";
+import { analyseSlack, buildTree, childrenOf, computeSchedule, CycleError, isParentTask, type Calendar, type LinkKey, type ProjectState, type RowId, type Schedule, type SlackAnalysis } from "@ganttlines/engine";
 import { useBoard } from "./board-context";
 import { useCriticalPath } from "./critical-path-view";
-
-const NO_SLACK: SlackMap = new Map();
 
 /** "4 days", "1 day", "0 days", "−1 day", "1.5 days". */
 export function formatSlack(halves: number): string {
@@ -11,35 +8,52 @@ export function formatSlack(halves: number): string {
   return `${halves < 0 ? "\u2212" : ""}${days} ${days === 1 ? "day" : "days"}`;
 }
 
-function scheduleOf(state: ProjectState, calendar: Parameters<typeof computeSchedule>[1]): Schedule | null {
-  try {
-    return computeSchedule(state, calendar);
-  } catch (error) {
-    if (error instanceof CycleError) return null;
-    throw error;
+const NOTHING: SlackAnalysis = { slack: new Map(), critical: new Set(), pastTarget: new Set() };
+
+/** Worked out once per version of the board, however many parts of the page ask. */
+const analyses = new WeakMap<ProjectState, { calendar: Calendar; schedule: Schedule | null; analysis?: SlackAnalysis }>();
+
+function analysed(state: ProjectState, calendar: Calendar) {
+  let entry = analyses.get(state);
+  if (!entry || entry.calendar !== calendar) {
+    let schedule: Schedule | null = null;
+    try {
+      schedule = computeSchedule(state, calendar);
+    } catch (error) {
+      if (!(error instanceof CycleError)) throw error;
+    }
+    entry = { calendar, schedule };
+    analyses.set(state, entry);
   }
+  return entry;
 }
 
-/** How far each task on the board can slip. */
-export function useSlack(): SlackMap {
-  const { state, calendar } = useBoard();
-  return useMemo(() => {
-    const schedule = scheduleOf(state, calendar);
-    return schedule ? computeSlack(state, calendar, schedule) : NO_SLACK;
-  }, [state, calendar]);
+/** The board's dates, shared with the slack worked out from them. */
+export function boardSchedule(state: ProjectState, calendar: Calendar): Schedule | null {
+  return analysed(state, calendar).schedule;
 }
 
-const NO_LINKS: ReadonlySet<LinkKey> = new Set();
+function slackAnalysis(state: ProjectState, calendar: Calendar): SlackAnalysis {
+  const entry = analysed(state, calendar);
+  if (!entry.schedule) return NOTHING;
+  entry.analysis ??= analyseSlack(state, calendar, entry.schedule);
+  return entry.analysis;
+}
+
+const hasTargets = (state: ProjectState) => Object.values(state.rows).some((row) => row.kind === "task" && row.targetId);
+
+/** How far tasks can slip. A board nobody aims on pays nothing for this until Critical path is on. */
+export function useSlackAnalysis(): SlackAnalysis {
+  const { state, calendar, sync } = useBoard();
+  const on = useCriticalPath(sync.projectId);
+  return on || hasTargets(state) ? slackAnalysis(state, calendar) : NOTHING;
+}
 
 /** The links a slip passes straight through, while the Critical path button is on. */
 export function useCriticalLinks(): ReadonlySet<LinkKey> {
   const { state, calendar, sync } = useBoard();
-  const slack = useSlack();
   const on = useCriticalPath(sync.projectId);
-  return useMemo(() => {
-    const schedule = on ? scheduleOf(state, calendar) : null;
-    return schedule ? criticalLinks(state, calendar, schedule, slack) : NO_LINKS;
-  }, [on, state, calendar, slack]);
+  return on ? slackAnalysis(state, calendar).critical : NOTHING.critical;
 }
 
 /** Where a milestone made on the go lands: right after the last one being aimed at, else at the end of the board. */

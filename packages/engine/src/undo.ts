@@ -1,6 +1,7 @@
 import { isLinkChange, restoredRow, type Change } from "./changes";
 import { linkKey, type Link, type LinkKey } from "./links";
 import type { ProjectState, Row, RowId } from "./model";
+import { clearLostTargets } from "./tree";
 
 export interface Reverted {
   state: ProjectState;
@@ -87,12 +88,14 @@ export function revertChanges(state: ProjectState, changes: readonly Change[], d
     delete links[key];
     skipped++;
   }
+  // What it restored may no longer be a milestone, or it may have put a milestone's aim back on its way out.
+  skipped += clearLostTargets(rows);
   return { state: { rows, links }, skipped };
 }
 
 /**
- * Deletes the `candidates` that nothing remaining points to (a row as parent, or either end of a
- * link). A candidate that is still referenced from outside the set is kept — and so are the
+ * Deletes the `candidates` that nothing remaining points to (a row as parent or target, or either end
+ * of a link). A candidate that is still referenced from outside the set is kept — and so are the
  * candidates it points to. Returns how many candidates had to be kept.
  */
 function removeUnreferenced(rows: Record<RowId, Row>, links: Readonly<Record<LinkKey, Link>>, candidates: Set<RowId>): number {
@@ -105,6 +108,7 @@ function removeUnreferenced(rows: Record<RowId, Row>, links: Readonly<Record<Lin
     for (const row of Object.values(rows)) {
       if (candidates.has(row.id)) continue;
       if (row.parentId !== null) referenced.add(row.parentId);
+      if (row.kind === "task" && row.targetId) referenced.add(row.targetId);
     }
     for (const id of candidates) {
       if (referenced.has(id)) {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { applyCommand, isValidTarget, type Command } from "../src/commands";
+import type { Change } from "../src/changes";
 import type { ProjectState, TaskRow } from "../src/model";
 import { computeSchedule } from "../src/schedule";
 
@@ -137,5 +138,41 @@ describe("the rest", () => {
     const { targetId: _gone, ...old } = task("t", dated);
     const state = project(old as TaskRow, task("m", { userStart: "2026-10-16", duration: 0 }));
     expect(applyCommand(state, cal, { type: "updateTitle", id: "t", title: "x" })).toMatchObject({ ok: true });
+  });
+});
+
+describe("undo with other people's edits", () => {
+  const undo = (state: ProjectState, changes: Change[]) => revertChanges(state, changes, "undo").state;
+  const apply = (state: ProjectState, command: Command) => {
+    const result = applyCommand(state, cal, command);
+    if (!result.ok) throw new Error(result.message);
+    return result;
+  };
+
+  it("doesn't restore a target whose milestone someone has since deleted", () => {
+    const stopped = apply(aimed(), { type: "setTarget", id: "t", targetId: null });
+    const deleted = run(stopped.state, cal, { type: "deleteRows", ids: ["m"] });
+    expect(taskIn(undo(deleted, stopped.changes), "t").targetId).toBeNull();
+  });
+
+  it("doesn't restore a target on what someone has since made a task again", () => {
+    const converted = apply(aimed(), { type: "convertMilestone", id: "m", milestone: false });
+    const resized = run(converted.state, cal, { type: "setDuration", id: "m", duration: 3 });
+    expect(taskIn(undo(resized, converted.changes), "t").targetId).toBeNull();
+  });
+
+  it("keeps a milestone someone else now aims for when undoing its creation", () => {
+    const created = apply(board(), { type: "createTargetMilestone", id: "t", newId: "new", title: "8.12", parentId: null, afterId: null, start: "2026-10-20" });
+    const other = run(created.state, cal, { type: "setTarget", id: "other", targetId: "new" });
+    const undone = undo(other, created.changes);
+    expect(undone.rows["new"]).toBeDefined();
+    expect(taskIn(undone, "other").targetId).toBe("new");
+    expect(taskIn(undone, "t").targetId).toBeNull();
+  });
+
+  it("undoing something else that stops a row being a milestone clears targets on it", () => {
+    const made = apply(project(task("t", dated), task("x", dated)), { type: "convertMilestone", id: "x", milestone: true });
+    const aiming = run(made.state, cal, { type: "setTarget", id: "t", targetId: "x" });
+    expect(taskIn(undo(aiming, made.changes), "t").targetId).toBeNull();
   });
 });

@@ -45,5 +45,5 @@ export { buildTree, childrenOf, findTreeProblem, isAncestor, isParentTask, type 
 export { revertChanges, type Reverted } from "./undo";
 export { baselineTasks, type BaselineTask } from "./baseline";
 export { workedDays, workedDaysOfAll } from "./worked";
-export { computeSlack, criticalLinks, effectiveTarget, type Slack, type SlackLimit, type SlackMap } from "./slack";
+export { analyseSlack, computeSlack, effectiveTarget, type Slack, type SlackAnalysis, type SlackLimit, type SlackMap } from "./slack";
 export { canonicalTags, MAX_TAG_LENGTH, MAX_TAGS_PER_TASK, normalizeTags, rankTags, tagKey, type TagUse } from "./tags";

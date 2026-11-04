@@ -1,4 +1,4 @@
-import type { DayNum, ProjectState, RowId } from "@ganttlines/engine";
+import type { DayNum, ProjectState, RowId, Schedule } from "@ganttlines/engine";
 import type { BoardRow } from "../model";
 import type { Timeline } from "./timeline";
 
@@ -8,10 +8,18 @@ export interface AimedMilestone {
   day: DayNum;
 }
 
-/** The dated milestones at least one task aims for. */
-export function aimedMilestones(state: ProjectState, rows: readonly BoardRow[]): AimedMilestone[] {
+/**
+ * The dated milestones at least one task aims for, whether or not their own rows are on screen (collapsed,
+ * filtered out). `rows` are the rows on screen: their dates win, as they may be a baseline's.
+ */
+export function aimedMilestones(state: ProjectState, schedule: Schedule | null, rows: readonly BoardRow[]): AimedMilestone[] {
   const aimed = new Set(Object.values(state.rows).flatMap((row) => (row.kind === "task" && row.targetId ? [row.targetId] : [])));
-  return rows.flatMap((entry) => (aimed.has(entry.row.id) && entry.span ? [{ id: entry.row.id, title: entry.row.title || "Untitled", day: entry.span.start }] : []));
+  const shown = new Map(rows.map((entry) => [entry.row.id, entry.span]));
+  return [...aimed].flatMap((id) => {
+    const span = shown.has(id) ? shown.get(id) : schedule?.get(id)?.span;
+    const row = state.rows[id];
+    return row && span ? [{ id, title: row.title || "Untitled", day: span.start }] : [];
+  });
 }
 
 /** A dashed line down the chart for each. */

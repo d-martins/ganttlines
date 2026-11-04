@@ -4,6 +4,7 @@ import { useId, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent }
 import { useBoard, useRun } from "../board-context";
 import { formatDay, today } from "../format";
 import { formatSlack, milestonesOf, newMilestonePlace } from "../slack";
+import { CommitInput } from "./commit-input";
 import { useFloatingList } from "./suggestion-list";
 
 type Choice = { kind: "milestone"; id: RowId; title: string; day: number | null } | { kind: "create"; title: string };
@@ -176,13 +177,13 @@ export function AimSection({ task, schedule }: { task: TaskRow; schedule: Schedu
       {correcting ? (
         <label className="flex items-center gap-2 text-xs text-muted">
           Date
-          <input
+          <CommitInput
             type="date"
             aria-label="Milestone date"
             autoFocus
             value={correctingSpan ? fromDay(correctingSpan.start) : ""}
-            onChange={(event) => event.target.value && run({ type: "moveTask", id: correcting, start: event.target.value })}
-            className="rounded-md border border-border-strong bg-bg px-2 py-0.5 text-sm text-text"
+            onCommit={(date) => date && run({ type: "moveTask", id: correcting, start: date })}
+            className="w-auto py-0.5"
           />
         </label>
       ) : null}

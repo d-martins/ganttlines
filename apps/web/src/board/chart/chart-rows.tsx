@@ -1,11 +1,11 @@
-import type { SlackMap } from "@ganttlines/engine";
+import type { SlackAnalysis } from "@ganttlines/engine";
 import { fromDay, LINK_KIND_WORDS, spanEnd, spanStart, type Command, type DayNum, type LinkKind, type RowId } from "@ganttlines/engine";
 import { UserRound } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { AssigneePicker } from "../assignee-picker";
 import { runCommand, useBoard } from "../board-context";
 import { useCriticalPath } from "../critical-path-view";
-import { useSlack } from "../slack";
+import { useSlackAnalysis } from "../slack";
 import { addAtEnd, deleteRow } from "../list/list-actions";
 import type { BoardRow } from "../model";
 import { useSelection } from "../selection";
@@ -49,12 +49,12 @@ function LinkDot({ left, top, title, onPointerDown }: { left: number; top: numbe
  * shows each bar's controls, and empty tracks show a ghost where a click would schedule the task.
  */
 /** What a bar's outline says; none for dates drawn from a baseline. */
-function slackMark(entry: BoardRow, slack: SlackMap, critical: boolean): "late" | "zero" | null {
+function slackMark(entry: BoardRow, { slack, pastTarget }: SlackAnalysis, critical: boolean): "late" | "zero" | null {
   if (entry.fromBaseline) return null;
   const mine = slack.get(entry.row.id);
   if (!mine) return null;
   // A missed milestone always shows; the rest only when asked for.
-  if (mine.halves < 0 && (critical || mine.limit.kind === "milestone")) return "late";
+  if (pastTarget.has(entry.row.id) || (mine.halves < 0 && (critical || mine.limit.kind === "milestone"))) return "late";
   return critical && mine.halves === 0 ? "zero" : null;
 }
 
@@ -84,7 +84,7 @@ export function ChartRows({
 }) {
   const board = useBoard();
   const { state, resources, resourceMap, canEdit, canCreateResources } = board;
-  const slack = useSlack();
+  const slack = useSlackAnalysis();
   const critical = useCriticalPath(board.sync.projectId);
   const select = useSelection((selection) => selection.select);
   const drag = useChartDrag((store) => store.drag);

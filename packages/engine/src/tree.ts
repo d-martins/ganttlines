@@ -80,3 +80,21 @@ export function findTreeProblem(rows: readonly Row[]): string | null {
   }
   return null;
 }
+
+/**
+ * Clears targets on what's no longer a milestone (deleted, converted, given subtasks) and on tasks that
+ * became one, in place. Returns how many it cleared.
+ */
+export function clearLostTargets(rows: Record<RowId, Row>): number {
+  const aiming = Object.values(rows).filter((row): row is TaskRow => row.kind === "task" && (row.targetId ?? null) !== null);
+  if (aiming.length === 0) return 0;
+  const parents = new Set(Object.values(rows).flatMap((row) => (row.parentId === null ? [] : [row.parentId])));
+  const isMilestone = (row: Row | undefined) => row?.kind === "task" && row.duration === 0 && !parents.has(row.id);
+  let cleared = 0;
+  for (const task of aiming) {
+    if (isMilestone(rows[task.targetId!]) && !isMilestone(task)) continue;
+    rows[task.id] = { ...task, targetId: null };
+    cleared++;
+  }
+  return cleared;
+}

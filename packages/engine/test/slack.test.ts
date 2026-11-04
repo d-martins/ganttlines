@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { linkKey } from "../src/links";
 import type { ProjectState, Row } from "../src/model";
 import { computeSchedule } from "../src/schedule";
-import { computeSlack, criticalLinks, effectiveTarget } from "../src/slack";
+import { analyseSlack, computeSlack, effectiveTarget } from "../src/slack";
 import { calendar, link, project, section, task } from "./fixtures";
 
 // October 2026: Mon 5 … Fri 9, Mon 12 … Fri 16, Mon 19 … Fri 23, Mon 26 … Fri 30
@@ -144,6 +144,37 @@ describe("computeSlack", () => {
     });
   });
 
+  it("a subtask not setting its parent's end isn't charged for a late follower", () => {
+    const state = project(
+      task("p", { userStart: start }),
+      task("late", { parentId: "p", userStart: start, duration: 3 }),
+      task("early", { parentId: "p", userStart: start, duration: 1 }),
+      task("after", { userStart: start, duration: 1, targetId: "m" }),
+      task("m", { userStart: "2026-10-07", duration: 0 }),
+      task("far", { userStart: start, duration: 30 }),
+      link("p", "after"),
+    );
+    expect(days(state, "after")).toBe(-1);
+    expect(days(state, "late")).toBe(-1);
+    expect(days(state, "early")).toBe(1); // it can reach the Tuesday the parent has to end on
+    expect(days(state, "p")).toBe(-1);
+  });
+
+  it("a miss bigger than the board is counted in full", () => {
+    const state = project(task("a", { userStart: start, duration: 1 }), task("b", { userStart: "2026-10-06", duration: 1, locked: true }), link("a", "b", 20));
+    expect(days(state, "a")).toBe(-20);
+  });
+
+  it("a milestone doesn't inherit its parent's target", () => {
+    const state = project(
+      task("p", { userStart: start, targetId: "soon" }),
+      task("kid", { parentId: "p", userStart: start, duration: 1 }),
+      task("inside", { parentId: "p", userStart: "2026-10-20", duration: 0 }),
+      task("soon", { userStart: "2026-10-07", duration: 0 }),
+    );
+    expect(slackOf(state).get("inside")).toEqual({ halves: 0, limit: { kind: "end" } });
+  });
+
   it("a target already passed gives a negative number, and so do tasks feeding it", () => {
     const state = project(
       task("feeder", { userStart: start, duration: 1 }),
@@ -213,16 +244,28 @@ describe("computeSlack", () => {
     const schedule = computeSchedule(state, cal);
     const began = Date.now();
     const slack = computeSlack(state, cal, schedule);
-    expect(Date.now() - began).toBeLessThan(1000);
+    const took = Date.now() - began;
+    expect(took).toBeLessThan(1000);
     expect(slack.get("t0")?.halves).toBe(0);
   });
 });
 
-describe("criticalLinks", () => {
-  it("returns only links the slip passes through at 0 or below", () => {
+describe("analyseSlack", () => {
+  it("names only the links a slip passes straight through", () => {
     const state = example();
-    const schedule = computeSchedule(state, cal);
-    const critical = criticalLinks(state, cal, schedule, computeSlack(state, cal, schedule));
-    expect(critical).toEqual(new Set([linkKey(link("design", "api")), linkKey(link("legal", "release"))]));
+    expect(analyseSlack(state, cal, computeSchedule(state, cal)).critical).toEqual(new Set([linkKey(link("design", "api")), linkKey(link("legal", "release"))]));
+  });
+
+  it("knows who is past their own target, even when something else is tighter", () => {
+    const state = project(
+      task("t", { userStart: start, duration: 3, targetId: "m" }),
+      task("m", { userStart: "2026-10-06", duration: 0 }),
+      task("locked", { userStart: "2026-10-06", duration: 1, locked: true }),
+      task("fine", { userStart: start, duration: 1, targetId: "m" }),
+      link("t", "locked"),
+    );
+    const { slack, pastTarget } = analyseSlack(state, cal, computeSchedule(state, cal));
+    expect(slack.get("t")?.limit).toEqual({ kind: "task", id: "locked" });
+    expect(pastTarget).toEqual(new Set(["t"]));
   });
 });

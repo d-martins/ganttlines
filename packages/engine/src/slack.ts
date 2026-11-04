@@ -16,7 +16,11 @@ export type SlackMap = ReadonlyMap<RowId, Slack>;
 
 /** The task's own target, else its nearest ancestor's. */
 export function effectiveTarget(state: ProjectState, row: Row): RowId | null {
-  let steps = Object.keys(state.rows).length + 1;
+  return targetOf(state, row, Object.keys(state.rows).length);
+}
+
+function targetOf(state: ProjectState, row: Row, rowCount: number): RowId | null {
+  let steps = rowCount + 1;
   for (let up: Row | undefined = row; up && steps > 0; up = up.parentId === null ? undefined : state.rows[up.parentId], steps--) {
     if (up.kind === "task" && (up.targetId ?? null) !== null) return up.targetId;
   }
@@ -70,6 +74,14 @@ const tighter = (a: Slack, b: Slack) => a.halves < b.halves || (a.halves === b.h
 /** Milestones move in whole days. */
 const wholeDays = (halves: number) => Math.floor(halves / 2) * 2;
 
+export interface SlackAnalysis {
+  slack: SlackMap;
+  /** the links with no room, so a slip passes straight through them */
+  critical: ReadonlySet<LinkKey>;
+  /** tasks past their own target, directly or by inheritance, and the parents of those */
+  pastTarget: ReadonlySet<RowId>;
+}
+
 /** The earliest and latest subtask edges under a parent, with the runners-up for when the first moves. */
 interface Edges {
   firstStart: { id: RowId; half: HalfDay };
@@ -78,7 +90,8 @@ interface Edges {
   nextEnd: HalfDay;
 }
 
-function analyse(state: ProjectState, calendar: Calendar, schedule: Schedule) {
+/** How far each scheduled task can slip, and what limits it; parents show their subtasks' tightest. */
+export function analyseSlack(state: ProjectState, calendar: Calendar, schedule: Schedule): SlackAnalysis {
   const tree = buildTree(state);
   const task = (id: RowId): TaskRow | null => {
     const row = state.rows[id];
@@ -90,7 +103,8 @@ function analyse(state: ProjectState, calendar: Calendar, schedule: Schedule) {
   const spans = scheduled.map((row) => spanOf(row.id)!);
   const slack = new Map<RowId, Slack>();
   const linkRoom = new Map<LinkKey, number>();
-  if (spans.length === 0) return { slack, linkRoom };
+  const pastTarget = new Set<RowId>();
+  if (spans.length === 0) return { slack, critical: new Set(), pastTarget };
 
   const earliest = Math.min(...spans.map(spanStart));
   const boardEnd = Math.max(...spans.map(spanEnd));
@@ -98,15 +112,16 @@ function analyse(state: ProjectState, calendar: Calendar, schedule: Schedule) {
   const clocks = new Map<ResourceId | null, Clock>();
   const clockOf = (resource: ResourceId | null): Clock => {
     let clock = clocks.get(resource);
-    if (!clock) clocks.set(resource, (clock = new Clock(calendar, resource, earliest - reach * 3 - 400, boardEnd + reach * 3 + 400)));
+    if (!clock) clocks.set(resource, (clock = new Clock(calendar, resource, earliest - reach - 400, boardEnd + reach + 400)));
     return clock;
   };
 
+  const rowCount = Object.keys(state.rows).length;
   const out = new Map<RowId, Link[]>();
   for (const link of Object.values(state.links)) out.set(link.predecessorId, [...(out.get(link.predecessorId) ?? []), link]);
   const ancestorsOf = (row: Row): TaskRow[] => {
     const ancestors: TaskRow[] = [];
-    let steps = Object.keys(state.rows).length + 1;
+    let steps = rowCount + 1;
     for (let up = row.parentId === null ? undefined : state.rows[row.parentId]; up && steps > 0; up = up.parentId === null ? undefined : state.rows[up.parentId], steps--) {
       if (up.kind === "task") ancestors.push(up);
     }
@@ -177,34 +192,37 @@ function analyse(state: ProjectState, calendar: Calendar, schedule: Schedule) {
       if (tighter(candidate, best)) best = candidate;
     };
 
-    const target = effectiveTarget(state, row);
+    // A milestone has nothing to aim with, so it doesn't pick up a parent's target either.
+    const target = milestone ? null : targetOf(state, row, rowCount);
     const targetSpan = target !== null && target !== row.id ? spanOf(target) : null;
-    if (target !== null && targetSpan) offer({ halves: clock.between(spanEnd(span), spanEnd(targetSpan)), limit: { kind: "milestone", id: target } });
+    if (target !== null && targetSpan) {
+      const gap = clock.between(spanEnd(span), spanEnd(targetSpan));
+      if (gap < 0 && isLeaf(row)) for (const up of [row, ...ancestorsOf(row)]) pastTarget.add(up.id);
+      offer({ halves: gap, limit: { kind: "milestone", id: target } });
+    }
 
     for (const link of linksLeaving(row)) {
       const { leaves, stretched } = heldBy(link);
-      const checks: { fits: (k: number) => boolean; limit: SlackLimit }[] = leaves.map((follower) => {
+      const checks: { allows: (predecessor: Span) => boolean; limit: SlackLimit }[] = leaves.map((follower) => {
         const followerSlack = slack.get(follower.id);
         const latest = follower.locked || !followerSlack ? spanStart(spanOf(follower.id)!) : clockOf(follower.resourceId).add(spanStart(spanOf(follower.id)!), followerSlack.halves);
         const limit: SlackLimit = follower.locked || !followerSlack ? { kind: "task", id: follower.id } : followerSlack.limit;
-        return { fits: (k) => linkRequirement(calendar, follower, link, spanOfPredecessor(link.predecessorId, k)) <= latest, limit };
+        return { allows: (predecessor) => linkRequirement(calendar, follower, link, predecessor) <= latest, limit };
       });
       if (stretched) {
         const own = slack.get(stretched.id);
         const latest = clockOf(null).add(spanEnd(spanOf(stretched.id)!), own?.halves ?? 0);
-        checks.push({ fits: (k) => finishFloor(calendar, link, spanOfPredecessor(link.predecessorId, k), null) <= latest, limit: own?.limit ?? { kind: "end" } });
+        checks.push({ allows: (predecessor) => finishFloor(calendar, link, predecessor, null) <= latest, limit: own?.limit ?? { kind: "end" } });
       }
-      for (const { fits, limit } of checks) {
-        if (fits(reach)) continue;
-        let low = -reach;
-        if (fits(low)) {
-          let high = reach; // fits(low), not fits(high)
-          while (high - low > 1) {
-            const middle = Math.floor((low + high) / 2);
-            if (fits(middle)) low = middle;
-            else high = middle;
-          }
-        }
+      for (const { allows, limit } of checks) {
+        const own = link.predecessorId === row.id;
+        // A miss can be bigger than the board is long.
+        let found = largestFit((k) => allows(spanOfPredecessor(link.predecessorId, k)), reach, own ? reach * 64 : reach);
+        // Other subtasks hold the parent's edge past what the link allows: nothing this row does fixes
+        // that, so all it answers for is not making it worse with its own span.
+        if (found === -Infinity && !own) found = largestFit((k) => allows(moved(k)), reach, reach * 64);
+        if (found === Infinity) continue;
+        const low = found === -Infinity ? -reach * 64 : found;
         const room = milestone ? wholeDays(low) : low;
         if (isLeaf(row)) linkRoom.set(linkKey(link), Math.min(linkRoom.get(linkKey(link)) ?? Infinity, room));
         offer({ halves: room, limit });
@@ -251,16 +269,50 @@ function analyse(state: ProjectState, calendar: Calendar, schedule: Schedule) {
     }
     if (tightest) slack.set(parent.id, tightest);
   }
-  return { slack, linkRoom };
+  return { slack, critical: new Set([...linkRoom].filter(([, room]) => room <= 0).map(([key]) => key)), pastTarget };
 }
 
-/** How far each scheduled task can slip, and what limits it; parents show their subtasks' tightest. */
+/**
+ * The largest shift that `fits`, which only gets harder as the shift grows, searching out from 0 as most
+ * answers are small. Infinity: it still fits at `up`; -Infinity: it doesn't even at `-down`.
+ */
+function largestFit(fits: (k: number) => boolean, up: number, down: number): number {
+  let low: number;
+  let high: number;
+  if (fits(0)) {
+    low = 0;
+    for (let step = 1; ; step *= 2) {
+      high = low + step;
+      if (high > up) {
+        if (fits(up)) return Infinity;
+        high = up;
+        break;
+      }
+      if (!fits(high)) break;
+      low = high;
+    }
+  } else {
+    high = 0;
+    for (let step = 1; ; step *= 2) {
+      low = high - step;
+      if (low < -down) {
+        if (!fits(-down)) return -Infinity;
+        low = -down;
+        break;
+      }
+      if (fits(low)) break;
+      high = low;
+    }
+  }
+  while (high - low > 1) {
+    const middle = Math.floor((low + high) / 2);
+    if (fits(middle)) low = middle;
+    else high = middle;
+  }
+  return low;
+}
+
+/** Just the numbers from `analyseSlack`. */
 export function computeSlack(state: ProjectState, calendar: Calendar, schedule: Schedule): SlackMap {
-  return analyse(state, calendar, schedule).slack;
-}
-
-/** The links with no room, so a slip passes straight through them. */
-export function criticalLinks(state: ProjectState, calendar: Calendar, schedule: Schedule, _slack: SlackMap): Set<LinkKey> {
-  const { linkRoom } = analyse(state, calendar, schedule);
-  return new Set([...linkRoom].filter(([, room]) => room <= 0).map(([key]) => key));
+  return analyseSlack(state, calendar, schedule).slack;
 }

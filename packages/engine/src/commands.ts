@@ -22,7 +22,7 @@ import {
   type Schedule,
   type Span,
 } from "./schedule";
-import { buildTree, childrenOf, descendantLeafTasks, isAncestor, isParentTask, subtreeIds, type Tree } from "./tree";
+import { buildTree, childrenOf, clearLostTargets, descendantLeafTasks, isAncestor, isParentTask, subtreeIds, type Tree } from "./tree";
 
 export type DayHalf = "morning" | "afternoon";
 
@@ -124,20 +124,8 @@ class Execution {
   run(command: Command): ProjectState {
     this.apply(command);
     this.settleFormerParents();
-    this.clearLostTargets();
+    clearLostTargets(this.rows);
     return this.result();
-  }
-
-  /** Targets on what's no longer a milestone (deleted, converted, given subtasks) and on tasks that became one. */
-  private clearLostTargets(): void {
-    const aiming = Object.values(this.rows).filter((row): row is TaskRow => row.kind === "task" && (row.targetId ?? null) !== null);
-    if (aiming.length === 0) return;
-    const state = this.result();
-    const tree = buildTree(state);
-    const isMilestone = (row: Row | undefined) => row?.kind === "task" && row.duration === 0 && !isParentTask(tree, row);
-    for (const task of aiming) {
-      if (!isMilestone(this.rows[task.targetId!]) || isMilestone(task)) this.rows[task.id] = { ...task, targetId: null };
-    }
   }
 
   private apply(command: Command): ProjectState {

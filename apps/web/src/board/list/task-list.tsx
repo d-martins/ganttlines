@@ -1,6 +1,6 @@
 import type { Slack } from "@ganttlines/engine";
 import { useCriticalPath } from "../critical-path-view";
-import { formatSlack, useSlack } from "../slack";
+import { formatSlack, useSlackAnalysis } from "../slack";
 import type { Calendar, RowId } from "@ganttlines/engine";
 import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, GripVertical, LocateFixed, IndentDecrease, IndentIncrease, MessageSquare, PanelRightOpen, Plus, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState, type HTMLAttributes, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type Ref } from "react";
@@ -206,7 +206,7 @@ export function ListRows({
 }) {
   const board = useBoard();
   const critical = useCriticalPath(board.sync.projectId);
-  const slack = useSlack();
+  const { slack } = useSlackAnalysis();
   const capabilities = useCapabilities();
   const comments = useQuery({ ...commentCounts(board.sync.projectId), enabled: capabilities.comments }).data;
   const { state, calendar, resources, resourceMap, canEdit, canCreateResources } = board;
