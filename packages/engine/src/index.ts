@@ -2,6 +2,7 @@ export { Calendar, type CalendarData, type Holiday, type ResourceId, type TimeOf
 export { applyChanges, changedRowIds, diffState, isLinkChange, type Change, type LinkChange, type RowChange } from "./changes";
 export {
   applyCommand,
+  isValidTarget,
   MAX_DATE,
   MAX_DURATION,
   MIN_DATE,
