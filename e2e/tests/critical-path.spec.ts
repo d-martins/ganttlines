@@ -30,7 +30,8 @@ test("creates a milestone from Add link, sees a miss, turns on Critical path, an
   await expect(page.locator('[data-slack="late"]')).toHaveCount(1);
   await panel.getByRole("button", { name: "Close details (Esc)" }).click();
 
-  await page.getByRole("button", { name: "Critical path" }).click();
+  // Adding the aim turned it on.
+  await expect(page.getByRole("button", { name: "Critical path" })).toHaveAttribute("aria-pressed", "true");
   await expect(listRow(page, "Build").getByRole("gridcell", { name: /^Can slip/ })).toContainText("\u22122 days");
 
   const filters = page.getByRole("toolbar", { name: "Filters" });
@@ -47,7 +48,9 @@ test("creates a milestone from Add link, sees a miss, turns on Critical path, an
   await eve.page.goto(shared);
   await expect(listRow(eve.page, "Build")).toBeVisible();
   await expect(listRow(eve.page, "Docs")).toHaveCount(0);
-  // Eve hasn't turned the button on: the miss still shows, the column doesn't.
-  await expect(eve.page.locator('[data-slack="late"]')).toHaveCount(1);
+  // The board has an aim, so it opens with Critical path on for Eve too; she can turn it off, and the miss still shows.
+  await expect(eve.page.getByRole("columnheader", { name: "Can slip" })).toHaveCount(1);
+  await eve.page.getByRole("button", { name: "Critical path" }).click();
   await expect(eve.page.getByRole("columnheader", { name: "Can slip" })).toHaveCount(0);
+  await expect(eve.page.locator('[data-slack="late"]')).toHaveCount(1);
 });

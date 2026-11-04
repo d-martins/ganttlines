@@ -570,11 +570,12 @@ describe("the Critical path button", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date(2026, 8, 29, 12));
     localStorage.clear();
-    useCriticalPathView.setState({ on: {} });
+    // Most of these start from having turned it off; see "its default" for what happens with no choice made.
+    useCriticalPathView.setState({ on: { [PROJECT_ID]: false }, defaults: {} });
   });
   afterEach(() => {
     vi.useRealTimers();
-    useCriticalPathView.setState({ on: {} });
+    useCriticalPathView.setState({ on: {}, defaults: {} });
   });
 
   const PLAN = [
@@ -591,7 +592,7 @@ describe("the Critical path button", () => {
   const canSlip = (name: string) => within(rowNamed(name)).queryByRole("gridcell", { name: /^Can slip/ });
   const rowNamed = (name: string) => screen.getAllByRole("row").find((row) => within(row).queryByText(name, { exact: true }))!;
 
-  it("is off by default: no column, no zero outlines, no critical links", async () => {
+  it("off: no column, no zero outlines, no critical links", async () => {
     await chartBoard(PLAN);
     expect(button()).toHaveAttribute("aria-pressed", "false");
     expect(screen.queryByText("Can slip")).not.toBeInTheDocument();
@@ -683,6 +684,75 @@ describe("the Critical path button", () => {
     const { user } = await chartBoard(PLAN, VIEWER);
     await user.click(button());
     expect(screen.getByRole("columnheader", { name: "Can slip" })).toBeInTheDocument();
+  });
+});
+
+describe("the Critical path button's default", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 8, 29, 12));
+    localStorage.clear();
+    useCriticalPathView.setState({ on: {}, defaults: {} });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    useCriticalPathView.setState({ on: {}, defaults: {} });
+  });
+
+  const rows = (aim: boolean) => [
+    section("x", { position: "a0" }),
+    task("build", { parentId: "x", position: "a0", userStart: "2026-10-12", duration: 1, targetId: aim ? "cut" : null }),
+    task("cut", { parentId: "x", position: "a1", userStart: "2026-10-20", duration: 0 }),
+  ];
+  const button = () => screen.getByRole("button", { name: "Critical path" });
+  const handle = (name: string) => within(screen.getByRole("button", { name: new RegExp(`^${name}, `) }).parentElement!).getByTitle("Drag onto another task to link them");
+
+  it("is on when the board has an aim", async () => {
+    await chartBoard(rows(true));
+    await waitFor(() => expect(button()).toHaveAttribute("aria-pressed", "true"));
+  });
+
+  it("is off when it has none", async () => {
+    await chartBoard(rows(false));
+    expect(button()).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("a choice made stands, even with aims on the board", async () => {
+    useCriticalPathView.setState({ on: { [PROJECT_ID]: false } });
+    await chartBoard(rows(true));
+    expect(button()).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("turning it off is remembered", async () => {
+    const { user } = await chartBoard(rows(true));
+    await waitFor(() => expect(button()).toHaveAttribute("aria-pressed", "true"));
+    await user.click(button());
+    expect(button()).toHaveAttribute("aria-pressed", "false");
+    expect(JSON.parse(localStorage.getItem("gp.criticalPath")!)).toEqual({ [PROJECT_ID]: false });
+  });
+
+  it("comes back on when you add an aim, even if you'd turned it off", async () => {
+    useCriticalPathView.setState({ on: { [PROJECT_ID]: false } });
+    const { user } = await chartBoard(rows(false));
+    drag(handle("build"), 500, 900, 2 * 30 + 15);
+    await user.click((await screen.findAllByRole("menuitem"))[0]!);
+    expect(button()).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("stays as it is when you add a plain link", async () => {
+    const { user } = await chartBoard(rows(false));
+    drag(handle("build"), 500, 900, 2 * 30 + 15);
+    await user.click((await screen.findAllByRole("menuitem"))[1]!);
+    expect(button()).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("doesn't change when someone else adds an aim", async () => {
+    await chartBoard(rows(false));
+    act(() => {
+      FakeWebSocket.last.deliver({ type: "patch", projectId: PROJECT_ID, version: 6, commandId: "other", actor: { userId: null, label: "Ana" }, changes: [{ rowId: "build", field: "targetId", before: null, after: "cut" }] });
+    });
+    await waitFor(() => expect(screen.getByTestId("milestone-line")).toBeInTheDocument());
+    expect(button()).toHaveAttribute("aria-pressed", "false");
   });
 });
 
