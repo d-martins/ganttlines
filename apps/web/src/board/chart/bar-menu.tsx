@@ -82,7 +82,7 @@ export function BarMenu({ task, isParent, open, onOpenChange }: { task: TaskRow;
             className="px-2 pb-1"
             onKeyDown={(event) => event.stopPropagation()}
           >
-            <TagsSection task={task} inlineList />
+            <TagsSection task={task} inMenu />
           </div>
           <DropdownMenu.Separator className="my-1 h-px bg-border" />
           {!isParent ? (

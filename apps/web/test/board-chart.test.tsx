@@ -436,12 +436,12 @@ describe("tags in the bar's menu", () => {
     expect(input).toHaveValue("");
   });
 
-  it("clicking the box offers tags at once, in the menu's flow, leaving out the task's own", async () => {
+  it("clicking the box offers tags at once, floating over the menu, leaving out the task's own", async () => {
     const { user, menu, input } = await openMenu();
     expect(within(menu).queryByRole("listbox")).not.toBeInTheDocument();
     await user.click(input);
     const list = within(menu).getByRole("listbox", { name: "Tags to add" });
-    expect(list.className).not.toContain("absolute");
+    expect(list.className).toContain("fixed");
     expect(within(list).getAllByRole("option").map((option) => option.textContent)).toEqual(["frozen", "release"]);
     await user.keyboard("{Enter}");
     expect(setTags()).toEqual([]);
@@ -498,12 +498,11 @@ describe("tags in the bar's menu", () => {
     expect(screen.getByRole("menu")).toBe(menu);
   });
 
-  it("clicking a suggestion adds it and keeps the menu open, the list growing the menu rather than covering it", async () => {
+  it("clicking a suggestion adds it and keeps the menu open", async () => {
     const { user, menu, input } = await openMenu();
     await user.click(input);
     await user.keyboard("re");
     const list = within(menu).getByRole("listbox", { name: "Tags to add" });
-    expect(list.className).not.toContain("absolute");
     await user.click(within(list).getByRole("option", { name: "release" }));
     expect(setTags()).toEqual([{ type: "setTags", id: "ui", tags: ["UI", "BE", "release"] }]);
     expect(screen.getByRole("menu")).toBe(menu);

@@ -6,6 +6,7 @@ import { describeEntry } from "../src/board/panel/activity";
 import { RichTextView } from "../src/ui/rich-text";
 import { ANA, CALENDAR, FakeWebSocket, PROJECT_ID, projectState, section, task } from "./board-fixtures";
 import { ADMIN, project, renderApp, screen, signedIn, VIEWER } from "./utils";
+import { placeSuggestions } from "../src/board/panel/tags-section";
 
 const ROWS = [
   section("x", { position: "a0" }),
@@ -499,6 +500,7 @@ describe("details panel", () => {
       expect(await offered()).toEqual(["UX research", "Q4 · must-have", "Back end"]);
       for (const option of within(tagSection()).getAllByRole("option")) expect(option).toHaveAttribute("aria-selected", "false");
       expect(tagInput()).not.toHaveAttribute("aria-activedescendant");
+      expect(within(tagSection()).getByRole("listbox").className).toContain("fixed");
     });
 
     it("offers at most 8 with nothing typed; typing finds the rest", async () => {
@@ -591,6 +593,37 @@ describe("details panel", () => {
       await selectRow(app.user, "hooks");
       await app.user.click(tagInput());
       expect(await offered()).toEqual(["Common", "Rare"]);
+    });
+
+    describe("placing the list", () => {
+      const rect = (left: number, top: number, width: number, height: number) => ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) });
+      const place = (boxLeft: number, boxTop: number, listHeight = 100) => {
+        const box = document.createElement("input");
+        const list = document.createElement("ul");
+        box.getBoundingClientRect = () => rect(boxLeft, boxTop, 200, 24);
+        // Placed at 0,0 it shows up at 10,20: whatever holds it may be its frame instead of the window.
+        list.getBoundingClientRect = () => rect(10, 20, 224, listHeight);
+        placeSuggestions(box, list);
+        return list.style;
+      };
+
+      it("goes under the box, wherever the list's frame is", () => {
+        expect(place(100, 200)).toMatchObject({ left: "90px", top: "208px" });
+      });
+
+      it("goes above the box when there's no room below", () => {
+        expect(place(100, 700)).toMatchObject({ left: "90px", top: "576px" });
+      });
+
+      it("stays inside the window on the right", () => {
+        expect(place(900, 200).left).toBe("782px");
+      });
+
+      it("scrolls rather than leaving the window when neither side has room", () => {
+        const style = place(100, 100, 500);
+        expect(style.maxHeight).toBe("288px");
+        expect(style.top).toBe("108px");
+      });
     });
 
     it('typing lists the matching workspace tags, then + Create "…"', async () => {

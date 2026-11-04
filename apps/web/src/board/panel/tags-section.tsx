@@ -1,13 +1,16 @@
 import { canonicalTags, MAX_TAG_LENGTH, MAX_TAGS_PER_TASK, rankTags, tagKey, type TaskRow } from "@ganttlines/engine";
 import { useQuery } from "@tanstack/react-query";
 import { GripVertical, X } from "lucide-react";
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { workspaceTags } from "../../api/queries";
 import { toast } from "../../ui/toast";
 import { useBoard, useRun } from "../board-context";
 
 /** how many known tags the dropdown offers at most */
 const MAX_SUGGESTIONS = 8;
+const MAX_LIST_HEIGHT = 288;
+const LIST_GAP = 4;
+const LIST_MARGIN = 8;
 
 const CHIP = "flex max-w-full items-center gap-0.5 rounded-full border border-border-strong bg-surface-2 py-0.5 text-xs text-text";
 
@@ -26,14 +29,33 @@ function moveTag(tags: readonly string[], from: number, to: number): string[] {
   return next;
 }
 
+/** Floats the list by the box without leaving the window: under it, or above it if there's more room. */
+export function placeSuggestions(box: HTMLElement, list: HTMLElement) {
+  const scrolled = list.scrollTop;
+  // `fixed` is relative to the window, unless something holding the list has a transform, as a menu
+  // does: placed at 0,0 it shows where that frame starts.
+  Object.assign(list.style, { left: "0px", top: "0px", maxHeight: "none" });
+  const frame = list.getBoundingClientRect();
+  const anchor = box.getBoundingClientRect();
+  const below = window.innerHeight - anchor.bottom - LIST_GAP - LIST_MARGIN;
+  const above = anchor.top - LIST_GAP - LIST_MARGIN;
+  const height = Math.min(frame.height, MAX_LIST_HEIGHT);
+  const under = height <= below || below >= above;
+  const shown = Math.min(height, under ? below : above);
+  const left = Math.min(anchor.left, window.innerWidth - frame.width - LIST_MARGIN);
+  const top = under ? anchor.bottom + LIST_GAP : anchor.top - LIST_GAP - shown;
+  Object.assign(list.style, { left: `${left - frame.left}px`, top: `${top - frame.top}px`, maxHeight: `${Math.min(MAX_LIST_HEIGHT, under ? below : above)}px` });
+  list.scrollTop = scrolled;
+}
+
 /**
  * A task's tags: chips in its order (× removes one, the handle drags it to another place) and an
  * "Add tag" box. Focused, it offers the workspace's most used tags; typing narrows them and offers
- * creating a new one. Every change sends the whole list. Viewers see the chips only. `inlineList` puts
- * the suggestions in the flow on their own line, growing whatever holds this instead of floating over
- * what's below, and keeps the focus in the box when a chip's buttons are used, as a menu would lose it.
+ * creating a new one, in a list floating over what's below. Every change sends the whole list. Viewers
+ * see the chips only. `inMenu` keeps the focus in the box when a chip's buttons are used, as a menu
+ * would lose it.
  */
-export function TagsSection({ task, inlineList = false }: { task: TaskRow; inlineList?: boolean }) {
+export function TagsSection({ task, inMenu = false }: { task: TaskRow; inMenu?: boolean }) {
   const board = useBoard();
   const run = useRun();
   const { canEdit, state } = board;
@@ -74,10 +96,18 @@ export function TagsSection({ task, inlineList = false }: { task: TaskRow; inlin
   const showList = open && choices.length > 0;
   const active = Math.min(highlight ?? (needle ? 0 : -1), choices.length - 1);
 
-  // Near the bottom of the window the list could open out of sight.
-  useEffect(() => {
-    if (showList) suggestions.current?.scrollIntoView?.({ block: "nearest" });
-  }, [showList]);
+  // After every render, as chips wrapping can move the box and typing changes the list's height.
+  useLayoutEffect(() => {
+    if (!showList) return;
+    const place = () => box.current && suggestions.current && placeSuggestions(box.current, suggestions.current);
+    place();
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  });
 
   const send = (tags: string[]) => run({ type: "setTags", id: task.id, tags });
   const add = (choice: Choice) => {
@@ -90,7 +120,7 @@ export function TagsSection({ task, inlineList = false }: { task: TaskRow; inlin
 
   /** After using a chip's button: back in the box, without the list opening under the mouse. */
   const refocus = () => {
-    if (!inlineList) return;
+    if (!inMenu) return;
     quietFocus.current = true;
     box.current?.focus();
     quietFocus.current = false;
@@ -195,7 +225,7 @@ export function TagsSection({ task, inlineList = false }: { task: TaskRow; inlin
         </ul>
       ) : null}
       {canEdit ? (
-        <div className={`relative min-w-28 flex-1 ${inlineList && showList ? "basis-full" : ""}`}>
+        <div className="min-w-28 flex-1">
           <input
             ref={box}
             role="combobox"
@@ -224,7 +254,7 @@ export function TagsSection({ task, inlineList = false }: { task: TaskRow; inlin
             className="w-full rounded-md border border-transparent bg-transparent px-0 py-0.5 text-sm text-text outline-none transition-[padding,border-color] duration-200 ease-out placeholder:text-muted focus:border-border-strong focus:bg-bg focus:px-2 motion-reduce:transition-none"
           />
           {showList ? (
-            <ul ref={suggestions} id={listId} role="listbox" aria-label="Tags to add" className={`mt-1 rounded-md border border-border bg-bg p-1 text-sm ${inlineList ? "" : "absolute top-full left-0 z-20 max-h-72 w-56 overflow-y-auto shadow-lg"}`}>
+            <ul ref={suggestions} id={listId} role="listbox" aria-label="Tags to add" className="fixed z-50 w-56 overflow-y-auto rounded-md border border-border bg-bg p-1 text-sm shadow-lg">
               {choices.map((choice, index) => (
                 <li
                   key={`${choice.create}:${choice.tag}`}
