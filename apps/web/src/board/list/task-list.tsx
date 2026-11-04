@@ -1,3 +1,5 @@
+import * as Tooltip from "@radix-ui/react-tooltip";
+import { useHoveredMilestone } from "../chart/milestone-lines";
 import type { Slack } from "@ganttlines/engine";
 import { useCriticalPath } from "../critical-path-view";
 import { formatSlack, useSlackAnalysis } from "../slack";
@@ -24,8 +26,8 @@ import { useCapabilities } from "../../workspace";
  * Fixed columns + the title's minimum + padding = LIST_WIDTH.min, so no column is ever cut off.
  */
 const COLUMNS = "grid grid-cols-[40px_minmax(96px,1fr)_120px_40px_40px_76px] items-center";
-/** The same, with "Can slip" after AWD; SLIP_COLUMN in view-store.ts is its 104 px. */
-const COLUMNS_WITH_SLIP = "grid grid-cols-[40px_minmax(96px,1fr)_120px_40px_40px_104px_76px] items-center";
+/** The same, with "Can slip" after AWD; SLIP_COLUMN in view-store.ts is its 72 px. */
+const COLUMNS_WITH_SLIP = "grid grid-cols-[40px_minmax(96px,1fr)_120px_40px_40px_72px_76px] items-center";
 const INDENT = 16;
 
 /** Outline tools and the column headings; reordering and collapsing are off while filtering. */
@@ -512,7 +514,7 @@ export function ListRows({
                 </CellButton>
               )}
             </span>
-            {critical ? <SlipCell entry={entry} slack={entry.fromBaseline ? undefined : slack.get(row.id)} /> : null}
+            {critical ? <SlipCell slack={entry.fromBaseline ? undefined : slack.get(row.id)} /> : null}
             <span role="gridcell" className={`flex justify-end gap-1 ${selected ? "" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"}`}>
               <RowActions id={row.id} title={row.title} />
             </span>
@@ -538,17 +540,35 @@ export function ListRows({
 }
 
 /** A value that opens its editor on a click or Space / Enter (if editable); the click also selects the row. */
-/** "0 days · 8.10": how far the row can slip, naming the milestone that limits it. */
-function SlipCell({ entry, slack }: { entry: BoardRow; slack: Slack | undefined }) {
+/** How far the row can slip. Pointing at it says what limits it, and picks out that milestone's line. */
+function SlipCell({ slack }: { slack: Slack | undefined }) {
   const { state } = useBoard();
-  if (!slack) return <span role="gridcell" aria-label={`Can slip: nothing for ${entry.row.title || "this row"}`} />;
+  if (!slack) {
+    return (
+      <span role="gridcell" aria-label="Can slip: nothing to measure against" className="px-1 text-right text-xs text-muted">
+        –
+      </span>
+    );
+  }
   const amount = formatSlack(slack.halves);
-  const limitTitle = slack.limit.kind === "end" ? null : state.rows[slack.limit.id]?.title || "Untitled";
-  const shown = slack.limit.kind === "milestone" ? `${amount} · ${limitTitle}` : amount;
+  const limit = slack.limit;
   const tone = slack.halves < 0 ? "font-semibold text-[var(--slack-late)]" : slack.halves === 0 ? "font-semibold text-[var(--slack-zero)]" : "text-muted";
+  const hint = limit.kind === "end" ? "Limited by the end of the board" : `Limited by ${state.rows[limit.id]?.title || "Untitled"}`;
+  const setHovered = (id: RowId | null) => useHoveredMilestone.setState({ id });
   return (
-    <span role="gridcell" aria-label={`Can slip ${shown}`} title={limitTitle ? `Limited by ${limitTitle}` : "Limited by the end of the board"} className={`truncate px-1 text-right text-xs tabular-nums ${tone}`}>
-      {shown}
+    <span role="gridcell" aria-label={`Can slip ${amount}`} className={`px-1 text-right text-xs tabular-nums ${tone}`}>
+      <Tooltip.Root>
+        <Tooltip.Trigger asChild>
+          <span onPointerEnter={() => setHovered(limit.kind === "milestone" ? limit.id : null)} onPointerLeave={() => setHovered(null)}>
+            {amount}
+          </span>
+        </Tooltip.Trigger>
+        <Tooltip.Portal>
+          <Tooltip.Content sideOffset={6} className="z-50 rounded bg-text px-2 py-1 text-xs text-bg shadow">
+            {hint}
+          </Tooltip.Content>
+        </Tooltip.Portal>
+      </Tooltip.Root>
     </span>
   );
 }

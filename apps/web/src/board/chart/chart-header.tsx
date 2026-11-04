@@ -1,7 +1,7 @@
 import { weekday, type DayNum } from "@ganttlines/engine";
 import type { HighlightDto } from "@ganttlines/protocol";
 import { dateParts, formatDay } from "../format";
-import type { AimedMilestone } from "./milestone-lines";
+import { useHoveredMilestone, type AimedMilestone } from "./milestone-lines";
 import type { Timeline, Zoom } from "./timeline";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -57,6 +57,7 @@ export function ChartHeader({
   /** where the chart starts on screen: long labels stay readable there while their cell scrolls */
   stickyLeft: number;
 }) {
+  const hovered = useHoveredMilestone((state) => state.id);
   const top =
     zoom === "month"
       ? segments(timeline, days, (day) => String(dateParts(day).year), (day) => String(dateParts(day).year))
@@ -88,8 +89,9 @@ export function ChartHeader({
         <div
           key={milestone.id}
           data-testid="milestone-flag"
+          data-hovered={hovered === milestone.id || undefined}
           title={milestone.title}
-          className="absolute top-1 z-10 max-w-[12ch] -translate-x-1/2 truncate rounded bg-[var(--target-line)] px-1 text-[10px] leading-4 font-semibold text-[var(--target-ink)]"
+          className={`absolute top-1 z-10 max-w-[12ch] -translate-x-1/2 truncate rounded bg-[var(--target-line)] px-1 text-[10px] leading-4 font-semibold text-[var(--target-ink)] ${hovered === milestone.id ? "ring-2 ring-[var(--target-line)]" : ""}`}
           style={{ left: timeline.x(milestone.day) + timeline.dayWidth / 2 }}
         >
           {milestone.title}

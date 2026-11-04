@@ -1,4 +1,5 @@
 import type { DayNum, ProjectState, RowId, Schedule } from "@ganttlines/engine";
+import { create } from "zustand";
 import type { BoardRow } from "../model";
 import type { Timeline } from "./timeline";
 
@@ -22,14 +23,19 @@ export function aimedMilestones(state: ProjectState, schedule: Schedule | null, 
   });
 }
 
+/** The milestone whose line stands out: the one limiting the "Can slip" value under the pointer. */
+export const useHoveredMilestone = create<{ id: RowId | null }>(() => ({ id: null }));
+
 /** A dashed line down the chart for each. */
 export function MilestoneLines({ milestones, timeline, height }: { milestones: readonly AimedMilestone[]; timeline: Timeline; height: number }) {
+  const hovered = useHoveredMilestone((state) => state.id);
   return milestones.map((milestone) => (
     <div
       key={milestone.id}
       aria-hidden
       data-testid="milestone-line"
-      className="pointer-events-none absolute top-0 w-0 border-l-2 border-dashed border-[var(--target-line)]"
+      data-hovered={hovered === milestone.id || undefined}
+      className={`pointer-events-none absolute top-0 w-0 border-[var(--target-line)] ${hovered === milestone.id ? "border-l-[3px] border-solid" : "border-l-2 border-dashed"}`}
       style={{ left: timeline.x(milestone.day) + timeline.dayWidth / 2 - 1, height }}
     />
   ));

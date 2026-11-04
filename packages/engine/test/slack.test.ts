@@ -48,14 +48,30 @@ describe("computeSlack", () => {
     expect(slackOf(example()).get(id)).toEqual({ halves: expected * 2, limit });
   });
 
-  it("with no targets at all, measures to the end of the board", () => {
-    const state = project(task("a", { userStart: start, duration: 2 }), task("long", { userStart: start, duration: 5 }));
-    expect(slackOf(state).get("a")).toEqual({ halves: 6, limit: { kind: "end" } });
-    expect(days(state, "long")).toBe(0);
+  it("a task connected to nothing has no number: no aim, no links, nobody aiming at it", () => {
+    const state = project(task("a", { userStart: start, duration: 2 }), task("long", { userStart: start, duration: 5 }), task("m", { userStart: "2026-10-30", duration: 0 }));
+    expect(slackOf(state).size).toBe(0);
   });
 
-  it("a board with one task has 0", () => {
-    expect(days(project(task("a", { userStart: start })), "a")).toBe(0);
+  it("a chain with no milestones measures to the end of the board, the rest stays out", () => {
+    const state = project(task("a", { userStart: start, duration: 2 }), task("b", { userStart: start, duration: 1 }), task("alone", { userStart: start, duration: 9 }), link("a", "b"));
+    expect(slackOf(state).get("a")).toEqual({ halves: 12, limit: { kind: "end" } }); // b may slip to the 15th, the board's last day
+    expect(slackOf(state).get("b")).toEqual({ halves: 12, limit: { kind: "end" } });
+    expect(slackOf(state).has("alone")).toBe(false);
+  });
+
+  it("a milestone with something aiming at it has a number, and so does a subtask of a linked parent", () => {
+    const state = project(
+      task("t", { userStart: start, duration: 1, targetId: "m" }),
+      task("m", { userStart: "2026-10-09", duration: 0 }),
+      task("p", { userStart: start }),
+      task("kid", { parentId: "p", userStart: start, duration: 1 }),
+      task("before", { userStart: start, duration: 1 }),
+      link("before", "p"),
+    );
+    expect(slackOf(state).has("m")).toBe(true);
+    expect(slackOf(state).has("kid")).toBe(true);
+    expect(slackOf(state).has("p")).toBe(true);
   });
 
   describe("through a link: the most the predecessor can shift without pushing the follower past its own limit", () => {
@@ -172,7 +188,8 @@ describe("computeSlack", () => {
       task("inside", { parentId: "p", userStart: "2026-10-20", duration: 0 }),
       task("soon", { userStart: "2026-10-07", duration: 0 }),
     );
-    expect(slackOf(state).get("inside")).toEqual({ halves: 0, limit: { kind: "end" } });
+    expect(slackOf(state).has("inside")).toBe(false);
+    expect(days(state, "kid")).toBe(2);
   });
 
   it("a target already passed gives a negative number, and so do tasks feeding it", () => {
@@ -205,11 +222,11 @@ describe("computeSlack", () => {
   it("a parent shows the tightest of its subtasks; sections and unscheduled tasks have no entry", () => {
     const state = project(
       section("s"),
-      task("p", { parentId: "s", userStart: start }),
+      task("p", { parentId: "s", userStart: start, targetId: "m" }),
       task("k1", { parentId: "p", userStart: start, duration: 1 }),
       task("k2", { parentId: "p", userStart: start, duration: 3 }),
       task("idle", { parentId: "s" }),
-      task("far", { userStart: start, duration: 5 }),
+      task("m", { userStart: "2026-10-09", duration: 0 }),
     );
     expect(days(state, "p")).toBe(2);
     expect(slackOf(state).has("s")).toBe(false);
@@ -222,8 +239,8 @@ describe("computeSlack", () => {
   });
 
   it("half days return odd halves", () => {
-    const state = project(task("a", { userStart: start, duration: 1.5 }), task("far", { userStart: start, duration: 3 }));
-    expect(slackOf(state).get("a")?.halves).toBe(3);
+    const state = project(task("a", { userStart: start, duration: 1.5, targetId: "m" }), task("m", { userStart: "2026-10-09", duration: 0 }));
+    expect(slackOf(state).get("a")?.halves).toBe(7);
   });
 
   it("an assignee's time off isn't counted", () => {

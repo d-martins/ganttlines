@@ -605,11 +605,32 @@ describe("the Critical path button", () => {
     expect(button()).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText("AWD").nextElementSibling).toHaveTextContent("Can slip");
     expect(screen.getByRole("columnheader", { name: "Can slip" })).toBeInTheDocument();
-    expect(canSlip("tight")).toHaveTextContent("0 days · cut");
-    expect(canSlip("loose")).toHaveTextContent("1 day · cut");
-    expect(canSlip("late")).toHaveTextContent("−1 day · cut");
-    expect(canSlip("after")).toHaveTextContent("0 days");
-    expect(canSlip("after")).toHaveAttribute("title", "Limited by the end of the board");
+    expect(canSlip("tight")).toHaveTextContent(/^0 days$/);
+    expect(canSlip("loose")).toHaveTextContent(/^1 day$/);
+    expect(canSlip("late")).toHaveTextContent(/^−1 day$/);
+    expect(canSlip("after")).toHaveTextContent(/^–$/); // connected to nothing
+  });
+
+  it("hovering a value highlights its milestone's line and says what limits it", async () => {
+    const { user } = await chartBoard(PLAN);
+    await user.click(button());
+    const line = screen.getByTestId("milestone-line");
+    expect(line).not.toHaveAttribute("data-hovered");
+    await user.hover(canSlip("tight")!.firstElementChild ?? canSlip("tight")!);
+    expect(line).toHaveAttribute("data-hovered", "true");
+    expect(screen.getByTestId("milestone-flag")).toHaveAttribute("data-hovered", "true");
+    expect((await screen.findByRole("tooltip")).textContent).toBe("Limited by cut");
+    await user.unhover(canSlip("tight")!.firstElementChild ?? canSlip("tight")!);
+    expect(line).not.toHaveAttribute("data-hovered");
+  });
+
+  it("says when the end of the board is the limit, without highlighting anything", async () => {
+    const rows = [...PLAN, task("linked", { parentId: "x", position: "a5", userStart: "2026-10-12", duration: 1 }), task("onward", { parentId: "x", position: "a6", userStart: "2026-10-12", duration: 1 })];
+    const { user } = await chartBoard(rows, ADMIN, [{ predecessorId: "linked", followerId: "onward", kind: "FS", lag: 0 }]);
+    await user.click(button());
+    await user.hover(canSlip("linked")!.firstElementChild ?? canSlip("linked")!);
+    expect((await screen.findByRole("tooltip")).textContent).toBe("Limited by the end of the board");
+    expect(screen.getByTestId("milestone-line")).not.toHaveAttribute("data-hovered");
   });
 
   it("0 days gets the amber outline, below 0 the red, fills unchanged", async () => {

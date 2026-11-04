@@ -31,7 +31,7 @@ test("creates a milestone from Add link, sees a miss, turns on Critical path, an
   await panel.getByRole("button", { name: "Close details (Esc)" }).click();
 
   await page.getByRole("button", { name: "Critical path" }).click();
-  await expect(listRow(page, "Build").getByRole("gridcell", { name: /^Can slip/ })).toContainText("\u22122 days · Code freeze");
+  await expect(listRow(page, "Build").getByRole("gridcell", { name: /^Can slip/ })).toContainText("\u22122 days");
 
   const filters = page.getByRole("toolbar", { name: "Filters" });
   await filters.getByRole("button", { name: "+ Filter" }).click();
