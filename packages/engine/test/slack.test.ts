@@ -41,11 +41,23 @@ describe("computeSlack", () => {
     ["docs", 4, { kind: "milestone", id: "cutoff" }],
     ["qa", 2, { kind: "end" }],
     ["package", 2, { kind: "end" }],
-    ["cutoff", 2, { kind: "end" }],
     ["legal", 0, { kind: "end" }],
-    ["release", 0, { kind: "end" }],
   ])("the example plan: %s has %d days", (id, expected, limit) => {
     expect(slackOf(example()).get(id)).toEqual({ halves: expected * 2, limit });
+  });
+
+  it("milestones never have a number, whatever they're connected to, and don't count towards a parent's", () => {
+    expect(slackOf(example()).has("cutoff")).toBe(false);
+    expect(slackOf(example()).has("release")).toBe(false);
+    const state = project(
+      task("p", { userStart: start }),
+      task("kid", { parentId: "p", userStart: start, duration: 1, targetId: "m" }),
+      task("gate", { parentId: "p", userStart: "2026-10-05", duration: 0 }),
+      task("m", { userStart: "2026-10-09", duration: 0 }),
+      link("gate", "kid", 0, "SS"),
+    );
+    expect(slackOf(state).has("gate")).toBe(false);
+    expect(days(state, "p")).toBe(4);
   });
 
   it("a task connected to nothing has no number: no aim, no links, nobody aiming at it", () => {
@@ -60,7 +72,7 @@ describe("computeSlack", () => {
     expect(slackOf(state).has("alone")).toBe(false);
   });
 
-  it("a milestone with something aiming at it has a number, and so does a subtask of a linked parent", () => {
+  it("a subtask of a linked parent has a number, and so does the parent", () => {
     const state = project(
       task("t", { userStart: start, duration: 1, targetId: "m" }),
       task("m", { userStart: "2026-10-09", duration: 0 }),
@@ -69,7 +81,6 @@ describe("computeSlack", () => {
       task("before", { userStart: start, duration: 1 }),
       link("before", "p"),
     );
-    expect(slackOf(state).has("m")).toBe(true);
     expect(slackOf(state).has("kid")).toBe(true);
     expect(slackOf(state).has("p")).toBe(true);
   });

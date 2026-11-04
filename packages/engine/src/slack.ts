@@ -268,7 +268,8 @@ export function analyseSlack(state: ProjectState, calendar: Calendar, schedule: 
   for (const leaf of scheduled.filter(isLeaf)) {
     const milestone = leaf.duration === 0;
     const connected = aimedAt.has(leaf.id) || (!milestone && targetOf(state, leaf, rowCount) !== null) || [leaf, ...ancestorsOf(leaf)].some((row) => linked.has(row.id));
-    if (!connected) slack.delete(leaf.id);
+    // A milestone is a date to meet, not work that slips: followers needed its number, nobody else does.
+    if (!connected || milestone) slack.delete(leaf.id);
   }
   for (const parent of scheduled.filter((row) => !isLeaf(row))) {
     let tightest: Slack | null = null;

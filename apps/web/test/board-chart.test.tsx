@@ -609,6 +609,8 @@ describe("the Critical path button", () => {
     expect(canSlip("loose")).toHaveTextContent(/^1 day$/);
     expect(canSlip("late")).toHaveTextContent(/^−1 day$/);
     expect(canSlip("after")).toHaveTextContent(/^–$/); // connected to nothing
+    expect(canSlip("cut")).toHaveTextContent(/^–$/); // a milestone, even with tasks aiming at it
+    expect(screen.getByRole("button", { name: /^cut, / })).not.toHaveAttribute("data-slack");
   });
 
   it("hovering a value highlights its milestone's line and says what limits it", async () => {

@@ -459,7 +459,7 @@ describe("AI access: editing plans", () => {
     expect(set["error"]).toBeUndefined();
     const rows = async () => (await call(client, "get_project", { project: "Launch" }))["rows"] as { title: string; target?: { title: string } | null; slack?: { days: number; limit: string } | null }[];
     expect((await rows()).find((row) => row.title === "Build")).toMatchObject({ target: { title: "Cutoff" }, slack: { days: 3, limit: "Cutoff" } });
-    expect((await rows()).find((row) => row.title === "Cutoff")).toMatchObject({ slack: { days: 0, limit: "end of board" } });
+    expect((await rows()).find((row) => row.title === "Cutoff")).toMatchObject({ slack: null });
     expect((await call(client, "update_task", { project: "Launch", task: "Build", target: "Other" }))["error"]).toBeTruthy();
     await call(client, "update_task", { project: "Launch", task: "Build", target: null });
     expect((await rows()).find((row) => row.title === "Build")).toMatchObject({ target: null });
