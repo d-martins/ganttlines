@@ -1,3 +1,4 @@
+import { milestonesOf } from "./slack";
 import { tagKey, type ProjectState, type RowId } from "@ganttlines/engine";
 import type { ResourceDto } from "@ganttlines/protocol";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
@@ -6,9 +7,9 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { NO_FILTERS, type BoardFilters } from "./filters";
 import { outline } from "./rows";
 
-type Part = "people" | "tags" | "sections";
-const PART_NAMES: Record<Part, string> = { people: "People", tags: "Tags", sections: "Section" };
-const CHIP_NAMES: Record<Part, string> = { people: "People", tags: "Tag", sections: "Section" };
+type Part = "people" | "tags" | "milestones" | "sections";
+const PART_NAMES: Record<Part, string> = { people: "People", tags: "Tags", milestones: "Milestone", sections: "Section" };
+const CHIP_NAMES: Record<Part, string> = { people: "People", tags: "Tag", milestones: "Milestone", sections: "Section" };
 
 interface Option {
   value: string;
@@ -55,7 +56,7 @@ export function FilterBar({
   const checked = (part: Part, value: string) => (part === "tags" ? filters.tags.some((tag) => tagKey(tag) === tagKey(value)) : filters[part].includes(value));
   const items = (part: Part) => <PartItems options={options[part]} part={part} checked={checked} toggle={toggle} />;
 
-  const chips = (["people", "tags", "sections"] as const).flatMap((part) => {
+  const chips = (["people", "tags", "milestones", "sections"] as const).flatMap((part) => {
     const labels = chipLabels(part, known, options);
     return labels.length > 0 ? [{ part, label: `${CHIP_NAMES[part]}: ${labels.join(", ")}` }] : [];
   });
@@ -146,7 +147,7 @@ function FilterMenu({ part: initial, items, trigger }: { part: Part | null; item
           }}
         >
           {part === null ? (
-            (["people", "tags", "sections"] as const).map((choice) => (
+            (["people", "tags", "milestones", "sections"] as const).map((choice) => (
               <DropdownMenu.Item
                 key={choice}
                 onSelect={(event) => {
@@ -259,8 +260,14 @@ function useOptions(state: ProjectState, resources: readonly ResourceDto[], filt
     const sections = outline(state)
       .visible.filter((entry) => entry.row.kind === "section")
       .map((entry) => ({ value: entry.row.id, label: entry.row.title || "Untitled", depth: entry.depth }));
+    // Soonest first by the date placed on, undated last.
+    const milestones = milestonesOf(state)
+      .flatMap((row) => (row.kind === "task" ? [row] : []))
+      .sort((a, b) => (a.userStart ?? "9999").localeCompare(b.userStart ?? "9999"))
+      .map((row) => ({ value: row.id, label: row.title || "Untitled" }));
     return {
       people,
+      milestones,
       tags: [...tags.values()].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" })).map((tag) => ({ value: tag, label: tag })),
       sections,
     };
