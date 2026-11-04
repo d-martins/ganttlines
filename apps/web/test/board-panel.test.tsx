@@ -1,6 +1,7 @@
 import { toDay, type Command, type TaskRow } from "@ganttlines/engine";
 import type { CommentDto, ProjectStateDto } from "@ganttlines/protocol";
 import { fireEvent, render, waitFor, within } from "@testing-library/react";
+import type { UserEvent } from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { describeEntry } from "../src/board/panel/activity";
 import { RichTextView } from "../src/ui/rich-text";
@@ -483,48 +484,79 @@ describe("details panel", () => {
       await selectRow(app.user, "hooks");
       return app;
     };
-    const aimSection = () => within(panel()).getByRole("heading", { name: "Aiming for" }).closest("section")!;
-    const box = () => within(aimSection()).getByRole("combobox", { name: "Aiming for" });
-    const offered = () => within(aimSection()).getAllByRole("option").map((option) => option.textContent);
+    const aimSection = () => within(panel()).getByRole("heading", { name: "Links" }).closest("section")!;
+    const newLinkWhen = () => within(aimSection()).getByRole("combobox", { name: "New link: this task" });
+    /** + Add link, then "aims for". */
+    const openAim = async (user: UserEvent) => {
+      await user.click(within(aimSection()).getByRole("button", { name: "Add link" }));
+      await user.selectOptions(newLinkWhen(), "aims for");
+    };
+    const offered = () => within(within(aimSection()).getByRole("listbox")).getAllByRole("option").map((option) => option.textContent);
     const lastCommand = () => sentCommands().at(-1);
     const dayOf = (iso: string) => formatDay(toDay(iso));
 
-    it("sits above Tags", async () => {
-      await aimBoard();
-      const headings = within(panel()).getAllByRole("heading").map((heading) => heading.textContent);
-      expect(headings.indexOf("Aiming for")).toBe(headings.indexOf("Tags") - 1);
+    it("has no box of its own: it's a choice in + Add link, and the picker opens at once", async () => {
+      const { user } = await aimBoard();
+      expect(within(panel()).queryByRole("heading", { name: "Aiming for" })).not.toBeInTheDocument();
+      await user.click(within(aimSection()).getByRole("button", { name: "Add link" }));
+      expect(within(newLinkWhen()).getAllByRole<HTMLOptionElement>("option").map((option) => option.value)[0]).toBe("aims for");
+      await user.selectOptions(newLinkWhen(), "aims for");
+      expect(within(aimSection()).getByRole("combobox", { name: "Aims for: choose a milestone" })).toHaveFocus();
+      expect(within(aimSection()).getByRole("listbox")).toBeInTheDocument();
     });
 
-    it("isn't there for milestones and sections", async () => {
+    it("isn't offered on a milestone", async () => {
       const { user } = await aimBoard();
       await selectRow(user, "soon");
-      expect(within(panel()).queryByRole("heading", { name: "Aiming for" })).not.toBeInTheDocument();
-      await user.dblClick(rowOf("x").querySelector('[aria-label^="Row "]')!);
-      await waitFor(() => expect(panel()).toHaveAccessibleName("Details of “x”"));
-      expect(within(panel()).queryByRole("heading", { name: "Aiming for" })).not.toBeInTheDocument();
+      await user.click(within(aimSection()).getByRole("button", { name: "Add link" }));
+      expect(within(newLinkWhen()).getAllByRole<HTMLOptionElement>("option").map((option) => option.value)).not.toContain("aims for");
+    });
+
+    it("lists as the first line, with how it stands under it, ahead of the links", async () => {
+      await aimBoard({ targetId: "soon", duration: 5 }, ADMIN, [task("first", { parentId: "x", position: "a0", userStart: "2026-10-05" })]);
+      const lines = within(aimSection()).getAllByRole("listitem");
+      expect(within(lines[0]!).getByRole("combobox", { name: /^Aims for/ })).toHaveValue("aims for");
+      expect(within(lines[0]!).getByRole("button", { name: /change the milestone/ })).toHaveTextContent("soon");
+      expect(within(lines[0]!).getByText(/2 days late/)).toBeInTheDocument();
+    });
+
+    it("the milestone can be changed from its line", async () => {
+      const { user } = await aimBoard({ targetId: "later" });
+      await user.click(within(aimSection()).getByRole("button", { name: /change the milestone/ }));
+      await user.click(within(within(aimSection()).getByRole("listbox")).getAllByRole("option")[0]!);
+      expect(lastCommand()).toEqual({ type: "setTarget", id: "hooks", targetId: "soon" });
+    });
+
+    it("the first dropdown turns an aim into a link", async () => {
+      const { user } = await aimBoard({ targetId: "later" });
+      await user.selectOptions(within(aimSection()).getByRole("combobox", { name: /^Aims for/ }), "starts after");
+      expect(sentCommands().slice(-2)).toEqual([
+        { type: "setTarget", id: "hooks", targetId: null },
+        { type: "addLink", predecessorId: "later", followerId: "hooks", kind: "FS" },
+      ]);
     });
 
     it("clicking offers the board's milestones soonest first with dates, undated last, none highlighted", async () => {
       const { user } = await aimBoard();
-      await user.click(box());
-      expect(offered()).toEqual([`soon${dayOf("2026-10-14")}`, `later${dayOf("2026-10-23")}`, "undatedno date"]);
-      for (const option of within(aimSection()).getAllByRole("option")) expect(option).toHaveAttribute("aria-selected", "false");
+      await openAim(user);
+      expect(offered()).toEqual([`#4 soon${dayOf("2026-10-14")}`, `#3 later${dayOf("2026-10-23")}`, "#5 undatedno date"]);
+      for (const option of within(within(aimSection()).getByRole("listbox")).getAllByRole("option")) expect(option).toHaveAttribute("aria-selected", "false");
       expect(within(aimSection()).getByRole("listbox").className).toContain("fixed");
     });
 
     it("typing narrows and highlights the first; an exact name offers no Create, whatever its case", async () => {
       const { user } = await aimBoard();
-      await user.click(box());
+      await openAim(user);
       await user.keyboard("o");
-      expect(offered()).toEqual([`soon${dayOf("2026-10-14")}`, '+ Create "o"']);
-      expect(within(aimSection()).getAllByRole("option")[0]).toHaveAttribute("aria-selected", "true");
+      expect(offered()).toEqual([`#4 soon${dayOf("2026-10-14")}`, '+ Create "o"']);
+      expect(within(within(aimSection()).getByRole("listbox")).getAllByRole("option")[0]).toHaveAttribute("aria-selected", "true");
       await user.keyboard("{Backspace}SOON");
-      expect(offered()).toEqual([`soon${dayOf("2026-10-14")}`]);
+      expect(offered()).toEqual([`#4 soon${dayOf("2026-10-14")}`]);
     });
 
     it("Enter on the empty box sets nothing; ↓ then Enter aims", async () => {
       const { user } = await aimBoard();
-      await user.click(box());
+      await openAim(user);
       await user.keyboard("{Enter}");
       expect(sentCommands().filter((command) => command.type === "setTarget")).toEqual([]);
       await user.keyboard("{ArrowDown}{Enter}");
@@ -533,14 +565,14 @@ describe("details panel", () => {
 
     it("clicking a milestone aims for it", async () => {
       const { user } = await aimBoard();
-      await user.click(box());
-      await user.click(within(aimSection()).getAllByRole("option")[1]!);
+      await openAim(user);
+      await user.click(within(within(aimSection()).getByRole("listbox")).getAllByRole("option")[1]!);
       expect(lastCommand()).toEqual({ type: "setTarget", id: "hooks", targetId: "later" });
     });
 
     it("+ Create makes one command, starting on the task's finish, and the date shows focused until the box is left", async () => {
       const { user } = await aimBoard();
-      await user.click(box());
+      await openAim(user);
       await user.keyboard("8.12{Enter}");
       expect(lastCommand()).toMatchObject({ type: "createTargetMilestone", id: "hooks", title: "8.12", start: "2026-10-13" });
       const date = within(aimSection()).getByLabelText("Milestone date");
@@ -560,7 +592,7 @@ describe("details panel", () => {
       vi.setSystemTime(new Date(2026, 9, 7, 12));
       try {
         const { user } = await aimBoard({ userStart: null });
-        await user.click(box());
+        await openAim(user);
         await user.keyboard("8.12{Enter}");
         expect(lastCommand()).toMatchObject({ type: "createTargetMilestone", start: "2026-10-07" });
       } finally {
@@ -598,22 +630,23 @@ describe("details panel", () => {
     it("a subtask shows its parent's target as inherited, and can replace it", async () => {
       const { user } = await aimBoard({ targetId: "later" }, ADMIN, [task("kid", { parentId: "hooks", position: "a0", userStart: "2026-10-12", duration: 1 })]);
       await selectRow(user, "kid");
-      expect(within(aimSection()).getByText("later")).toBeInTheDocument();
-      expect(within(aimSection()).getByText("From hooks")).toBeInTheDocument();
-      await user.click(box());
-      await user.click(within(aimSection()).getAllByRole("option")[0]!);
+      expect(within(aimSection()).getByText(/ later$/)).toBeInTheDocument();
+      expect(within(aimSection()).getByText("From hooks · 9 days to spare")).toBeInTheDocument();
+      expect(within(aimSection()).queryByRole("button", { name: /^Stop aiming/ })).not.toBeInTheDocument();
+      await openAim(user);
+      await user.click(within(within(aimSection()).getByRole("listbox")).getAllByRole("option")[0]!);
       expect(lastCommand()).toEqual({ type: "setTarget", id: "kid", targetId: "soon" });
     });
 
     it("viewers see the name and result only, or None", async () => {
       await aimBoard({ targetId: "later" }, VIEWER);
-      expect(within(aimSection()).getByText("later")).toBeInTheDocument();
+      expect(within(aimSection()).getByText(/ later$/)).toBeInTheDocument();
       expect(within(aimSection()).getByText("8 days to spare")).toBeInTheDocument();
       expect(within(aimSection()).queryByRole("combobox")).not.toBeInTheDocument();
-      expect(within(aimSection()).queryByRole("button")).not.toBeInTheDocument();
+      expect(within(aimSection()).queryByRole("button", { name: /Stop aiming|change the milestone/ })).not.toBeInTheDocument();
     });
 
-    it("viewers see None with no target", async () => {
+    it("viewers see None with no target and no links", async () => {
       await aimBoard({}, VIEWER);
       expect(within(aimSection()).getByText("None")).toBeInTheDocument();
     });

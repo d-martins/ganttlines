@@ -1,6 +1,10 @@
 import {
   applyCommand,
+  buildTree,
+  effectiveTarget,
   isAncestor,
+  isParentTask,
+  isValidTarget,
   linkKey,
   linksInto,
   linksOutOf,
@@ -21,6 +25,7 @@ import { toast } from "../../ui/toast";
 import { END_WORDS, lineOf, linkOf, WHEN_WORDS, type LinkLine, type LinkShape } from "../link-phrases";
 import { useSelection } from "../selection";
 import { TaskPicker } from "../task-picker";
+import { AIMS_FOR, AimLine, AimPicker } from "./aim-section";
 
 // Sized to their words (not the panel's full-width inputs), so a line fits: the task takes what's left.
 const SELECT = "shrink-0 rounded-md border border-border-strong bg-bg px-1.5 py-1 text-sm text-text";
@@ -30,6 +35,9 @@ type Control = "when" | "end" | "task";
 /** A line to focus once it shows: the link it now stands for, and which of its controls. */
 type FocusRequest = { key: LinkKey; control: Control };
 type LineRefs = { when: RefObject<HTMLSelectElement | null>; end: RefObject<HTMLSelectElement | null> };
+
+const WHEN_OR_AIM = [AIMS_FOR, ...WHEN_WORDS] as const;
+type WhenOrAim = (typeof WHEN_OR_AIM)[number];
 
 function WordSelect<T extends string>({
   value,
@@ -65,6 +73,7 @@ function LineControls({
   onRemove,
   refs,
   removeMarker = false,
+  onAim,
 }: {
   line: LinkLine;
   /** names the line's controls: "Link with #3 Design" */
@@ -76,10 +85,12 @@ function LineControls({
   refs: LineRefs;
   /** marks × for moving focus after a removal */
   removeMarker?: boolean;
+  /** offers "aims for" in the first dropdown, and what choosing it does */
+  onAim?: (() => void) | undefined;
 }) {
   return (
     <li data-link-line className="flex min-w-0 items-center gap-1 text-sm">
-      <WordSelect value={line.when} words={WHEN_WORDS} label={`${label}: this task`} selectRef={refs.when} onChange={(when) => onLine({ ...line, when })} />
+      <WordSelect<WhenOrAim> value={line.when} words={onAim ? WHEN_OR_AIM : WHEN_WORDS} label={`${label}: this task`} selectRef={refs.when} onChange={(when) => when === AIMS_FOR ? onAim?.() : onLine({ ...line, when })} />
       {task}
       <WordSelect value={line.end} words={END_WORDS} label={`${label}: the other task`} selectRef={refs.end} onChange={(end) => onLine({ ...line, end })} />
       <IconButton {...(removeMarker ? { "data-remove-link": true } : {})} label={removeLabel} onClick={onRemove} className="shrink-0">
@@ -114,15 +125,22 @@ export function LinksSection({
   schedule?: Schedule | null;
 }) {
   const select = useSelection((selection) => selection.select);
-  const [draft, setDraft] = useState<{ line: LinkLine; open: boolean } | null>(null);
+  const [draft, setDraft] = useState<{ line: LinkLine; open: boolean; aim?: boolean } | null>(null);
+  // A milestone just created from here: its date is ready to correct.
+  const [correcting, setCorrecting] = useState<RowId | null>(null);
   const [focus, setFocus] = useState<FocusRequest | null>(null);
   // After ×, the line that took the removed one's place (or Add link, when none is left) gets focus.
   const [focusAfterRemove, setFocusAfterRemove] = useState<{ index: number; before: number } | null>(null);
   const container = useRef<HTMLDivElement>(null);
   const addButton = useRef<HTMLButtonElement>(null);
+  const aimWhen = useRef<HTMLSelectElement>(null);
   const draftRefs: LineRefs = { when: useRef<HTMLSelectElement>(null), end: useRef<HTMLSelectElement>(null) };
 
   const numberOf = (id: RowId) => numbers.get(id) ?? 0;
+  // A milestone has nothing to aim with.
+  const canAim = task.duration !== 0 || isParentTask(buildTree(state), task);
+  const aimProps = { task, state, calendar, schedule, numbers, run };
+  const aiming = canAim && effectiveTarget(state, task) !== null;
   const otherOf = (link: Link) => (link.followerId === task.id ? link.predecessorId : link.followerId);
   const links = [...linksInto(state, task.id), ...linksOutOf(state, task.id)]
     .map((link) => ({ link, key: linkKey(link) }))
@@ -177,6 +195,35 @@ export function LinksSection({
     if (run(remove) !== null && run(add) !== null) setFocus({ key: linkKey(add), control: "task" });
   };
 
+  /** An aim turned into a link with its milestone, both or neither. */
+  const aimToLink = (when: LinkLine["when"]) => {
+    if (task.targetId === null) return;
+    const line = { when, end: "finished" as const };
+    const { kind, thisWaits } = linkOf(line);
+    const stop: Command = { type: "setTarget", id: task.id, targetId: null };
+    const add = { type: "addLink" as const, ...between(task.targetId, thisWaits), kind };
+    const stopped = applyCommand(state, calendar, stop);
+    const checked = stopped.ok ? applyCommand(stopped.state, calendar, add) : stopped;
+    if (!checked.ok) {
+      toast(checked.message, { tone: "error" });
+      return;
+    }
+    if (run(stop) !== null && run(add) !== null) setFocus({ key: linkKey(add), control: "when" });
+  };
+
+  /** A link with a milestone turned into an aim for it, both or neither. */
+  const linkToAim = (link: Link) => {
+    const remove: Command = { type: "removeLink", predecessorId: link.predecessorId, followerId: link.followerId, kind: link.kind, keepPlace: false };
+    const aim: Command = { type: "setTarget", id: task.id, targetId: otherOf(link) };
+    const removed = applyCommand(state, calendar, remove);
+    const checked = removed.ok ? applyCommand(removed.state, calendar, aim) : removed;
+    if (!checked.ok) {
+      toast(checked.message, { tone: "error" });
+      return;
+    }
+    if (run(remove) !== null) run(aim);
+  };
+
   const pickForDraft = (line: LinkLine, otherId: RowId) => {
     const { kind, thisWaits } = linkOf(line);
     const add = { type: "addLink" as const, ...between(otherId, thisWaits), kind };
@@ -185,10 +232,31 @@ export function LinksSection({
     setFocus({ key: linkKey(add), control: "task" });
   };
 
+  const aimLine = aiming ? (
+    <AimLine
+      {...aimProps}
+      canEdit={canEdit}
+      correcting={correcting}
+      onCorrected={() => setCorrecting(null)}
+      onCreated={setCorrecting}
+      onGo={select}
+      whenSelect={
+        <WordSelect<WhenOrAim>
+          value={AIMS_FOR}
+          words={WHEN_OR_AIM}
+          label={`Aims for ${nameOf(effectiveTarget(state, task)!)}: this task`}
+          selectRef={aimWhen}
+          onChange={(when) => when !== AIMS_FOR && aimToLink(when)}
+        />
+      }
+    />
+  ) : null;
+
   if (!canEdit) {
-    if (links.length === 0) return <p className="text-sm text-muted">None</p>;
+    if (links.length === 0 && !aiming) return <p className="text-sm text-muted">None</p>;
     return (
       <ul aria-label="Links" className="flex flex-col gap-1 text-sm">
+        {aimLine}
         {links.map((link) => {
           const otherId = otherOf(link);
           const { when, end } = lineOf({ kind: link.kind, thisWaits: link.followerId === task.id });
@@ -208,9 +276,10 @@ export function LinksSection({
 
   return (
     <div ref={container} className="flex flex-col gap-2">
-      {links.length === 0 && !draft ? <p className="text-sm text-muted">None</p> : null}
-      {links.length > 0 || draft ? (
+      {links.length === 0 && !draft && !aiming ? <p className="text-sm text-muted">None</p> : null}
+      {links.length > 0 || draft || aiming ? (
         <ul aria-label="Links" className="flex flex-col gap-1">
+          {aimLine}
           {links.map((link, index) => (
             <LinkLineEditor
               key={linkKey(link)}
@@ -224,6 +293,7 @@ export function LinksSection({
               focus={focus?.key === linkKey(link) ? focus.control : null}
               onFocused={() => setFocus(null)}
               onLine={(line, control) => changeLine(link, line, control)}
+              onAim={canAim && isValidTarget(state, otherOf(link)) ? () => linkToAim(link) : undefined}
               onTask={(otherId) => changeTask(link, otherId)}
               onGo={() => select(otherOf(link))}
               onRemove={() => {
@@ -233,8 +303,27 @@ export function LinksSection({
               }}
             />
           ))}
-          {draft ? (
+          {draft?.aim ? (
+            <li data-link-line className="flex min-w-0 items-center gap-1 text-sm">
+              <WordSelect<WhenOrAim>
+                value={AIMS_FOR}
+                words={WHEN_OR_AIM}
+                label="New link: this task"
+                selectRef={draftRefs.when}
+                onChange={(when) => when !== AIMS_FOR && setDraft({ line: { ...draft.line, when }, open: false })}
+              />
+              <AimPicker
+                {...aimProps}
+                onDone={() => setDraft(null)}
+                onCreated={setCorrecting}
+              />
+              <IconButton label="Discard the new link" onClick={() => { setDraft(null); addButton.current?.focus(); }} className="shrink-0">
+                <X size={14} />
+              </IconButton>
+            </li>
+          ) : draft ? (
             <LineControls
+              onAim={canAim ? () => setDraft({ ...draft, aim: true, open: false }) : undefined}
               line={draft.line}
               label="New link"
               refs={draftRefs}
@@ -294,6 +383,7 @@ function LinkLineEditor({
   onTask,
   onGo,
   onRemove,
+  onAim,
 }: {
   link: Link;
   taskId: RowId;
@@ -309,6 +399,7 @@ function LinkLineEditor({
   onTask: (otherId: RowId) => void;
   onGo: () => void;
   onRemove: () => void;
+  onAim?: (() => void) | undefined;
 }) {
   const [open, setOpen] = useState(false);
   const refs: LineRefs = { when: useRef<HTMLSelectElement>(null), end: useRef<HTMLSelectElement>(null) };
@@ -330,6 +421,7 @@ function LinkLineEditor({
       onLine={(next) => onLine(next, next.when !== line.when ? "when" : "end")}
       removeLabel={`Remove link with ${name}`}
       onRemove={onRemove}
+      onAim={onAim}
       task={
         <TaskPicker
           exclude={exclude(shape)}

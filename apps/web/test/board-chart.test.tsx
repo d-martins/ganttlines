@@ -478,6 +478,93 @@ describe("milestones being aimed at", () => {
   });
 });
 
+describe("dragging between a task and a milestone", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 8, 29, 12));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const PLAN = (fields: Partial<TaskRow> = {}) => [
+    section("x", { position: "a0" }),
+    task("build", { parentId: "x", position: "a0", userStart: "2026-10-12", duration: 1, ...fields }),
+    task("next", { parentId: "x", position: "a1", userStart: "2026-10-12", duration: 1 }),
+    task("8.10", { parentId: "x", position: "a2", userStart: "2026-10-20", duration: 0 }),
+    task("8.11", { parentId: "x", position: "a3", userStart: "2026-10-27", duration: 0 }),
+  ];
+  const handle = (name: string) => within(screen.getByRole("button", { name: new RegExp(`^${name.replace(".", "\\.")}, `) }).parentElement!).getByTitle("Drag onto another task to link them");
+  const dragTo = (name: string, row: number) => drag(handle(name), 500, 900, row * 30 + 15);
+  const choices = () => screen.getAllByRole("menuitem").map((item) => item.textContent);
+  const commands = () => sentCommands().filter((command) => command.type === "addLink" || command.type === "setTarget");
+
+  it("from the task: asks, aiming first, and sends nothing yet", async () => {
+    await chartBoard(PLAN());
+    dragTo("build", 3); // 8.10
+    expect(await screen.findByRole("menu", { name: "Link build and 8.10" })).toBeInTheDocument();
+    expect(choices()).toEqual(["build aims for 8.10Never moves the milestone", "Link: 8.10 waits for buildThe milestone moves if build is late"]);
+    expect(commands()).toEqual([]);
+  });
+
+  it("from the milestone: the same question, the link reading the other way", async () => {
+    await chartBoard(PLAN());
+    dragTo("8.10", 1); // build
+    await screen.findByRole("menu");
+    expect(choices()).toEqual(["build aims for 8.10Never moves the milestone", "Link: build waits for 8.10build starts after the milestone"]);
+  });
+
+  it("Enter takes the first choice: aiming", async () => {
+    const { user } = await chartBoard(PLAN());
+    dragTo("build", 3);
+    await waitFor(() => expect(screen.getAllByRole("menuitem")[0]).toHaveFocus());
+    await user.keyboard("{Enter}");
+    expect(commands()).toEqual([{ type: "setTarget", id: "build", targetId: "8.10" }]);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("aiming works from the milestone's side too", async () => {
+    const { user } = await chartBoard(PLAN());
+    dragTo("8.10", 1);
+    await user.click((await screen.findAllByRole("menuitem"))[0]!);
+    expect(commands()).toEqual([{ type: "setTarget", id: "build", targetId: "8.10" }]);
+  });
+
+  it.each([
+    ["from the task", "build", 3, "build", "8.10"],
+    ["from the milestone", "8.10", 1, "8.10", "build"],
+  ])("the link choice makes the link dragged, %s", async (_name, from, row, predecessorId, followerId) => {
+    const { user } = await chartBoard(PLAN());
+    dragTo(from, row);
+    await user.click((await screen.findAllByRole("menuitem"))[1]!);
+    expect(commands()).toEqual([expect.objectContaining({ type: "addLink", predecessorId, followerId })]);
+  });
+
+  it("says what it replaces when already aiming elsewhere", async () => {
+    await chartBoard(PLAN({ targetId: "8.11" }));
+    dragTo("build", 3);
+    await screen.findByRole("menu");
+    expect(choices()[0]).toBe("build aims for 8.10Instead of 8.11");
+  });
+
+  it("Escape cancels: nothing is created", async () => {
+    const { user } = await chartBoard(PLAN());
+    dragTo("build", 3);
+    await screen.findByRole("menu");
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+    expect(commands()).toEqual([]);
+  });
+
+  it("two tasks, and two milestones, just link", async () => {
+    await chartBoard(PLAN());
+    dragTo("build", 2); // next
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(commands()).toEqual([expect.objectContaining({ type: "addLink", predecessorId: "build", followerId: "next" })]);
+    dragTo("8.10", 4); // 8.11
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(commands().at(-1)).toEqual(expect.objectContaining({ type: "addLink", predecessorId: "8.10", followerId: "8.11" }));
+  });
+});
+
 describe("the Critical path button", () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["Date"] });

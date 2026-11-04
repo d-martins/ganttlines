@@ -6,6 +6,7 @@ import { AssigneePicker } from "../assignee-picker";
 import { runCommand, useBoard } from "../board-context";
 import { useCriticalPath } from "../critical-path-view";
 import { useSlackAnalysis } from "../slack";
+import { LinkChoiceMenu, linkChoiceFor, type LinkChoice } from "./link-choice";
 import { addAtEnd, deleteRow } from "../list/list-actions";
 import type { BoardRow } from "../model";
 import { useSelection } from "../selection";
@@ -85,6 +86,7 @@ export function ChartRows({
   const board = useBoard();
   const { state, resources, resourceMap, canEdit, canCreateResources } = board;
   const slack = useSlackAnalysis();
+  const [linkChoice, setLinkChoice] = useState<LinkChoice | null>(null);
   const critical = useCriticalPath(board.sync.projectId);
   const select = useSelection((selection) => selection.select);
   const drag = useChartDrag((store) => store.drag);
@@ -185,7 +187,12 @@ export function ChartRows({
         if (kind === "move") pressed.focus({ preventScroll: true });
         return;
       }
-      if (commit && current?.command) run(current.command);
+      if (commit && current?.command) {
+        // Between a task and a milestone it could mean aiming, too: ask, whichever way it was dragged.
+        const choice = current.command.type === "addLink" ? linkChoiceFor(board.state, current.command) : null;
+        if (choice) setLinkChoice({ ...choice, x: last?.clientX ?? startX, y: last?.clientY ?? startY });
+        else run(current.command);
+      }
     };
     const up = (upEvent: PointerEvent) => {
       move(upEvent); // the drop lands where the pointer is, even if no move event came since
@@ -388,6 +395,7 @@ export function ChartRows({
         </div>
       ) : null}
       {drag?.line ? <LinkDragPreview drag={drag} allRows={allRows} timeline={timeline} style={style} /> : null}
+      {linkChoice ? <LinkChoiceMenu choice={linkChoice} state={state} run={run} onClose={() => setLinkChoice(null)} /> : null}
     </>
   );
 }

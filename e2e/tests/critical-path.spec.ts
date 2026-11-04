@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { addTask, createProject, listRow, resetDatabase, setupAdmin, signedInUser } from "../support";
 
-test("creates a milestone from Aiming for, sees a miss, turns on Critical path, and a shared link keeps the filter", async ({ page, browser }) => {
+test("creates a milestone from Add link, sees a miss, turns on Critical path, and a shared link keeps the filter", async ({ page, browser }) => {
   await resetDatabase();
   await setupAdmin(page.request);
   const projectId = await createProject(page.request, "Launch");
@@ -14,7 +14,8 @@ test("creates a milestone from Aiming for, sees a miss, turns on Critical path, 
   // Named on the spot: it starts on the task's finish, so nothing is late yet.
   await page.getByRole("button", { name: "Open details of “Build”" }).click();
   const panel = page.getByRole("complementary", { name: "Details of “Build”" });
-  await panel.getByRole("combobox", { name: "Aiming for" }).click();
+  await panel.getByRole("button", { name: "Add link" }).click();
+  await panel.getByRole("combobox", { name: "New link: this task" }).selectOption("aims for");
   await page.keyboard.type("Code freeze");
   await page.keyboard.press("Enter");
   const date = panel.getByLabel("Milestone date");
@@ -24,6 +25,7 @@ test("creates a milestone from Aiming for, sees a miss, turns on Critical path, 
 
   // Moved earlier: the task now misses it, and says so.
   await date.fill("2026-10-14");
+  await date.press("Enter");
   await expect(panel.getByText(/2 days late/)).toBeVisible();
   await expect(page.locator('[data-slack="late"]')).toHaveCount(1);
   await panel.getByRole("button", { name: "Close details (Esc)" }).click();

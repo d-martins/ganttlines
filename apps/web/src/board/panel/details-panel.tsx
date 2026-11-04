@@ -19,7 +19,6 @@ import { useSelection } from "../selection";
 import { Activity } from "./activity";
 import { CommitInput, INPUT } from "./commit-input";
 import { LinksSection } from "./links-section";
-import { AimSection } from "./aim-section";
 import { TagsSection } from "./tags-section";
 import { Comments } from "./comments";
 import { useCapabilities } from "../../workspace";
@@ -238,11 +237,6 @@ export function DetailsPanel({ numbers, filtering }: { numbers: ReadonlyMap<RowI
         <Description row={row} maxHeight={halfHeight} />
         {row.kind === "task" ? <TaskFields task={row} isParent={isParent} schedule={schedule} numbers={numbers} /> : null}
       </div>
-      {row.kind === "task" && (row.duration !== 0 || isParent) ? (
-        <Section title="Aiming for">
-          <AimSection key={row.id} task={row} schedule={schedule} />
-        </Section>
-      ) : null}
       {row.kind === "task" ? (
         <Section title="Tags">
           <TagsSection key={row.id} task={row} />

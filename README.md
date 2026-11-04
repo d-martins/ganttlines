@@ -63,7 +63,8 @@ Platform, bind it with `DATABASE_CA_CERT=${db.CA_CERT}`.
 
 ## Critical path and milestones
 
-In a task's details, **Aiming for** picks the milestone it has to make, or names a new one on the spot.
+In a task's details, **+ Add link → aims for** picks the milestone it has to make, or names a new one on the
+spot. Dragging a link between a task and a milestone asks whether to aim or to link.
 A parent's choice covers its subtasks. Aiming moves nothing: the milestone stays on its date and shows as
 a dashed line down the chart, and a task that would miss it gets a red outline, as do the tasks feeding it.
 
