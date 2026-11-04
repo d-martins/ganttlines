@@ -488,8 +488,109 @@ describe("details panel", () => {
       expect(tagInput()).toHaveAttribute("placeholder", "Add tag");
       expect(tagInput().className).toContain("border-transparent");
       expect(tagInput().className).toContain("focus:border-border-strong");
-      await user.click(tagInput());
+    });
+
+    const offered = async () => (await within(tagSection()).findAllByRole("option")).map((option) => option.textContent);
+
+    it("clicking the box offers the most used tags at once, without the task's own, none highlighted", async () => {
+      const { user } = await tagsBoard(["UI"]);
       expect(within(tagSection()).queryByRole("listbox")).not.toBeInTheDocument();
+      await user.click(tagInput());
+      expect(await offered()).toEqual(["UX research", "Q4 · must-have", "Back end"]);
+      for (const option of within(tagSection()).getAllByRole("option")) expect(option).toHaveAttribute("aria-selected", "false");
+      expect(tagInput()).not.toHaveAttribute("aria-activedescendant");
+    });
+
+    it("offers at most 8 with nothing typed; typing finds the rest", async () => {
+      const known = Array.from({ length: 10 }, (_, index) => `tag ${index}`);
+      const { user } = await tagsBoard([], ADMIN, known);
+      await user.click(tagInput());
+      expect(await offered()).toEqual(known.slice(0, 8));
+      await user.keyboard("tag 9");
+      expect(await offered()).toEqual(["tag 9"]);
+    });
+
+    it("Enter on the empty box adds nothing; ↓ goes into the list, and the list stays open with what's left", async () => {
+      const { user } = await tagsBoard();
+      await user.click(tagInput());
+      await offered();
+      await user.keyboard("{Enter}");
+      expect(lastSetTags()).toBeUndefined();
+      await user.keyboard("{ArrowDown}");
+      expect(within(tagSection()).getAllByRole("option")[0]).toHaveAttribute("aria-selected", "true");
+      await user.keyboard("{Enter}");
+      expect(lastSetTags()).toEqual({ type: "setTags", id: "hooks", tags: ["UI"] });
+      expect(await offered()).toEqual(["UX research", "Q4 · must-have", "Back end"]);
+      for (const option of within(tagSection()).getAllByRole("option")) expect(option).toHaveAttribute("aria-selected", "false");
+    });
+
+    it("↑ from nothing highlighted goes to the end of the list", async () => {
+      const { user } = await tagsBoard();
+      await user.click(tagInput());
+      await offered();
+      await user.keyboard("{ArrowUp}");
+      expect(within(tagSection()).getAllByRole("option").at(-1)).toHaveAttribute("aria-selected", "true");
+    });
+
+    it("clicking a suggestion adds it and keeps offering the rest, the focus in the box", async () => {
+      const { user } = await tagsBoard();
+      await user.click(tagInput());
+      await offered();
+      await user.click(within(tagSection()).getByRole("option", { name: "UX research" }));
+      expect(lastSetTags()).toEqual({ type: "setTags", id: "hooks", tags: ["UX research"] });
+      expect(tagInput()).toHaveFocus();
+      expect(await offered()).toEqual(["UI", "Q4 · must-have", "Back end"]);
+    });
+
+    it("Escape closes the list, keeping what's typed; the box or ↓ opens it again; a second Escape clears the box", async () => {
+      const { user } = await tagsBoard();
+      await user.click(tagInput());
+      await user.keyboard("u");
+      await offered();
+      await user.keyboard("{Escape}");
+      expect(within(tagSection()).queryByRole("listbox")).not.toBeInTheDocument();
+      expect(tagInput()).toHaveValue("u");
+      expect(tagInput()).toHaveFocus();
+      await user.keyboard("{ArrowDown}");
+      expect(await offered()).toContain("UI");
+      await user.keyboard("{Escape}");
+      await user.click(tagInput());
+      expect(await offered()).toContain("UI");
+      await user.keyboard("{Escape}{Escape}");
+      expect(tagInput()).toHaveValue("");
+      expect(within(tagSection()).queryByRole("listbox")).not.toBeInTheDocument();
+      expect(panel()).toBeInTheDocument();
+    });
+
+    it("Enter with the list closed adds what's typed, not a match nobody can see", async () => {
+      const { user } = await tagsBoard();
+      await user.click(tagInput());
+      await user.keyboard("u");
+      await offered();
+      await user.keyboard("{Escape}{Enter}");
+      expect(lastSetTags()).toEqual({ type: "setTags", id: "hooks", tags: ["u"] });
+    });
+
+    it("offers nothing until something's typed when no tag exists yet", async () => {
+      const { user } = await tagsBoard([], ADMIN, []);
+      await user.click(tagInput());
+      await waitFor(() => expect(tagInput()).toHaveFocus());
+      expect(within(tagSection()).queryByRole("listbox")).not.toBeInTheDocument();
+    });
+
+    it("ranks the tags on the board by use too, for who can't list the workspace's", async () => {
+      const rows = [
+        ROWS[0]!,
+        task("a", { parentId: "x", position: "a2", userStart: "2026-10-12", duration: 2, tags: ["Rare"] }),
+        task("b", { parentId: "x", position: "a3", userStart: "2026-10-12", duration: 2, tags: ["Common"] }),
+        task("c", { parentId: "x", position: "a4", userStart: "2026-10-12", duration: 2, tags: ["Common"] }),
+        task("hooks", { parentId: "x", position: "a5", userStart: "2026-10-12", duration: 2 }),
+      ];
+      const app = await panelBoard(rows, ADMIN);
+      app.api.on("GET /api/tags", () => ({ body: { tags: [] } }));
+      await selectRow(app.user, "hooks");
+      await app.user.click(tagInput());
+      expect(await offered()).toEqual(["Common", "Rare"]);
     });
 
     it('typing lists the matching workspace tags, then + Create "…"', async () => {

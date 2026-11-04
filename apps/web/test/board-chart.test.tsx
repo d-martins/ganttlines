@@ -436,6 +436,36 @@ describe("tags in the bar's menu", () => {
     expect(input).toHaveValue("");
   });
 
+  it("clicking the box offers tags at once, in the menu's flow, leaving out the task's own", async () => {
+    const { user, menu, input } = await openMenu();
+    expect(within(menu).queryByRole("listbox")).not.toBeInTheDocument();
+    await user.click(input);
+    const list = within(menu).getByRole("listbox", { name: "Tags to add" });
+    expect(list.className).not.toContain("absolute");
+    expect(within(list).getAllByRole("option").map((option) => option.textContent)).toEqual(["frozen", "release"]);
+    await user.keyboard("{Enter}");
+    expect(setTags()).toEqual([]);
+    expect(screen.getByRole("menu")).toBe(menu);
+  });
+
+  it("Tab into the box offers them too, and Escape closes the list before the menu", async () => {
+    const { user, menu } = await openMenu();
+    await user.keyboard("{Tab}");
+    expect(within(menu).getByRole("listbox")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(within(menu).queryByRole("listbox")).not.toBeInTheDocument();
+    expect(screen.getByRole("menu")).toBe(menu);
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+  });
+
+  it("removing a chip with × brings the focus back without opening the list", async () => {
+    const { user, menu, input } = await openMenu();
+    await user.click(within(menu).getByRole("button", { name: "Remove the tag “UI”" }));
+    expect(input).toHaveFocus();
+    expect(within(menu).queryByRole("listbox")).not.toBeInTheDocument();
+  });
+
   it("keeps the box focused while typing: no typeahead, no closing on Space", async () => {
     const { user, menu, input } = await openMenu();
     await user.click(input);
@@ -500,6 +530,7 @@ describe("tags in the bar's menu", () => {
     expect(screen.getByRole("menu")).toBe(menu);
     expect(within(menu).queryByRole("listbox")).not.toBeInTheDocument();
     expect(input).toHaveFocus();
+    expect(input).toHaveValue("re");
     await user.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
   });

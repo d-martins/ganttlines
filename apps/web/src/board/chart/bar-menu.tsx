@@ -81,8 +81,6 @@ export function BarMenu({ task, isParent, open, onOpenChange }: { task: TaskRow;
             ref={tags}
             className="px-2 pb-1"
             onKeyDown={(event) => event.stopPropagation()}
-            // A removed chip takes the focus with it, and the menu would hand it to a swatch.
-            onClick={(event) => (event.target as Element).closest("button") && tags.current?.querySelector("input")?.focus()}
           >
             <TagsSection task={task} inlineList />
           </div>
