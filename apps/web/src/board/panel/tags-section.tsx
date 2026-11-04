@@ -1,13 +1,16 @@
-import { canonicalTags, MAX_TAG_LENGTH, MAX_TAGS_PER_TASK, tagKey, type TaskRow } from "@ganttlines/engine";
+import { canonicalTags, MAX_TAG_LENGTH, MAX_TAGS_PER_TASK, rankTags, tagKey, type TaskRow } from "@ganttlines/engine";
 import { useQuery } from "@tanstack/react-query";
 import { GripVertical, X } from "lucide-react";
-import { useId, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { workspaceTags } from "../../api/queries";
 import { toast } from "../../ui/toast";
 import { useBoard, useRun } from "../board-context";
 
 /** how many known tags the dropdown offers at most */
 const MAX_SUGGESTIONS = 8;
+const MAX_LIST_HEIGHT = 288;
+const LIST_GAP = 4;
+const LIST_MARGIN = 8;
 
 const CHIP = "flex max-w-full items-center gap-0.5 rounded-full border border-border-strong bg-surface-2 py-0.5 text-xs text-text";
 
@@ -26,46 +29,85 @@ function moveTag(tags: readonly string[], from: number, to: number): string[] {
   return next;
 }
 
+/** Floats the list by the box without leaving the window: under it, or above it if there's more room. */
+export function placeSuggestions(box: HTMLElement, list: HTMLElement) {
+  const scrolled = list.scrollTop;
+  // `fixed` is relative to the window, unless something holding the list has a transform, as a menu
+  // does: placed at 0,0 it shows where that frame starts.
+  Object.assign(list.style, { left: "0px", top: "0px", maxHeight: "none" });
+  const frame = list.getBoundingClientRect();
+  const anchor = box.getBoundingClientRect();
+  const below = window.innerHeight - anchor.bottom - LIST_GAP - LIST_MARGIN;
+  const above = anchor.top - LIST_GAP - LIST_MARGIN;
+  const height = Math.min(frame.height, MAX_LIST_HEIGHT);
+  const under = height <= below || below >= above;
+  const shown = Math.min(height, under ? below : above);
+  const left = Math.min(anchor.left, window.innerWidth - frame.width - LIST_MARGIN);
+  const top = under ? anchor.bottom + LIST_GAP : anchor.top - LIST_GAP - shown;
+  Object.assign(list.style, { left: `${left - frame.left}px`, top: `${top - frame.top}px`, maxHeight: `${Math.min(MAX_LIST_HEIGHT, under ? below : above)}px` });
+  list.scrollTop = scrolled;
+}
+
 /**
  * A task's tags: chips in its order (× removes one, the handle drags it to another place) and an
- * "Add tag" box that offers the workspace's matching tags, then creating a new one. Every change
- * sends the whole list. Viewers see the chips only.
+ * "Add tag" box. Focused, it offers the workspace's most used tags; typing narrows them and offers
+ * creating a new one, in a list floating over what's below. Every change sends the whole list. Viewers
+ * see the chips only. `inMenu` keeps the focus in the box when a chip's buttons are used, as a menu
+ * would lose it.
  */
-export function TagsSection({ task }: { task: TaskRow }) {
+export function TagsSection({ task, inMenu = false }: { task: TaskRow; inMenu?: boolean }) {
   const board = useBoard();
   const run = useRun();
   const { canEdit, state } = board;
   // Only signed-in editors and admins may list the workspace's tags; others need no suggestions.
   const workspace = useQuery(workspaceTags(canEdit && board.canEditCalendar)).data;
   const [text, setText] = useState("");
-  const [focused, setFocused] = useState(false);
-  const [highlight, setHighlight] = useState(0);
+  const [open, setOpen] = useState(false);
+  // null: the first match while typing, and nothing with an empty box, so Enter can't add by accident.
+  const [highlight, setHighlight] = useState<number | null>(null);
   const [drag, setDrag] = useState<{ from: number; to: number | null } | null>(null);
   const list = useRef<HTMLUListElement>(null);
+  const box = useRef<HTMLInputElement>(null);
+  const suggestions = useRef<HTMLUListElement>(null);
+  const quietFocus = useRef(false);
   const latest = useRef(task.tags);
   latest.current = task.tags;
   const listId = useId();
 
-  // The workspace's tags, then any on this board it doesn't list yet (just added here, say).
+  // The workspace's tags, most used first, then the board's: any it doesn't list yet (just added
+  // here, say), and all there is for those who can't list the workspace's.
   const known = useMemo(() => {
     const byKey = new Map<string, string>();
     const boardTags = Object.values(state.rows).flatMap((row) => (row.kind === "task" ? row.tags : []));
-    for (const tag of [...(workspace ?? []), ...boardTags]) if (!byKey.has(tagKey(tag))) byKey.set(tagKey(tag), tag);
+    const ranked = rankTags(boardTags.map((tag, first) => ({ tag, uses: 1, first })));
+    for (const tag of [...(workspace ?? []), ...ranked]) if (!byKey.has(tagKey(tag))) byKey.set(tagKey(tag), tag);
     return [...byKey.values()];
   }, [workspace, state.rows]);
 
   const needle = tagKey(text);
-  const choices: Choice[] = needle
-    ? [
-        ...known
-          .filter((tag) => tagKey(tag).includes(needle) && !hasTag(task.tags, tag))
-          .slice(0, MAX_SUGGESTIONS)
-          .map((tag) => ({ tag, create: false })),
-        ...(hasTag(known, text) || hasTag(task.tags, text) ? [] : [{ tag: text.trim(), create: true }]),
-      ]
-    : [];
-  const showList = focused && choices.length > 0;
-  const active = Math.min(highlight, choices.length - 1);
+  const typed = needle && !hasTag(task.tags, text) ? { tag: text.trim(), create: true } : null;
+  const choices: Choice[] = [
+    ...known
+      .filter((tag) => tagKey(tag).includes(needle) && !hasTag(task.tags, tag))
+      .slice(0, MAX_SUGGESTIONS)
+      .map((tag) => ({ tag, create: false })),
+    ...(typed && !hasTag(known, text) ? [typed] : []),
+  ];
+  const showList = open && choices.length > 0;
+  const active = Math.min(highlight ?? (needle ? 0 : -1), choices.length - 1);
+
+  // After every render, as chips wrapping can move the box and typing changes the list's height.
+  useLayoutEffect(() => {
+    if (!showList) return;
+    const place = () => box.current && suggestions.current && placeSuggestions(box.current, suggestions.current);
+    place();
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  });
 
   const send = (tags: string[]) => run({ type: "setTags", id: task.id, tags });
   const add = (choice: Choice) => {
@@ -73,19 +115,32 @@ export function TagsSection({ task }: { task: TaskRow }) {
     if (task.tags.length >= MAX_TAGS_PER_TASK) return toast(`A task has at most ${MAX_TAGS_PER_TASK} tags`, { tone: "error" });
     if (!send([...task.tags, ...canonicalTags([choice.tag], known)])) return;
     setText("");
-    setHighlight(0);
+    setHighlight(null);
+  };
+
+  /** After using a chip's button: back in the box, without the list opening under the mouse. */
+  const refocus = () => {
+    if (!inMenu) return;
+    quietFocus.current = true;
+    box.current?.focus();
+    quietFocus.current = false;
   };
 
   const onKey = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       if (choices.length === 0) return;
       event.preventDefault();
-      const step = event.key === "ArrowDown" ? 1 : -1;
-      setHighlight((active + step + choices.length) % choices.length);
+      if (!showList) return setOpen(true);
+      const down = event.key === "ArrowDown";
+      setHighlight(active < 0 ? (down ? 0 : choices.length - 1) : (active + (down ? 1 : -1) + choices.length) % choices.length);
     } else if (event.key === "Enter") {
       event.preventDefault();
-      const choice = choices[active];
+      // With the list closed, what's typed: not a match nobody can see.
+      const choice = showList ? choices[active] : typed;
       if (choice) add(choice);
+    } else if (event.key === "Escape" && showList) {
+      event.stopPropagation();
+      setOpen(false);
     } else if (event.key === "Escape" && text) {
       event.stopPropagation();
       setText("");
@@ -143,6 +198,7 @@ export function TagsSection({ task }: { task: TaskRow }) {
                   aria-label={`Move the tag “${tag}”`}
                   tabIndex={-1}
                   onPointerDown={(event) => startDrag(event, index)}
+                  onClick={refocus}
                   className="cursor-grab touch-none text-muted opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100"
                 >
                   <GripVertical aria-hidden size={12} />
@@ -155,7 +211,10 @@ export function TagsSection({ task }: { task: TaskRow }) {
                 <button
                   type="button"
                   aria-label={`Remove the tag “${tag}”`}
-                  onClick={() => send(task.tags.filter((_, other) => other !== index))}
+                  onClick={() => {
+                    send(task.tags.filter((_, other) => other !== index));
+                    refocus();
+                  }}
                   className="rounded-full text-muted hover:text-text"
                 >
                   <X aria-hidden size={12} />
@@ -166,33 +225,36 @@ export function TagsSection({ task }: { task: TaskRow }) {
         </ul>
       ) : null}
       {canEdit ? (
-        <div className="relative min-w-28 flex-1">
+        <div className="min-w-28 flex-1">
           <input
+            ref={box}
             role="combobox"
             aria-label="Add tag"
             aria-autocomplete="list"
             aria-expanded={showList}
             aria-controls={listId}
-            aria-activedescendant={showList ? `${listId}-${active}` : undefined}
+            aria-activedescendant={showList && active >= 0 ? `${listId}-${active}` : undefined}
             placeholder="Add tag"
             maxLength={MAX_TAG_LENGTH}
             value={text}
             onChange={(event) => {
               setText(event.target.value);
-              setHighlight(0);
+              setHighlight(null);
+              setOpen(true);
             }}
             onKeyDown={onKey}
-            onFocus={() => setFocused(true)}
-            onBlur={() => setFocused(false)}
+            onFocus={() => {
+              if (!quietFocus.current) setOpen(true);
+            }}
+            onClick={() => setOpen(true)}
+            onBlur={() => {
+              setOpen(false);
+              setHighlight(null);
+            }}
             className="w-full rounded-md border border-transparent bg-transparent px-0 py-0.5 text-sm text-text outline-none transition-[padding,border-color] duration-200 ease-out placeholder:text-muted focus:border-border-strong focus:bg-bg focus:px-2 motion-reduce:transition-none"
           />
           {showList ? (
-            <ul id={listId} role="listbox" aria-label="Tags to add" className="absolute top-full left-0 z-20 mt-1 max-h-72 w-56 overflow-y-auto rounded-md border border-border bg-bg p-1 text-sm shadow-lg">
-              {choices[0] && !choices[0].create ? (
-                <li role="presentation" className="px-2 pt-0.5 pb-1 text-[10px] font-semibold tracking-wide text-muted uppercase">
-                  Recent
-                </li>
-              ) : null}
+            <ul ref={suggestions} id={listId} role="listbox" aria-label="Tags to add" className="fixed z-50 w-56 overflow-y-auto rounded-md border border-border bg-bg p-1 text-sm shadow-lg">
               {choices.map((choice, index) => (
                 <li
                   key={`${choice.create}:${choice.tag}`}

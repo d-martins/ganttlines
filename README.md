@@ -283,6 +283,8 @@ docker compose down -v   # stops it and deletes the database and backup volumes
 
 Yarn 4 + Turborepo monorepo (TypeScript). `yarn install`, then from the repo root:
 
+- `yarn start` — the API and the web app with hot reload, at <http://localhost:5173>. Needs a running
+  PostgreSQL and a `.env` with `DATABASE_URL`, `SESSION_SECRET` and `PUBLIC_URL`
 - `yarn test` — unit and integration tests (the server's use a throwaway PostgreSQL in Docker)
 - `yarn type-check`
 - `yarn e2e` — end-to-end tests in a real browser against the production build (needs Docker; the

@@ -1,7 +1,7 @@
 import type { Command, Link } from "@ganttlines/engine";
 import { toDay } from "@ganttlines/engine";
 import type { ProjectStateDto } from "@ganttlines/protocol";
-import { fireEvent, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { toolsLeft } from "../src/board/chart/chart-rows";
 import { linkPath } from "../src/board/chart/dependencies";
@@ -376,6 +376,311 @@ describe("tags on the chart", () => {
     const popover = await screen.findByRole("dialog", { name: "Tags of “ui”" });
     await user.click(within(popover).getByRole("button", { name: "Filter by the tag “Back end”" }));
     await waitFor(() => expect(router.state.location.search).toEqual({ tags: ["Back end"] }));
+  });
+});
+
+describe("tags in the bar's menu", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 8, 29, 12));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const TAGGED = [
+    section("x", { position: "a0" }),
+    task("ui", { parentId: "x", position: "a0", userStart: "2026-09-30", duration: 5, tags: ["UI", "BE"] }),
+    task("hooks", { parentId: "x", position: "a1", userStart: "2026-10-12", duration: 2, tags: ["release"] }),
+    task("kid", { parentId: "hooks", position: "a0", userStart: "2026-10-12", duration: 2 }),
+    task("idle", { parentId: "x", position: "a2", userStart: "2026-10-20", duration: 2, locked: true, tags: ["frozen"] }),
+  ];
+
+  async function openMenu(name = "ui") {
+    const app = await chartBoard(TAGGED);
+    await app.user.click(screen.getByRole("button", { name: `Options for “${name}”` }));
+    const menu = await screen.findByRole("menu");
+    const input = within(menu).getByRole("combobox", { name: "Add tag" }) as HTMLInputElement;
+    return { ...app, menu, input };
+  }
+  const chips = (menu: HTMLElement) => within(menu).queryAllByRole("listitem").flatMap((item) => item.querySelector("[data-tag]")?.textContent ?? []);
+  const setTags = () => sentCommands().filter((command) => command.type === "setTags");
+
+  it("sits under Color, above the actions, and the menu doesn't open into the box", async () => {
+    const { menu, input } = await openMenu();
+    const labels = within(menu).getAllByText(/^(Color|Tags)$/).map((label) => label.textContent);
+    expect(labels).toEqual(["Color", "Tags"]);
+    expect(chips(menu)).toEqual(["UI", "BE"]);
+    const lock = within(menu).getByRole("menuitem", { name: "Lock dates" });
+    expect(input.compareDocumentPosition(lock) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(menu).getByText("Tags").className).toBe(within(menu).getByText("Color").className);
+    expect(input).not.toHaveFocus();
+    expect(input.className).toContain("border-transparent");
+  });
+
+  it("shows for a parent too, between single separators", async () => {
+    const { menu } = await openMenu("hooks");
+    expect(chips(menu)).toEqual(["release"]);
+    expect(within(menu).queryByRole("menuitem", { name: "Duplicate" })).not.toBeInTheDocument();
+    const separators = within(menu).getAllByRole("separator");
+    expect(separators).toHaveLength(2);
+    expect(separators[1]!.nextElementSibling).toBe(within(menu).getByRole("menuitem", { name: "Delete" }));
+  });
+
+  it("adds what's typed on Enter: one setTags with the full list, and the menu stays open", async () => {
+    const { user, menu, input } = await openMenu();
+    await user.click(input);
+    await user.keyboard("new one{Enter}");
+    expect(setTags()).toEqual([{ type: "setTags", id: "ui", tags: ["UI", "BE", "new one"] }]);
+    expect(screen.getByRole("menu")).toBe(menu);
+    expect(chips(menu)).toEqual(["UI", "BE", "new one"]);
+    expect(input).toHaveFocus();
+    expect(input).toHaveValue("");
+  });
+
+  it("clicking the box offers tags at once, floating over the menu, leaving out the task's own", async () => {
+    const { user, menu, input } = await openMenu();
+    expect(within(menu).queryByRole("listbox")).not.toBeInTheDocument();
+    await user.click(input);
+    const list = within(menu).getByRole("listbox", { name: "Tags to add" });
+    expect(list.className).toContain("fixed");
+    expect(within(list).getAllByRole("option").map((option) => option.textContent)).toEqual(["frozen", "release"]);
+    await user.keyboard("{Enter}");
+    expect(setTags()).toEqual([]);
+    expect(screen.getByRole("menu")).toBe(menu);
+  });
+
+  it("Tab into the box offers them too, and Escape closes the list before the menu", async () => {
+    const { user, menu } = await openMenu();
+    await user.keyboard("{Tab}");
+    expect(within(menu).getByRole("listbox")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(within(menu).queryByRole("listbox")).not.toBeInTheDocument();
+    expect(screen.getByRole("menu")).toBe(menu);
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+  });
+
+  it("removing a chip with × brings the focus back without opening the list", async () => {
+    const { user, menu, input } = await openMenu();
+    await user.click(within(menu).getByRole("button", { name: "Remove the tag “UI”" }));
+    expect(input).toHaveFocus();
+    expect(within(menu).queryByRole("listbox")).not.toBeInTheDocument();
+  });
+
+  it("keeps the box focused while typing: no typeahead, no closing on Space", async () => {
+    const { user, menu, input } = await openMenu();
+    await user.click(input);
+    await user.keyboard("lock dates");
+    expect(input).toHaveFocus();
+    expect(input).toHaveValue("lock dates");
+    expect(screen.getByRole("menu")).toBe(menu);
+    expect(sentCommands().filter((command) => command.type === "setLocked")).toEqual([]);
+  });
+
+  it("arrow keys in the box move through the suggestions, not the menu", async () => {
+    const { user, input, menu } = await openMenu();
+    await user.click(input);
+    await user.keyboard("re");
+    const options = within(menu).getAllByRole("option");
+    expect(options.map((option) => option.textContent)).toEqual(["release", '+ Create "re"']);
+    await user.keyboard("{ArrowDown}");
+    expect(input).toHaveFocus();
+    expect(options[1]).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("× removes a tag and Backspace in the empty box the last one; the menu stays open", async () => {
+    const { user, menu, input } = await openMenu();
+    await user.click(within(menu).getByRole("button", { name: "Remove the tag “UI”" }));
+    expect(setTags().at(-1)).toEqual({ type: "setTags", id: "ui", tags: ["BE"] });
+    expect(screen.getByRole("menu")).toBe(menu);
+    expect(input).toHaveFocus(); // not lost with the chip, nor on a swatch
+    await user.keyboard("{Backspace}");
+    expect(setTags().at(-1)).toEqual({ type: "setTags", id: "ui", tags: [] });
+    expect(screen.getByRole("menu")).toBe(menu);
+  });
+
+  it("clicking a suggestion adds it and keeps the menu open", async () => {
+    const { user, menu, input } = await openMenu();
+    await user.click(input);
+    await user.keyboard("re");
+    const list = within(menu).getByRole("listbox", { name: "Tags to add" });
+    await user.click(within(list).getByRole("option", { name: "release" }));
+    expect(setTags()).toEqual([{ type: "setTags", id: "ui", tags: ["UI", "BE", "release"] }]);
+    expect(screen.getByRole("menu")).toBe(menu);
+    expect(input).toHaveFocus();
+  });
+
+  it("reorders by dragging a chip's handle, and the menu stays open", async () => {
+    const { menu } = await openMenu();
+    const handle = within(menu).getByRole("button", { name: "Move the tag “BE”" });
+    fireEvent.pointerDown(handle, { button: 0 });
+    // jsdom has no layout: every chip is a 0×0 box at the origin, so y = 0, x = -1 is "before the first".
+    fireEvent.pointerMove(window, { clientX: -1, clientY: 0 });
+    fireEvent.pointerUp(window);
+    expect(setTags()).toEqual([{ type: "setTags", id: "ui", tags: ["BE", "UI"] }]);
+    expect(screen.getByRole("menu")).toBe(menu);
+  });
+
+  it("Escape closes the suggestions only while they show, and the menu otherwise", async () => {
+    const { user, menu, input } = await openMenu();
+    await user.click(input);
+    await user.keyboard("re");
+    expect(within(menu).getByRole("listbox")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("menu")).toBe(menu);
+    expect(within(menu).queryByRole("listbox")).not.toBeInTheDocument();
+    expect(input).toHaveFocus();
+    expect(input).toHaveValue("re");
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+  });
+
+  it("Escape closes the menu when what's typed offers nothing", async () => {
+    const { user, input } = await openMenu();
+    await user.click(input);
+    await user.keyboard("UI"); // already on the task
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+  });
+
+  it("arrow keys still walk the swatches and items when the focus isn't in the box", async () => {
+    const { user, menu } = await chartBoard(TAGGED).then(async (app) => {
+      const trigger = screen.getByRole("button", { name: "Options for “ui”" });
+      trigger.focus();
+      await app.user.keyboard("{Enter}");
+      return { ...app, menu: await screen.findByRole("menu") };
+    });
+    const swatches = within(menu).getAllByRole("menuitemradio");
+    await waitFor(() => expect(swatches[0]).toHaveFocus());
+    await user.keyboard("{ArrowDown}");
+    expect(swatches[1]).toHaveFocus();
+    await user.keyboard("{ArrowUp}");
+    expect(swatches[0]).toHaveFocus();
+    await user.keyboard("{End}{ArrowUp}");
+    expect(within(menu).getByRole("menuitem", { name: "Duplicate" })).toHaveFocus();
+    for (let step = 0; step < 3; step++) await user.keyboard("{ArrowUp}");
+    expect(swatches.at(-1)).toHaveFocus(); // the arrows pass over the tag box
+  });
+
+  it("Tab goes from the menu's items to the box and back", async () => {
+    const { user, menu, input } = await openMenu();
+    await user.keyboard("{Tab}");
+    expect(input).toHaveFocus();
+    await user.keyboard("{Tab}");
+    expect(input).not.toHaveFocus();
+    expect(menu.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).toHaveAttribute("role", "menuitemradio");
+    await user.keyboard("{Shift>}{Tab}{/Shift}");
+    expect(input).toHaveFocus();
+    expect(screen.getByRole("menu")).toBe(menu);
+  });
+
+  it("the mouse passing over the items leaves the focus in the box", async () => {
+    const { user, menu, input } = await openMenu();
+    await user.click(input);
+    await user.keyboard("re");
+    const lock = within(menu).getByRole("menuitem", { name: "Lock dates" });
+    await user.hover(lock);
+    expect(input).toHaveFocus();
+    await user.hover(menu);
+    expect(input).toHaveFocus();
+    await user.keyboard("d");
+    expect(input).toHaveValue("red");
+  });
+
+  it("the items take the focus on hover as ever when the box hasn't got it", async () => {
+    const { user, menu } = await openMenu();
+    const lock = within(menu).getByRole("menuitem", { name: "Lock dates" });
+    await user.hover(lock);
+    expect(lock).toHaveFocus();
+  });
+
+  it("a locked task's tags stay editable", async () => {
+    const { user, menu, input } = await openMenu("idle");
+    expect(within(menu).getByRole("menuitem", { name: "Unlock dates" })).toBeInTheDocument();
+    await user.click(input);
+    await user.keyboard("thaw{Enter}");
+    expect(setTags()).toEqual([{ type: "setTags", id: "idle", tags: ["frozen", "thaw"] }]);
+  });
+
+  it("the items still work after typing", async () => {
+    const { user, menu, input } = await openMenu();
+    await user.click(input);
+    await user.keyboard("half a tag");
+    await user.click(within(menu).getByRole("menuitem", { name: "Duplicate" }));
+    expect(sentCommands().at(-1)).toMatchObject({ type: "duplicateTask", id: "ui" });
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+  });
+
+  describe("with a tag filter on", () => {
+    const filtered = (tags = ["UI"]) => `?tags=${encodeURIComponent(JSON.stringify(tags))}`;
+    const uiOptions = () => screen.queryByRole("button", { name: "Options for “ui”", hidden: true });
+
+    async function openFiltered() {
+      const app = await chartBoard(TAGGED, ADMIN, [], filtered());
+      await app.user.click(uiOptions()!);
+      return { ...app, menu: await screen.findByRole("menu") };
+    }
+
+    it("removing the filtered tag keeps the menu and the row, and focus stays in the menu", async () => {
+      const { user, menu } = await openFiltered();
+      await user.click(within(menu).getByRole("button", { name: "Remove the tag “UI”" }));
+      expect(setTags()).toEqual([{ type: "setTags", id: "ui", tags: ["BE"] }]);
+      expect(screen.getByRole("menu")).toBe(menu);
+      expect(uiOptions()).toBeInTheDocument();
+      expect(within(menu).getByRole("combobox", { name: "Add tag" })).toHaveFocus();
+    });
+
+    it("the row leaves 5 s after the menu closes and another row is selected", async () => {
+      const { user, menu } = await openFiltered();
+      await user.click(within(menu).getByRole("button", { name: "Remove the tag “UI”" }));
+      await user.keyboard("{Escape}");
+      await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+      expect(uiOptions()).toBeInTheDocument();
+      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+      fireEvent.click(document.querySelector('[data-chart-body] [data-row="0"]')!); // the section above it
+      act(() => void vi.advanceTimersByTime(4999));
+      expect(uiOptions()).toBeInTheDocument();
+      act(() => void vi.advanceTimersByTime(1));
+      expect(uiOptions()).not.toBeInTheDocument();
+    });
+
+    it("a row that goes away takes its menu with it: bringing the row back doesn't reopen it", async () => {
+      const { router } = await openFiltered();
+      await act(() => router.navigate({ to: ".", search: { tags: ["release"] } as never }));
+      await waitFor(() => expect(uiOptions()).not.toBeInTheDocument());
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+      await act(() => router.navigate({ to: ".", search: {} as never }));
+      await waitFor(() => expect(uiOptions()).toBeInTheDocument());
+      await act(async () => {});
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("the day menu under the chart", () => {
+    const dayMenuItem = () => screen.queryByRole("menuitem", { name: "Highlight this day…", hidden: true });
+
+    it("a right-click in the tag box leaves the browser's own menu alone", async () => {
+      const { input } = await openMenu();
+      expect(fireEvent.contextMenu(input, { clientX: 100, clientY: 5 })).toBe(true); // true: not default-prevented
+      await act(async () => {});
+      expect(dayMenuItem()).not.toBeInTheDocument();
+    });
+
+    it("a touch long-press in the tag box doesn't open it", async () => {
+      const { input } = await openMenu();
+      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+      fireEvent.pointerDown(input, { pointerType: "touch", button: 0, clientX: 100, clientY: 5 });
+      act(() => void vi.advanceTimersByTime(800));
+      expect(dayMenuItem()).not.toBeInTheDocument();
+    });
+
+    it("opens again once the menu has closed", async () => {
+      const { user } = await openMenu();
+      await user.keyboard("{Escape}");
+      await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+      fireEvent.contextMenu(document.querySelector("[data-chart-body]")!, { clientX: 100, clientY: 5 });
+      expect(await screen.findByRole("menuitem", { name: "Highlight this day…" })).toBeInTheDocument();
+    });
   });
 });
 
