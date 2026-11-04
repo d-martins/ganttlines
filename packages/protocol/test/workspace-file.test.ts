@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { WorkspaceFile, WorkspaceFileV1, WorkspaceFileV2 } from "../src/workspace-file";
+import { WorkspaceFile, WorkspaceFileV1, WorkspaceFileV2, WorkspaceFileV3 } from "../src/workspace-file";
 
 const A = "11111111-1111-4111-8111-111111111111";
 const B = "22222222-2222-4222-8222-222222222222";
@@ -55,18 +55,29 @@ describe("WorkspaceFileV2", () => {
 describe("WorkspaceFile", () => {
   const section = (rowId: string, extra: object = {}) => ({ id: rowId, kind: "section", title: "S", parentId: null, position: "a1", ...extra });
 
-  it("is version 3: tasks have tags, sections have a description", () => {
-    expect(WorkspaceFile.safeParse(file(3, [taskRow(A, { tags: ["UI", "Back end"] }), section(B, { description: "Notes" })], [])).success).toBe(true);
-    expect(WorkspaceFile.safeParse(file(3, [taskRow(A)], [])).success).toBe(false);
-    expect(WorkspaceFile.safeParse(file(3, [taskRow(A, { tags: [] }), section(B)], [])).success).toBe(false);
-    expect(WorkspaceFile.safeParse(file(3, [section(B, { description: "", tags: [] })], [])).success).toBe(false);
-    expect(WorkspaceFile.safeParse(file(2, [taskRow(A, { tags: [] })], [])).success).toBe(false);
+  it("is version 4: tasks have tags and a target, sections a description", () => {
+    const row = (extra: object = {}) => taskRow(A, { tags: ["UI", "Back end"], targetId: null, ...extra });
+    expect(WorkspaceFile.safeParse(file(4, [row(), section(B, { description: "Notes" })], [])).success).toBe(true);
+    expect(WorkspaceFile.safeParse(file(4, [row({ targetId: B })], [])).success).toBe(true);
+    expect(WorkspaceFile.safeParse(file(4, [taskRow(A, { tags: [] })], [])).success).toBe(false);
+    expect(WorkspaceFile.safeParse(file(4, [row({ targetId: "nope" })], [])).success).toBe(false);
+    expect(WorkspaceFile.safeParse(file(3, [row()], [])).success).toBe(false);
+  });
+
+  it("version 3 has tags but no target", () => {
+    expect(WorkspaceFileV3.safeParse(file(3, [taskRow(A, { tags: ["UI"] }), section(B, { description: "Notes" })], [])).success).toBe(true);
+    expect(WorkspaceFileV3.safeParse(file(3, [taskRow(A, { tags: [], targetId: null })], [])).success).toBe(false);
+    expect(WorkspaceFileV3.safeParse(file(3, [taskRow(A)], [])).success).toBe(false);
+    expect(WorkspaceFileV3.safeParse(file(3, [section(B, { description: "", tags: [] })], [])).success).toBe(false);
+  });
+
+  it("version 2 has neither tags nor section descriptions", () => {
     expect(WorkspaceFileV2.safeParse(file(2, [taskRow(A, { tags: [] })], [])).success).toBe(false);
     expect(WorkspaceFileV2.safeParse(file(2, [section(B, { description: "" })], [])).success).toBe(false);
   });
 
   it("refuses tags the app would never store", () => {
-    const withTags = (tags: string[]) => WorkspaceFile.safeParse(file(3, [taskRow(A, { tags })], [])).success;
+    const withTags = (tags: string[]) => WorkspaceFile.safeParse(file(4, [taskRow(A, { tags, targetId: null })], [])).success;
     expect(withTags(["Q4 · must-have", "x".repeat(100)])).toBe(true);
     for (const tags of [[""], [" UI"], ["UI", "ui"], ["x".repeat(101)], Array.from({ length: 51 }, (_, i) => `t${i}`)]) expect(withTags(tags), String(tags[0])).toBe(false);
   });

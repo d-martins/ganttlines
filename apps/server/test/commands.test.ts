@@ -352,6 +352,19 @@ describe("tags", () => {
     expect(row.tags).toEqual(["UI", "new", "Back end"]);
   });
 
+  it("keeps a target through a reload, and undoes creating one as a single step", async () => {
+    const { editor, projectId } = await editorWithProject();
+    const id = randomUUID();
+    const milestone = randomUUID();
+    await send(editor, projectId, createTask(id));
+    expect((await send(editor, projectId, { type: "createTargetMilestone", id, newId: milestone, title: "8.12", parentId: null, afterId: null, start: "2026-11-17" })).statusCode).toBe(200);
+    const rowOf = async (rowId: string) => (await reload(editor, projectId)).rows.find((r: { id: string }) => r.id === rowId);
+    expect(await rowOf(id)).toMatchObject({ targetId: milestone });
+    expect(await rowOf(milestone)).toMatchObject({ duration: 0, title: "8.12", userStart: "2026-11-17" });
+    expect((await send(editor, projectId, { type: "setTarget", id, targetId: null })).statusCode).toBe(200);
+    expect(await rowOf(id)).toMatchObject({ targetId: null });
+  });
+
   it("matches spellings only within the board for share-link editors, so other projects' tags stay hidden", async () => {
     const { admin, editor, projectId } = await editorWithProject();
     const secret = (await t.app.inject({ method: "POST", url: "/api/projects", headers: { cookie: editor }, payload: { name: "Secret" } })).json().project.id as string;

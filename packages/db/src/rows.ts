@@ -24,6 +24,7 @@ export function toEngineRow(row: DbRow): Row {
     description: row.description,
     actualDuration: row.actualDuration,
     tags: [...row.tags],
+    targetId: row.targetId,
   };
 }
 
@@ -48,6 +49,7 @@ export function toDbColumns(row: Row): Omit<DbRow, "projectId"> {
       description: row.description,
       actualDuration: null,
       tags: [],
+      targetId: null,
     };
   }
   return {
@@ -61,5 +63,6 @@ export function toDbColumns(row: Row): Omit<DbRow, "projectId"> {
     description: row.description,
     actualDuration: row.actualDuration,
     tags: [...row.tags],
+    targetId: row.targetId,
   };
 }

@@ -452,6 +452,20 @@ describe("AI access: editing plans", () => {
     await client.close();
   });
 
+  it("shows what a task aims for and how far it can slip; update_task sets and clears the target", async () => {
+    const { client } = await editorsApp();
+    await call(client, "add_tasks", { project: "Launch", tasks: [{ title: "Build", start: "2026-10-05", durationDays: 2 }, { title: "Cutoff", start: "2026-10-09", milestone: true }, { title: "Other", start: "2026-10-05" }] });
+    const set = await call(client, "update_task", { project: "Launch", task: "Build", target: "Cutoff" });
+    expect(set["error"]).toBeUndefined();
+    const rows = async () => (await call(client, "get_project", { project: "Launch" }))["rows"] as { title: string; target?: { title: string } | null; slack?: { days: number; limit: string } | null }[];
+    expect((await rows()).find((row) => row.title === "Build")).toMatchObject({ target: { title: "Cutoff" }, slack: { days: 3, limit: "Cutoff" } });
+    expect((await rows()).find((row) => row.title === "Cutoff")).toMatchObject({ slack: { days: 0, limit: "end of board" } });
+    expect((await call(client, "update_task", { project: "Launch", task: "Build", target: "Other" }))["error"]).toBeTruthy();
+    await call(client, "update_task", { project: "Launch", task: "Build", target: null });
+    expect((await rows()).find((row) => row.title === "Build")).toMatchObject({ target: null });
+    await client.close();
+  });
+
   it("sets tags: add_tasks and update_task replace the list, in the workspace's spelling; get_project shows them", async () => {
     const { ed, client } = await editorsApp();
     const elsewhere = (await t.app.inject({ method: "POST", url: "/api/projects", headers: { cookie: ed.cookie }, payload: { name: "Other" } })).json().project.id as string;

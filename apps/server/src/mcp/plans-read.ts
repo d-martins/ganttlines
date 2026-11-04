@@ -7,7 +7,7 @@ import { answer, guarded, type ToolContext, type ToolGroup } from "./tools";
 const ISO_DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "a date as YYYY-MM-DD");
 
 /** A board row as the AI sees it: dates computed, people and linked tasks by id and name. */
-export function describeRow({ row, depth, isParent, span, violation, links, violatedLinks }: OutlineRow, names: { people: Map<string, string>; rows: Map<string, string> }) {
+export function describeRow({ row, depth, isParent, span, violation, links, violatedLinks, slack }: OutlineRow, names: { people: Map<string, string>; rows: Map<string, string> }) {
   const task = (id: string) => ({ id, title: names.rows.get(id) ?? "Unknown" });
   const base = { id: row.id, title: row.title, depth, parentId: row.parentId };
   if (row.kind === "section") return { ...base, type: "section" as const, ...(row.description ? { description: row.description } : {}) };
@@ -33,6 +33,8 @@ export function describeRow({ row, depth, isParent, span, violation, links, viol
     ...(row.actualDuration !== null ? { actualDurationDays: row.actualDuration } : {}),
     color: row.color,
     tags: row.tags,
+    target: row.targetId === null ? null : task(row.targetId),
+    slack: slack && { days: slack.halves / 2, limit: slack.limit.kind === "end" ? "end of board" : (names.rows.get(slack.limit.id) ?? "Unknown") },
     ...(row.description ? { description: row.description } : {}),
   };
 }

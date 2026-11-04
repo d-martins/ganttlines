@@ -81,4 +81,4 @@ export {
   type McpSettingsDto,
   type OAuthRequestDto,
 } from "./mcp";
-export { WorkspaceFile, WorkspaceFileV1, WorkspaceFileV2 } from "./workspace-file";
+export { WorkspaceFile, WorkspaceFileV1, WorkspaceFileV2, WorkspaceFileV3 } from "./workspace-file";

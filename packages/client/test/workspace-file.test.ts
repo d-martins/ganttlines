@@ -51,7 +51,7 @@ describe("the workspace file", () => {
     await expect(readWorkspaceFile(JSON.stringify(file))).resolves.toMatchObject({ projects: [expect.objectContaining({ name: "x".repeat(200) })] });
   });
 
-  it("export writes version 3 with tags and section descriptions, and imports them again", async () => {
+  it("export writes version 4 with tags and section descriptions, and imports them again", async () => {
     const { source, project } = await filledSource();
     const link = source.openBoard(project.id).openLink();
     await settle();
@@ -61,8 +61,37 @@ describe("the workspace file", () => {
     link.send(JSON.stringify({ type: "command", commandId: P, command: { type: "setDescription", id: D, description: "All the building" } }));
     await settle();
     const file = source.exportFile();
-    expect(file.version).toBe(3);
+    expect(file.version).toBe(4);
     expect(file.projects[0]?.rows).toEqual([expect.objectContaining({ id: A, tags: ["UI", "Back end"] }), expect.objectContaining({ id: D, kind: "section", description: "All the building" })]);
+    expect((await readWorkspaceFile(JSON.stringify(file))).projects[0]?.rows).toEqual(file.projects[0]?.rows);
+  });
+
+  it("imports a version 3 file: tasks without a target", async () => {
+    const { source } = await filledSource();
+    const file = JSON.parse(JSON.stringify(source.exportFile())) as Record<string, any>;
+    file.version = 3;
+    for (const row of file.projects[0].rows) delete row.targetId;
+    const imported = await readWorkspaceFile(JSON.stringify(file));
+    expect(imported.version).toBe(4);
+    expect(imported.projects[0]?.rows).toEqual([expect.objectContaining({ id: A, targetId: null })]);
+  });
+
+  it("refuses a file whose task aims for something that isn't a milestone on its board", async () => {
+    const { source } = await filledSource();
+    const file = JSON.parse(JSON.stringify(source.exportFile())) as Record<string, any>;
+    file.projects[0].rows[0].targetId = D;
+    await expect(readWorkspaceFile(JSON.stringify(file))).rejects.toThrow(/aims for something/);
+  });
+
+  it("keeps a target through export and import", async () => {
+    const { source, project } = await filledSource();
+    const link = source.openBoard(project.id).openLink();
+    await settle();
+    link.send(JSON.stringify({ type: "join", projectId: project.id, version: 1, protocol: PROTOCOL_VERSION }));
+    link.send(JSON.stringify({ type: "command", commandId: C, command: { type: "createTargetMilestone", id: A, newId: D, title: "8.12", parentId: null, afterId: A, start: "2026-11-17" } }));
+    await settle();
+    const file = source.exportFile();
+    expect(file.projects[0]?.rows).toEqual(expect.arrayContaining([expect.objectContaining({ id: A, targetId: D })]));
     expect((await readWorkspaceFile(JSON.stringify(file))).projects[0]?.rows).toEqual(file.projects[0]?.rows);
   });
 
@@ -70,11 +99,14 @@ describe("the workspace file", () => {
     const { source } = await filledSource();
     const file = JSON.parse(JSON.stringify(source.exportFile())) as Record<string, any>;
     file.version = 2;
-    for (const row of file.projects[0].rows) delete row.tags;
+    for (const row of file.projects[0].rows) {
+      delete row.tags;
+      delete row.targetId;
+    }
     file.projects[0].rows.push({ id: D, kind: "section", title: "Build", parentId: null, position: "a1" });
     const imported = await readWorkspaceFile(JSON.stringify(file));
-    expect(imported.version).toBe(3);
-    expect(imported.projects[0]?.rows).toEqual([expect.objectContaining({ id: A, tags: [] }), { id: D, kind: "section", title: "Build", parentId: null, position: "a1", description: "" }]);
+    expect(imported.version).toBe(4);
+    expect(imported.projects[0]?.rows).toEqual([expect.objectContaining({ id: A, tags: [], targetId: null }), { id: D, kind: "section", title: "Build", parentId: null, position: "a1", description: "" }]);
     const elsewhere = await LocalSource.open(new MemoryStore());
     await elsewhere.replaceWith(imported);
     expect(elsewhere.exportFile().projects[0]?.rows).toEqual(imported.projects[0]?.rows);
@@ -90,6 +122,7 @@ describe("the workspace file", () => {
     }
     const v2 = exported();
     v2.version = 2;
+    for (const row of v2.projects[0].rows) delete row.targetId;
     await expect(readWorkspaceFile(JSON.stringify(v2))).rejects.toMatchObject({ code: "invalid_file" });
   });
 
@@ -129,7 +162,7 @@ describe("the workspace file", () => {
       e: ["2026-10-20", false, "2026-10-20", false],
     };
     const file = await readWorkspaceFile(JSON.stringify(v1));
-    expect(file.version).toBe(3);
+    expect(file.version).toBe(4);
     const source = await LocalSource.open(new MemoryStore());
     await source.replaceWith(file);
     const board = await source.openBoard(P).load();
@@ -170,7 +203,7 @@ describe("the workspace file", () => {
 
     it("from a newer GanttLines", async () => {
       const file = await base();
-      await expect(readWorkspaceFile(JSON.stringify({ ...file, version: 4 }))).rejects.toMatchObject({ code: "newer_version" });
+      await expect(readWorkspaceFile(JSON.stringify({ ...file, version: 5 }))).rejects.toMatchObject({ code: "newer_version" });
     });
 
     it("too big", async () => {

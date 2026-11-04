@@ -37,7 +37,9 @@ const tags = z
   .array(z.string().min(1).max(MAX_TAG_LENGTH).refine((tag) => tag === tag.trim(), "Tags have no surrounding spaces"))
   .max(MAX_TAGS_PER_TASK)
   .refine((list) => new Set(list.map(tagKey)).size === list.length, "A task has each tag once");
-const TaskRow = z.strictObject({ ...taskFields, tags });
+const TaskRow = z.strictObject({ ...taskFields, tags, targetId: id.nullable() });
+// Before v4, tasks had no target.
+const TaskRowV3 = z.strictObject({ ...taskFields, tags });
 const TaskRowV2 = z.strictObject(taskFields);
 // v1 files kept a task's single predecessor and its offset on the row.
 const TaskRowV1 = z.strictObject({
@@ -107,7 +109,7 @@ const projectFields = {
 /** A whole local workspace, as exported to (and imported from) a `.ganttlines.json` file. */
 export const WorkspaceFile = z.strictObject({
   ...workspaceFields,
-  version: z.literal(3),
+  version: z.literal(4),
   projects: z
     .array(
       z.strictObject({
@@ -119,6 +121,22 @@ export const WorkspaceFile = z.strictObject({
     .max(1_000),
 });
 export type WorkspaceFile = z.infer<typeof WorkspaceFile>;
+
+/** The format before targets, still accepted on import. */
+export const WorkspaceFileV3 = z.strictObject({
+  ...workspaceFields,
+  version: z.literal(3),
+  projects: z
+    .array(
+      z.strictObject({
+        ...projectFields,
+        rows: z.array(z.discriminatedUnion("kind", [SectionRow, TaskRowV3])).max(20_000),
+        links: z.array(LinkRecord).max(100_000),
+      }),
+    )
+    .max(1_000),
+});
+export type WorkspaceFileV3 = z.infer<typeof WorkspaceFileV3>;
 
 /** The format before tags and section descriptions, still accepted on import. */
 export const WorkspaceFileV2 = z.strictObject({

@@ -182,6 +182,7 @@ const TaskFields = {
     .max(MAX_TAGS_PER_TASK)
     .optional()
     .describe("the task's tags, in order, replacing its list ([] for none); tags are shared by every project and a tag already in use keeps its spelling (\"ui\" becomes \"UI\")"),
+  target: z.string().nullable().optional().describe("the milestone on this board the task aims for (id or title; null for none): never moves anything, it's what `slack` measures against"),
 };
 
 /** Editing plans: projects, and the tasks on their boards. */
@@ -536,6 +537,7 @@ async function applyTaskFields(
     lagDays?: number | undefined;
     milestone?: boolean | undefined;
     tags?: string[] | undefined;
+    target?: string | null | undefined;
   },
   team: Awaited<ReturnType<ToolContext["context"]["instance"]["resources"]>>,
   added: readonly { id: string; title: string }[],
@@ -583,4 +585,7 @@ async function applyTaskFields(
   if (fields.description !== undefined) await edit.run({ type: "setDescription", id, description: fields.description });
   if (fields.color !== undefined) await edit.run({ type: "setColor", id, color: fields.color });
   if (fields.tags !== undefined) await edit.run({ type: "setTags", id, tags: fields.tags });
+  if (fields.target !== undefined) {
+    await edit.run({ type: "setTarget", id, targetId: fields.target === null ? null : edit.find(fields.target, "task", added).id });
+  }
 }

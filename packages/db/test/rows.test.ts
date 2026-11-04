@@ -18,6 +18,7 @@ const task: TaskRow = {
   locked: true,
   description: "notes",
   tags: ["UI", "Back end"],
+  targetId: "33333333-3333-4333-8333-333333333333",
 };
 const projectId = "55555555-5555-4555-8555-555555555555";
 
@@ -36,6 +37,12 @@ describe("row mapping", () => {
     expect(toDbColumns(task).tags).toEqual(["UI", "Back end"]);
     expect(toDbColumns(section).description).toBe("the plan");
     expect(toEngineRow({ ...toDbColumns(section), projectId, tags: ["stray"] })).toEqual(section);
+  });
+
+  it("keeps a task's target, and none on a section", () => {
+    expect(toDbColumns(task).targetId).toBe(task.targetId);
+    expect(toDbColumns(section).targetId).toBeNull();
+    expect(toEngineRow({ ...toDbColumns(task), projectId })).toMatchObject({ targetId: task.targetId });
   });
 
   it("rejects corrupted kinds and colors", () => {
