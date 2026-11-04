@@ -1,4 +1,4 @@
-import type { Command } from "@ganttlines/engine";
+import { toDay, type Command, type TaskRow } from "@ganttlines/engine";
 import type { CommentDto, ProjectStateDto } from "@ganttlines/protocol";
 import { fireEvent, render, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -6,7 +6,9 @@ import { describeEntry } from "../src/board/panel/activity";
 import { RichTextView } from "../src/ui/rich-text";
 import { ANA, CALENDAR, FakeWebSocket, PROJECT_ID, projectState, section, task } from "./board-fixtures";
 import { ADMIN, project, renderApp, screen, signedIn, VIEWER } from "./utils";
-import { placeSuggestions } from "../src/board/panel/tags-section";
+import { placeSuggestions } from "../src/board/panel/suggestion-list";
+import { newMilestonePlace } from "../src/board/slack";
+import { formatDay } from "../src/board/format";
 
 const ROWS = [
   section("x", { position: "a0" }),
@@ -467,6 +469,154 @@ describe("details panel", () => {
     expect(panel()).toHaveAccessibleName("Details of “ui”");
   });
 
+  describe("aiming for", () => {
+    const aimBoard = async (fields: Partial<TaskRow> = {}, user = ADMIN, extra: ProjectStateDto["rows"] = []) => {
+      const rows = [
+        ROWS[0]!,
+        task("hooks", { parentId: "x", position: "a1", userStart: "2026-10-12", duration: 2, ...fields }),
+        task("later", { parentId: "x", position: "a2", userStart: "2026-10-23", duration: 0 }),
+        task("soon", { parentId: "x", position: "a3", userStart: "2026-10-14", duration: 0 }),
+        task("undated", { parentId: "x", position: "a4", duration: 0 }),
+        ...extra,
+      ];
+      const app = await panelBoard(rows, user);
+      await selectRow(app.user, "hooks");
+      return app;
+    };
+    const aimSection = () => within(panel()).getByRole("heading", { name: "Aiming for" }).closest("section")!;
+    const box = () => within(aimSection()).getByRole("combobox", { name: "Aiming for" });
+    const offered = () => within(aimSection()).getAllByRole("option").map((option) => option.textContent);
+    const lastCommand = () => sentCommands().at(-1);
+    const dayOf = (iso: string) => formatDay(toDay(iso));
+
+    it("sits above Tags", async () => {
+      await aimBoard();
+      const headings = within(panel()).getAllByRole("heading").map((heading) => heading.textContent);
+      expect(headings.indexOf("Aiming for")).toBe(headings.indexOf("Tags") - 1);
+    });
+
+    it("isn't there for milestones and sections", async () => {
+      const { user } = await aimBoard();
+      await selectRow(user, "soon");
+      expect(within(panel()).queryByRole("heading", { name: "Aiming for" })).not.toBeInTheDocument();
+      await user.dblClick(rowOf("x").querySelector('[aria-label^="Row "]')!);
+      await waitFor(() => expect(panel()).toHaveAccessibleName("Details of “x”"));
+      expect(within(panel()).queryByRole("heading", { name: "Aiming for" })).not.toBeInTheDocument();
+    });
+
+    it("clicking offers the board's milestones soonest first with dates, undated last, none highlighted", async () => {
+      const { user } = await aimBoard();
+      await user.click(box());
+      expect(offered()).toEqual([`soon${dayOf("2026-10-14")}`, `later${dayOf("2026-10-23")}`, "undatedno date"]);
+      for (const option of within(aimSection()).getAllByRole("option")) expect(option).toHaveAttribute("aria-selected", "false");
+      expect(within(aimSection()).getByRole("listbox").className).toContain("fixed");
+    });
+
+    it("typing narrows and highlights the first; an exact name offers no Create, whatever its case", async () => {
+      const { user } = await aimBoard();
+      await user.click(box());
+      await user.keyboard("o");
+      expect(offered()).toEqual([`soon${dayOf("2026-10-14")}`, '+ Create "o"']);
+      expect(within(aimSection()).getAllByRole("option")[0]).toHaveAttribute("aria-selected", "true");
+      await user.keyboard("{Backspace}SOON");
+      expect(offered()).toEqual([`soon${dayOf("2026-10-14")}`]);
+    });
+
+    it("Enter on the empty box sets nothing; ↓ then Enter aims", async () => {
+      const { user } = await aimBoard();
+      await user.click(box());
+      await user.keyboard("{Enter}");
+      expect(sentCommands().filter((command) => command.type === "setTarget")).toEqual([]);
+      await user.keyboard("{ArrowDown}{Enter}");
+      expect(lastCommand()).toEqual({ type: "setTarget", id: "hooks", targetId: "soon" });
+    });
+
+    it("clicking a milestone aims for it", async () => {
+      const { user } = await aimBoard();
+      await user.click(box());
+      await user.click(within(aimSection()).getAllByRole("option")[1]!);
+      expect(lastCommand()).toEqual({ type: "setTarget", id: "hooks", targetId: "later" });
+    });
+
+    it("+ Create makes one command, starting on the task's finish, and the date shows focused until the box is left", async () => {
+      const { user } = await aimBoard();
+      await user.click(box());
+      await user.keyboard("8.12{Enter}");
+      expect(lastCommand()).toMatchObject({ type: "createTargetMilestone", id: "hooks", title: "8.12", start: "2026-10-13" });
+      const date = within(aimSection()).getByLabelText("Milestone date");
+      expect(date).toHaveFocus();
+      expect(date).toHaveValue("2026-10-13");
+      const created = (lastCommand() as { newId: string }).newId;
+      fireEvent.change(date, { target: { value: "2026-10-20" } });
+      expect(lastCommand()).toEqual({ type: "moveTask", id: created, start: "2026-10-20" });
+      await user.click(within(panel()).getByRole("combobox", { name: "Add tag" }));
+      expect(within(aimSection()).queryByLabelText("Milestone date")).not.toBeInTheDocument();
+    });
+
+    it("+ Create starts today when the task has no dates", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date(2026, 9, 7, 12));
+      try {
+        const { user } = await aimBoard({ userStart: null });
+        await user.click(box());
+        await user.keyboard("8.12{Enter}");
+        expect(lastCommand()).toMatchObject({ type: "createTargetMilestone", start: "2026-10-07" });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("goes after the last milestone being aimed at, else at the end of the board", () => {
+      const rows = (aimed: boolean) => {
+        const list = [section("s", { position: "a0" }), task("m", { parentId: "s", position: "a0", duration: 0 }), task("t", { position: "a1", targetId: aimed ? "m" : null })];
+        return newMilestonePlace({ rows: Object.fromEntries(list.map((row) => [row.id, row])), links: {} });
+      };
+      expect(rows(true)).toEqual({ parentId: "s", afterId: "m" });
+      expect(rows(false)).toEqual({ parentId: null, afterId: "t" });
+    });
+
+    it("says how late it is, or how much is to spare", async () => {
+      await aimBoard({ targetId: "soon", duration: 5 }); // finishes Fri 16, milestone Wed 14
+      expect(within(aimSection()).getByText(`2 days late: finishes ${dayOf("2026-10-16")}, milestone is ${dayOf("2026-10-14")}`)).toBeInTheDocument();
+    });
+
+    it("counts one day late, to spare and exactly on time", async () => {
+      const { user } = await aimBoard({ targetId: "later" }); // finishes Tue 13, milestone Fri 23
+      expect(within(aimSection()).getByText("8 days to spare")).toBeInTheDocument();
+      await user.click(within(aimSection()).getByRole("button", { name: "Stop aiming for “later”" }));
+      expect(lastCommand()).toEqual({ type: "setTarget", id: "hooks", targetId: null });
+      expect(rowOf("later")).toBeInTheDocument();
+    });
+
+    it("says an undated milestone has no date yet", async () => {
+      await aimBoard({ targetId: "undated" });
+      expect(within(aimSection()).getByText("No date yet")).toBeInTheDocument();
+    });
+
+    it("a subtask shows its parent's target as inherited, and can replace it", async () => {
+      const { user } = await aimBoard({ targetId: "later" }, ADMIN, [task("kid", { parentId: "hooks", position: "a0", userStart: "2026-10-12", duration: 1 })]);
+      await selectRow(user, "kid");
+      expect(within(aimSection()).getByText("later")).toBeInTheDocument();
+      expect(within(aimSection()).getByText("From hooks")).toBeInTheDocument();
+      await user.click(box());
+      await user.click(within(aimSection()).getAllByRole("option")[0]!);
+      expect(lastCommand()).toEqual({ type: "setTarget", id: "kid", targetId: "soon" });
+    });
+
+    it("viewers see the name and result only, or None", async () => {
+      await aimBoard({ targetId: "later" }, VIEWER);
+      expect(within(aimSection()).getByText("later")).toBeInTheDocument();
+      expect(within(aimSection()).getByText("8 days to spare")).toBeInTheDocument();
+      expect(within(aimSection()).queryByRole("combobox")).not.toBeInTheDocument();
+      expect(within(aimSection()).queryByRole("button")).not.toBeInTheDocument();
+    });
+
+    it("viewers see None with no target", async () => {
+      await aimBoard({}, VIEWER);
+      expect(within(aimSection()).getByText("None")).toBeInTheDocument();
+    });
+  });
+
   describe("tags", () => {
     const tagsBoard = async (tags: string[] = [], user = ADMIN, known: string[] = ["UI", "UX research", "Q4 · must-have", "Back end"]) => {
       const rows = [ROWS[0]!, ROWS[1]!, task("hooks", { parentId: "x", position: "a1", userStart: "2026-10-12", duration: 2, tags })];
@@ -826,6 +976,11 @@ describe("history wording", () => {
     rowIds: ["t"],
     changes: changes.map((change) => ({ rowId: "t", ...change })),
   });
+  it("words aiming", () => {
+    expect(describeEntry(entry("setTarget", [{ field: "targetId", before: null, after: "p" }]), names, "t")).toBe("aimed it for “Design”");
+    expect(describeEntry(entry("setTarget", [{ field: "targetId", before: "p", after: null }]), names, "t")).toBe("stopped aiming it for “Design”");
+  });
+
   it("describes changes in words", () => {
     expect(describeEntry(entry("createRow", [{ field: "*", before: null, after: {} }]), names, "t")).toBe("created it");
     expect(describeEntry(entry("indent", [{ field: "parentId", before: null, after: "p" }, { field: "position", before: "a", after: "b" }]), names, "t")).toBe("moved it in the list");

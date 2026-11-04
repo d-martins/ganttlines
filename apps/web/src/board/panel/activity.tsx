@@ -87,6 +87,8 @@ export function describeChange(change: Change | LinkKindChange, names: Names, ro
       return null;
     case "tags":
       return describeTags(before, after);
+    case "targetId":
+      return typeof after === "string" ? `aimed it for ${quote(names.state.rows[after]?.title)}` : `stopped aiming it for ${quote(typeof before === "string" ? names.state.rows[before]?.title : "")}`;
     default:
       return `changed ${field}`;
   }
