@@ -1,4 +1,4 @@
-import type { Command, Link } from "@ganttlines/engine";
+import type { Command, Link, TaskRow } from "@ganttlines/engine";
 import { toDay } from "@ganttlines/engine";
 import type { ProjectStateDto } from "@ganttlines/protocol";
 import { act, fireEvent, waitFor, within } from "@testing-library/react";
@@ -376,6 +376,78 @@ describe("tags on the chart", () => {
     const popover = await screen.findByRole("dialog", { name: "Tags of “ui”" });
     await user.click(within(popover).getByRole("button", { name: "Filter by the tag “Back end”" }));
     await waitFor(() => expect(router.state.location.search).toEqual({ tags: ["Back end"] }));
+  });
+});
+
+describe("milestones being aimed at", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 8, 29, 12));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const AIMED = (fields: Partial<TaskRow> = {}) => [
+    section("x", { position: "a0" }),
+    task("ui", { parentId: "x", position: "a0", userStart: "2026-10-05", duration: 2, ...fields }),
+    task("free", { parentId: "x", position: "a1", userStart: "2026-10-05", duration: 1 }),
+    task("cut", { parentId: "x", position: "a2", userStart: "2026-10-14", duration: 0 }),
+    task("other", { parentId: "x", position: "a3", userStart: "2026-10-16", duration: 0 }),
+    task("undated", { parentId: "x", position: "a4", duration: 0 }),
+  ];
+  const lines = () => screen.queryAllByTestId("milestone-line");
+  const flags = () => screen.queryAllByTestId("milestone-flag").map((flag) => flag.textContent);
+  const bar = (name: string) => screen.getByRole("button", { name: new RegExp(`^${name}, `) });
+
+  it("a milestone nobody aims for draws no line", async () => {
+    await chartBoard(AIMED());
+    expect(lines()).toEqual([]);
+    expect(flags()).toEqual([]);
+  });
+
+  it("one being aimed at draws a line and a flag with its title", async () => {
+    await chartBoard(AIMED({ targetId: "cut" }));
+    expect(lines()).toHaveLength(1);
+    expect(flags()).toEqual(["cut"]);
+  });
+
+  it("two tasks aiming at it draw one line", async () => {
+    const rows = AIMED({ targetId: "cut" }).map((row) => (row.id === "free" ? { ...row, targetId: "cut" } : row));
+    await chartBoard(rows);
+    expect(lines()).toHaveLength(1);
+  });
+
+  it("an undated one draws none", async () => {
+    await chartBoard(AIMED({ targetId: "undated" }));
+    expect(lines()).toEqual([]);
+  });
+
+  it("a task past its target is outlined, keeping its colour", async () => {
+    const rows = AIMED({ targetId: "cut", duration: 10, color: "purple" }).map((row) => (row.id === "free" ? { ...row, color: "purple" as const } : row));
+    await chartBoard(rows); // finishes the 16th, milestone the 14th
+    const late = bar("ui");
+    expect(late).toHaveAttribute("data-slack", "late");
+    expect(late.className).toContain("outline");
+    expect(late.style.background).toBe(bar("free").style.background);
+    expect(bar("free")).not.toHaveAttribute("data-slack");
+  });
+
+  it("a task feeding one that's late is too", async () => {
+    await chartBoard(
+      [
+        section("x", { position: "a0" }),
+        task("feeder", { parentId: "x", position: "a0", userStart: "2026-10-05", duration: 1 }),
+        task("ui", { parentId: "x", position: "a1", userStart: "2026-10-05", duration: 10, targetId: "cut" }),
+        task("cut", { parentId: "x", position: "a2", userStart: "2026-10-14", duration: 0 }),
+      ],
+      ADMIN,
+      [{ predecessorId: "feeder", followerId: "ui", kind: "FS", lag: 0 }],
+    );
+    expect(bar("feeder")).toHaveAttribute("data-slack", "late");
+  });
+
+  it("a board with no targets has no outlines", async () => {
+    await chartBoard(AIMED());
+    expect(document.querySelector("[data-slack]")).toBeNull();
   });
 });
 

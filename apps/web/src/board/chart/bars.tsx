@@ -158,6 +158,7 @@ export function RowBar({
   titleGap = 6,
   visibleLeft = -Infinity,
   tags = null,
+  slack = null,
 }: {
   entry: BoardRow;
   span: Span;
@@ -172,6 +173,8 @@ export function RowBar({
   visibleLeft?: number;
   /** drawn after the title (the task's tags) */
   tags?: ReactNode;
+  /** past a limit, or none left: an outline, as a bar's colour stays the person's own */
+  slack?: "late" | "zero" | null;
 }) {
   const { row } = entry;
   const kind = shapeOf(entry);
@@ -188,8 +191,10 @@ export function RowBar({
     barDetails(span, assignee?.name) + (entry.actual && task ? `, took ${formatDays(entry.actualDays!)} of ${formatDays(task.duration)} working days` : "");
   const label = `${row.title || "Untitled"}, ${details}`;
   const locked = task?.locked ? <Lock aria-label="Locked" size={10} className="shrink-0" /> : null;
-  const { className: shapeClass = "", ...shapeRest } = shape ?? {};
-  const shapeAttrs: ShapeProps = shape ? { role: "button", "aria-label": label, ...shapeRest } : { role: "img", "aria-label": label };
+  const { className: givenClass = "", ...shapeRest } = shape ?? {};
+  const shapeClass = `${givenClass} ${slack ? `outline-2 outline-offset-1 ${slack === "late" ? "outline-[var(--slack-late)]" : "outline-[var(--slack-zero)]"}` : ""}`;
+  const marked = slack ? ({ "data-slack": slack } as ShapeProps) : {};
+  const shapeAttrs: ShapeProps = shape ? { role: "button", "aria-label": label, ...marked, ...shapeRest } : { role: "img", "aria-label": label, ...marked };
   const outsideTitle = (
     <span className="pointer-events-none absolute flex items-center gap-1 whitespace-nowrap text-xs" style={{ left: right + titleGap, top: 0, height: rowHeight }}>
       {kind === "task" ? locked : null}

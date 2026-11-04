@@ -1,6 +1,7 @@
 import { weekday, type DayNum } from "@ganttlines/engine";
 import type { HighlightDto } from "@ganttlines/protocol";
 import { dateParts, formatDay } from "../format";
+import type { AimedMilestone } from "./milestone-lines";
 import type { Timeline, Zoom } from "./timeline";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -40,6 +41,7 @@ export function ChartHeader({
   highlights,
   holidays,
   todayDay,
+  milestones = [],
   stickyLeft,
 }: {
   timeline: Timeline;
@@ -50,6 +52,8 @@ export function ChartHeader({
   /** holiday names by day */
   holidays: ReadonlyMap<DayNum, readonly string[]>;
   todayDay: DayNum;
+  /** the milestones being aimed at, flagged where their line starts */
+  milestones?: readonly AimedMilestone[];
   /** where the chart starts on screen: long labels stay readable there while their cell scrolls */
   stickyLeft: number;
 }) {
@@ -78,6 +82,17 @@ export function ChartHeader({
           <span className="sticky px-1.5" style={{ left: stickyLeft }}>
             {cell.label}
           </span>
+        </div>
+      ))}
+      {milestones.map((milestone) => (
+        <div
+          key={milestone.id}
+          data-testid="milestone-flag"
+          title={milestone.title}
+          className="absolute top-1 z-10 max-w-[12ch] -translate-x-1/2 truncate rounded bg-[var(--target-line)] px-1 text-[10px] leading-4 font-semibold text-[var(--target-ink)]"
+          style={{ left: timeline.x(milestone.day) + timeline.dayWidth / 2 }}
+        >
+          {milestone.title}
         </div>
       ))}
       {bottom.map((cell) => {

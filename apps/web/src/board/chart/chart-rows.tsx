@@ -1,8 +1,10 @@
+import type { SlackMap } from "@ganttlines/engine";
 import { fromDay, LINK_KIND_WORDS, spanEnd, spanStart, type Command, type DayNum, type LinkKind, type RowId } from "@ganttlines/engine";
 import { UserRound } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { AssigneePicker } from "../assignee-picker";
 import { runCommand, useBoard } from "../board-context";
+import { useSlack } from "../slack";
 import { addAtEnd, deleteRow } from "../list/list-actions";
 import type { BoardRow } from "../model";
 import { useSelection } from "../selection";
@@ -45,6 +47,13 @@ function LinkDot({ left, top, title, onPointerDown }: { left: number; top: numbe
  * through the engine; the command is sent on drop), focused bars respond to the keyboard, hover
  * shows each bar's controls, and empty tracks show a ghost where a click would schedule the task.
  */
+/** What a bar's outline says; none for dates drawn from a baseline. */
+function slackMark(entry: BoardRow, slack: SlackMap): "late" | "zero" | null {
+  if (entry.fromBaseline) return null;
+  const mine = slack.get(entry.row.id);
+  return mine && mine.halves < 0 && mine.limit.kind === "milestone" ? "late" : null;
+}
+
 export function ChartRows({
   rows,
   allRows,
@@ -71,6 +80,7 @@ export function ChartRows({
 }) {
   const board = useBoard();
   const { state, resources, resourceMap, canEdit, canCreateResources } = board;
+  const slack = useSlack();
   const select = useSelection((selection) => selection.select);
   const drag = useChartDrag((store) => store.drag);
   const [hover, setHover] = useState<{ index: number; day: DayNum } | null>(null);
@@ -268,6 +278,7 @@ export function ChartRows({
                 resources={resourceMap}
                 titleGap={editable ? 18 : 6}
                 visibleLeft={visibleLeft}
+                slack={slackMark(entry, slack)}
                 tags={task && task.tags.length > 0 ? <TagChips title={row.title} tags={task.tags} filter={tagFilter} /> : null}
                 shape={
                   editable

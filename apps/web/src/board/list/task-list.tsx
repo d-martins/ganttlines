@@ -513,6 +513,9 @@ export function ListRows({
           <button type="button" className="flex items-center gap-1 rounded px-2 py-1 text-muted hover:bg-surface-2 hover:text-text" onClick={() => addAtEnd(board, state, "task")}>
             <Plus size={13} /> Add task
           </button>
+          <button type="button" className="flex items-center gap-1 rounded px-2 py-1 text-muted hover:bg-surface-2 hover:text-text" onClick={() => addAtEnd(board, state, "task", undefined, true)}>
+            <Plus size={13} /> Add milestone
+          </button>
           <button type="button" className="flex items-center gap-1 rounded px-2 py-1 text-muted hover:bg-surface-2 hover:text-text" onClick={() => addAtEnd(board, state, "section")}>
             <Plus size={13} /> Add section
           </button>

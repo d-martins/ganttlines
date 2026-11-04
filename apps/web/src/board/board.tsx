@@ -9,6 +9,7 @@ import { DayMenu } from "./chart/day-menu";
 import { useChartDrag } from "./chart/drag";
 import { ChartHeader } from "./chart/chart-header";
 import { Dependencies } from "./chart/dependencies";
+import { aimedMilestones, MilestoneLines } from "./chart/milestone-lines";
 import { Shading } from "./chart/shading";
 import { chartRange, scaleOf, Timeline, zoomStep } from "./chart/timeline";
 import { today } from "./format";
@@ -123,6 +124,7 @@ export function Board({
     () => boardModel(displayed, calendar, baseline, filters, collapsed, team, shownMatches),
     [displayed, calendar, baseline, filters, collapsed, team, shownMatches],
   );
+  const milestones = useMemo(() => aimedMilestones(state, model.rows), [state, model.rows]);
   const known = useMemo(() => knownFilters(state, filters, team), [state, filters, team]);
   const DetailsPanel = useDetailsPanel();
   const onListKey = useListKeys(model.rows, model.filtering);
@@ -314,7 +316,7 @@ export function Board({
               <ListHeader filtering={model.filtering} />
               {divider}
             </div>
-            <ChartHeader timeline={timeline} zoom={scaleOf(dayWidth)} stickyLeft={listWidth} days={days} highlights={highlightDays} holidays={holidayNames} todayDay={todayDay} />
+            <ChartHeader timeline={timeline} zoom={scaleOf(dayWidth)} stickyLeft={listWidth} days={days} highlights={highlightDays} holidays={holidayNames} todayDay={todayDay} milestones={milestones} />
           </div>
           <div className="flex" style={{ height: bodyHeight }}>
             <div
@@ -375,6 +377,7 @@ export function Board({
                 <div aria-hidden className="absolute right-0 left-0 bg-accent-soft opacity-60" style={{ top: selectedIndex * rowHeight, height: rowHeight }} />
               ) : null}
               <div aria-hidden className="absolute top-0 w-0.5 bg-[var(--today)]" style={{ left: timeline.x(todayDay) + timeline.dayWidth / 2 - 1, height: bodyHeight }} />
+              <MilestoneLines milestones={milestones} timeline={timeline} height={bodyHeight} />
               <Dependencies rows={model.rows} links={model.links} firstRow={firstRow} lastRow={lastRow} timeline={timeline} style={barStyle} />
               <ChartRows rows={shown} allRows={model.rows} firstRow={firstRow} timeline={timeline} style={barStyle} visibleLeft={viewport.left} tagFilter={tagFilter} filtering={model.filtering} />
             </div>
