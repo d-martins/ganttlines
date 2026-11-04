@@ -1,4 +1,4 @@
-import { toDay, type Command, type TaskRow } from "@ganttlines/engine";
+import { toDay, type Command, type Link, type TaskRow } from "@ganttlines/engine";
 import type { CommentDto, ProjectStateDto } from "@ganttlines/protocol";
 import { fireEvent, render, waitFor, within } from "@testing-library/react";
 import type { UserEvent } from "@testing-library/user-event";
@@ -471,7 +471,7 @@ describe("details panel", () => {
   });
 
   describe("aiming for", () => {
-    const aimBoard = async (fields: Partial<TaskRow> = {}, user = ADMIN, extra: ProjectStateDto["rows"] = []) => {
+    const aimBoard = async (fields: Partial<TaskRow> = {}, user = ADMIN, extra: ProjectStateDto["rows"] = [], links: Link[] = []) => {
       const rows = [
         ROWS[0]!,
         task("hooks", { parentId: "x", position: "a1", userStart: "2026-10-12", duration: 2, ...fields }),
@@ -480,7 +480,7 @@ describe("details panel", () => {
         task("undated", { parentId: "x", position: "a4", duration: 0 }),
         ...extra,
       ];
-      const app = await panelBoard(rows, user);
+      const app = await panelBoard(rows, user, [], links);
       await selectRow(app.user, "hooks");
       return app;
     };
@@ -510,6 +510,97 @@ describe("details panel", () => {
       await selectRow(user, "soon");
       await user.click(within(aimSection()).getByRole("button", { name: "Add link" }));
       expect(within(newLinkWhen()).getAllByRole<HTMLOptionElement>("option").map((option) => option.value)).not.toContain("aims for");
+    });
+
+    describe("from the milestone's side", () => {
+      const linkLines = () => within(aimSection()).getAllByRole("listitem");
+      const whenOf = (line: HTMLElement) => within(line).getAllByRole("combobox")[0]!;
+
+      it("lists what aims for it as aimed by, with how each stands, not subtasks that only inherit", async () => {
+        const { user } = await aimBoard({ targetId: "soon", duration: 5 }, ADMIN, [
+          task("aimer", { parentId: "x", position: "a5", userStart: "2026-10-12", duration: 1, targetId: "soon" }),
+          task("other", { parentId: "x", position: "a6", userStart: "2026-10-12", duration: 1, targetId: "later" }),
+          task("kid", { parentId: "aimer", position: "a0", userStart: "2026-10-12", duration: 1 }),
+        ]);
+        await selectRow(user, "soon");
+        const lines = linkLines();
+        expect(lines).toHaveLength(2);
+        expect(whenOf(lines[0]!)).toHaveValue("aimed by");
+        expect(within(lines[0]!).getByRole("button", { name: /hooks: change the task/ })).toBeInTheDocument();
+        expect(within(lines[0]!).getByText(/2 days late/)).toBeInTheDocument();
+        expect(within(lines[1]!).getByRole("button", { name: /aimer: change the task/ })).toBeInTheDocument();
+      });
+
+      it("+ Add link offers aimed by, not aims for, and picking a task aims it here", async () => {
+        const { user } = await aimBoard();
+        await selectRow(user, "soon");
+        await user.click(within(aimSection()).getByRole("button", { name: "Add link" }));
+        const options = within(newLinkWhen()).getAllByRole<HTMLOptionElement>("option").map((option) => option.value);
+        expect(options[0]).toBe("aimed by");
+        expect(options).not.toContain("aims for");
+        await user.selectOptions(newLinkWhen(), "aimed by");
+        const search = await screen.findByRole("combobox", { name: "Find a task to aim here" });
+        await user.type(search, "hooks{Enter}");
+        expect(lastCommand()).toEqual({ type: "setTarget", id: "hooks", targetId: "soon" });
+      });
+
+      it("offers tasks only: no milestones, sections, or what already aims here", async () => {
+        const { user } = await aimBoard({ targetId: "soon" }, ADMIN, [task("free", { parentId: "x", position: "a5", userStart: "2026-10-12" })]);
+        await selectRow(user, "soon");
+        await user.click(within(aimSection()).getByRole("button", { name: "Add link" }));
+        await user.selectOptions(newLinkWhen(), "aimed by");
+        const search = await screen.findByRole("combobox", { name: "Find a task to aim here" });
+        expect(search).toBeInTheDocument();
+        const offered = screen.getAllByRole("option").filter((option) => /#\d+ /.test(option.textContent ?? "")).map((option) => option.textContent);
+        expect(offered).toHaveLength(1);
+        expect(offered[0]).toMatch(/free/);
+      });
+
+      it("× stops that task aiming here", async () => {
+        const { user } = await aimBoard({ targetId: "soon" });
+        await selectRow(user, "soon");
+        await user.click(within(aimSection()).getByRole("button", { name: "Stop “hooks” aiming here" }));
+        expect(lastCommand()).toEqual({ type: "setTarget", id: "hooks", targetId: null });
+      });
+
+      it("changing the task moves the aim to the new one", async () => {
+        const { user } = await aimBoard({ targetId: "soon" }, ADMIN, [task("free", { parentId: "x", position: "a5", userStart: "2026-10-12" })]);
+        await selectRow(user, "soon");
+        await user.click(within(aimSection()).getByRole("button", { name: /hooks: change the task/ }));
+        await user.type(await screen.findByRole("combobox", { name: "Find a task to aim here" }), "free{Enter}");
+        expect(sentCommands().slice(-2)).toEqual([
+          { type: "setTarget", id: "hooks", targetId: null },
+          { type: "setTarget", id: "free", targetId: "soon" },
+        ]);
+      });
+
+      it("the first dropdown turns it into a link, and a link with a task into aimed by", async () => {
+        const { user } = await aimBoard({}, ADMIN, [task("ui", { parentId: "x", position: "a5", userStart: "2026-10-12", duration: 1 })], [{ predecessorId: "ui", followerId: "soon", kind: "FS", lag: 0 }]);
+        await selectRow(user, "soon");
+        const linkLine = linkLines().find((line) => within(line).queryByRole("button", { name: /ui: change the task/ }))!;
+        await user.selectOptions(whenOf(linkLine), "aimed by");
+        expect(sentCommands().slice(-2)).toEqual([
+          { type: "removeLink", predecessorId: "ui", followerId: "soon", kind: "FS", keepPlace: false },
+          { type: "setTarget", id: "ui", targetId: "soon" },
+        ]);
+      });
+
+      it("the aimed-by line turns into a link", async () => {
+        const { user } = await aimBoard({ targetId: "soon" });
+        await selectRow(user, "soon");
+        await user.selectOptions(whenOf(linkLines()[0]!), "starts after");
+        expect(sentCommands().slice(-2)).toEqual([
+          { type: "setTarget", id: "hooks", targetId: null },
+          { type: "addLink", predecessorId: "hooks", followerId: "soon", kind: "FS" },
+        ]);
+      });
+
+      it("viewers read the lines", async () => {
+        const { user } = await aimBoard({ targetId: "soon" }, VIEWER);
+        await selectRow(user, "soon");
+        expect(linkLines()[0]).toHaveTextContent(/^aimed by #\d+ hooks/);
+        expect(within(aimSection()).queryByRole("combobox")).not.toBeInTheDocument();
+      });
     });
 
     it("lists as the first line, with how it stands under it, ahead of the links", async () => {

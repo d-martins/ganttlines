@@ -9,6 +9,8 @@ import { useFloatingList } from "./suggestion-list";
 
 /** The word for aiming on a link line, beside "starts after" and the rest. */
 export const AIMS_FOR = "aims for";
+/** The same, read from the milestone. */
+export const AIMED_BY = "aimed by";
 
 type Choice = { kind: "milestone"; id: RowId; title: string; day: number | null } | { kind: "create"; title: string };
 
@@ -22,7 +24,7 @@ interface AimProps {
 }
 
 /** How the task stands against the milestone: "2 days late: finishes …", "3 days to spare", "No date yet". */
-function standing({ task, calendar, schedule }: Pick<AimProps, "task" | "calendar" | "schedule">, targetId: RowId): { text: string; late: boolean } | null {
+export function standing({ task, calendar, schedule }: Pick<AimProps, "task" | "calendar" | "schedule">, targetId: RowId): { text: string; late: boolean } | null {
   const mine = schedule?.get(task.id)?.span;
   const theirs = schedule?.get(targetId)?.span;
   if (!theirs) return { text: "No date yet", late: false };
