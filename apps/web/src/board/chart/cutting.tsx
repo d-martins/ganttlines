@@ -17,7 +17,8 @@ export function clampCut(at: HalfDay, parts: readonly Span[]): HalfDay {
   const clamped = Math.min(Math.max(at, first + 1), last);
   if (parts.some((part) => spanStart(part) <= clamped && clamped <= spanEnd(part))) return clamped;
   // In a gap: whichever side is closer.
-  const before = Math.max(...parts.filter((part) => spanEnd(part) < clamped).map(spanEnd));
+  // Not the task's very first half: nothing would have been done before it.
+  const before = Math.max(...parts.filter((part) => spanEnd(part) < clamped && spanEnd(part) > first).map(spanEnd));
   const after = Math.min(...parts.filter((part) => spanStart(part) > clamped).map(spanStart));
   return clamped - before <= after - clamped ? before : after;
 }

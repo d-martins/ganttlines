@@ -63,6 +63,9 @@ function towardsMilestones(state: ProjectState, milestones: ReadonlySet<RowId>):
   // Bounded by `found`: each row is walked once, so a loop can't run forever.
   while (waiting.length > 0) {
     const id = waiting.pop()!;
+    // What interrupts a task can make it miss, as much as what feeds it.
+    const waitingRow = state.rows[id];
+    if (waitingRow?.kind === "task") for (const by of waitingRow.interruptedBy ?? []) if (state.rows[by]) add(by);
     // A link into a parent holds back everything under it, too.
     let steps = rows.length;
     for (let up: Readonly<Row> | undefined = state.rows[id]; up && steps > 0; up = up.parentId === null ? undefined : state.rows[up.parentId], steps--) {

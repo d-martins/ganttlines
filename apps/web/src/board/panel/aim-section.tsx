@@ -163,6 +163,7 @@ export function AimLine({
   onCreated,
   onGo,
   whenSelect,
+  onStopped,
   ...props
 }: AimProps & {
   canEdit: boolean;
@@ -172,9 +173,19 @@ export function AimLine({
   onCreated: (id: RowId) => void;
   onGo: (id: RowId) => void;
   whenSelect: ReactNode;
+  /** the × was pressed, and this line is going: where the keyboard goes next is the caller's */
+  onStopped: () => void;
 }) {
   const { task, state, schedule, numbers, run } = props;
   const [changing, setChanging] = useState(false);
+  const [refocus, setRefocus] = useState(false);
+  const changeButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!refocus) return;
+    setRefocus(false);
+    // A milestone just made here: its date has the focus.
+    if (correcting === null) changeButton.current?.focus();
+  }, [refocus]);
   const targetId = effectiveTarget(state, task);
   const target = targetId === null ? undefined : state.rows[targetId];
   if (targetId === null || !target) return null;
@@ -190,9 +201,17 @@ export function AimLine({
         <div className="flex min-w-0 items-center gap-1">
           {whenSelect}
           {changing ? (
-            <AimPicker {...props} onDone={() => setChanging(false)} onCreated={onCreated} />
+            <AimPicker
+              {...props}
+              onDone={() => {
+                setChanging(false);
+                setRefocus(true);
+              }}
+              onCreated={onCreated}
+            />
           ) : (
             <button
+              ref={changeButton}
               type="button"
               aria-label={`Aims for ${name}: change the milestone`}
               title={name}
@@ -203,7 +222,7 @@ export function AimLine({
               <ChevronDown aria-hidden size={13} className="ml-auto shrink-0 text-muted" />
             </button>
           )}
-          <IconButton label={`Stop aiming for “${target.title}”`} onClick={() => run({ type: "setTarget", id: task.id, targetId: null })} className="shrink-0">
+          <IconButton label={`Stop aiming for “${target.title}”`} onClick={() => run({ type: "setTarget", id: task.id, targetId: null }) !== null && onStopped()} className="shrink-0">
             <X size={14} />
           </IconButton>
         </div>

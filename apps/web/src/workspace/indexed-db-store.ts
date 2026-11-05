@@ -5,6 +5,8 @@ const PROJECTS = "projects";
 /**
  * 2: projects keep their links as records of their own (version 1 kept one predecessor on each task).
  * 3: tasks have tags and sections a description.
+ * 4: tasks can aim for a milestone.
+ * 5: tasks can have interruptions.
  */
 const VERSION = 5;
 

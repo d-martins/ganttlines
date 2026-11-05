@@ -40,6 +40,7 @@ export function restoredRow(snapshot: unknown): Row {
   const row: Record<string, unknown> = { ...(snapshot as Record<string, unknown>) };
   for (const field of DROPPED_FIELDS) delete row[field];
   if (row["kind"] === "task") {
+    row["targetId"] ??= null;
     row["breaks"] ??= [];
     row["interruptedBy"] ??= [];
   }

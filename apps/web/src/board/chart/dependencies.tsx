@@ -7,6 +7,10 @@ import { useHoveredRow } from "./drag";
 import type { Timeline } from "./timeline";
 
 const STUB = 8;
+const NOT_CRITICAL: ReadonlySet<string> = new Set();
+
+export const dependencyColor = ({ violation, critical, fromBaseline }: { violation: boolean; critical: boolean; fromBaseline: boolean }) =>
+  violation ? "var(--violation)" : critical && !fromBaseline ? "var(--slack-zero)" : "var(--dependency)";
 
 /**
  * Path from a predecessor to its successor: down (or up) out of the predecessor's bottom (or top)
@@ -67,7 +71,9 @@ export function Dependencies({
   style: BarStyle;
 }) {
   const rowHeight = ROW_HEIGHT[style];
-  const critical = useCriticalLinks();
+  const liveCritical = useCriticalLinks();
+  // On a baseline's dates: how things stand today says nothing about those.
+  const critical = rows.some((entry) => entry.fromBaseline) ? NOT_CRITICAL : liveCritical;
   const index = new Map(rows.map((entry, i) => [entry.row.id, i]));
   const hovered = useHoveredRow((store) => store.id);
   const interruptions: { key: string; d: string }[] = [];
@@ -136,7 +142,7 @@ export function Dependencies({
           data-critical={critical.has(path.key) || undefined}
           d={path.d}
           fill="none"
-          stroke={path.violation ? "var(--violation)" : critical.has(path.key) ? "var(--slack-zero)" : "var(--dependency)"}
+          stroke={dependencyColor({ violation: path.violation, critical: critical.has(path.key), fromBaseline: false })}
           strokeWidth={1.25}
           markerEnd={`url(#${path.violation ? "dep-arrow-violation" : critical.has(path.key) ? "dep-arrow-critical" : "dep-arrow"})`}
         />

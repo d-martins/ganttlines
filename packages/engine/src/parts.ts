@@ -18,6 +18,18 @@ export function workBefore(parts: readonly Span[], half: HalfDay, calendar: Cale
   return work;
 }
 
+/** Working half days from `from` up to, not including, `to` that aren't taken by `busy`. */
+export function freeHalves(calendar: Calendar, from: HalfDay, to: HalfDay, busy: readonly Span[], resourceId: ResourceId | null): number {
+  const ranges = mergedRanges(busy);
+  let free = 0;
+  let range = 0;
+  for (let half = calendar.snapHalf(from, resourceId); half < to; half = calendar.nextHalfAfter(half, resourceId)) {
+    while (ranges[range] && ranges[range]!.to < half) range++;
+    if (!ranges[range] || ranges[range]!.from > half) free++;
+  }
+  return free;
+}
+
 /** Where each of a task's stored pauses sits: the half worked before it and the half work picks up again. */
 export function pausesOf(task: Pick<TaskRow, "breaks" | "resourceId">, parts: readonly Span[], calendar: Calendar): { after: number; lastWorked: HalfDay; resume: HalfDay }[] {
   const pauses: { after: number; lastWorked: HalfDay; resume: HalfDay }[] = [];

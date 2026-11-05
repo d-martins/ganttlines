@@ -221,7 +221,8 @@ export function Board({
       if (!(event.ctrlKey || event.metaKey) || event.deltaY === 0) return;
       const { timeline: current, dayWidth: width, listWidth: list } = wheelState.current;
       const body = element.querySelector("[data-chart-body]");
-      if (!body || !(event.target instanceof Node) || !body.contains(event.target)) return;
+      // Anywhere on the board: the chart zooms, around the pointer or the nearest of it, and never the page.
+      if (!body) return;
       event.preventDefault();
       if (event.timeStamp - total.at > 150) total.sum = 0;
       total.at = event.timeStamp;

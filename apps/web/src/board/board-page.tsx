@@ -173,6 +173,8 @@ function LiveBoard({ sync, share }: { sync: BoardSync; share: ShareAccess | null
       if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "z" || !canEdit) return;
       const target = event.target as HTMLElement | null;
       if (target && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))) return;
+      // A menu is asking something: undoing underneath it would change what it's about.
+      if (document.querySelector('[role="menu"]')) return;
       event.preventDefault();
       sync.requestHistory(event.shiftKey ? "redo" : "undo");
     };
