@@ -94,11 +94,14 @@ export function describeChange(change: Change | LinkKindChange, names: Names, ro
     case "interruptedBy": {
       const [was, now] = [(before as string[] | undefined) ?? [], (after as string[] | undefined) ?? []];
       const added = now.find((id) => !was.includes(id));
-      if (added) return `made ${quote(names.state.rows[added]?.title)} interrupt it`;
-      return `stopped ${quote(names.state.rows[was.find((id) => !now.includes(id)) ?? ""]?.title)} interrupting it`;
+      const named = (id: string | undefined) => (id !== undefined && names.state.rows[id] ? quote(names.state.rows[id]!.title) : "a task since deleted");
+      if (added) return `made ${named(added)} interrupt it`;
+      return `stopped ${named(was.find((id) => !now.includes(id)))} interrupting it`;
     }
-    case "targetId":
-      return typeof after === "string" ? `aimed it for ${quote(names.state.rows[after]?.title)}` : `stopped aiming it for ${quote(typeof before === "string" ? names.state.rows[before]?.title : "")}`;
+    case "targetId": {
+      const named = (id: unknown) => (typeof id === "string" && names.state.rows[id] ? quote(names.state.rows[id]!.title) : "a milestone since deleted");
+      return typeof after === "string" ? `aimed it for ${named(after)}` : `stopped aiming it for ${named(before)}`;
+    }
     default:
       return `changed ${field}`;
   }

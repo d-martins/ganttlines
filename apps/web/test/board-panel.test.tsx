@@ -829,6 +829,24 @@ describe("details panel", () => {
       expect(within(lines[0]!).getByText(/2 days late/)).toBeInTheDocument();
     });
 
+    it("keeps the keyboard's place: after picking on the line, and after ×", async () => {
+      const { user } = await aimBoard({ targetId: "later" });
+      await user.click(within(aimSection()).getByRole("button", { name: /change the milestone/ }));
+      await user.keyboard("{ArrowDown}{Enter}");
+      await waitFor(() => expect(within(aimSection()).getByRole("button", { name: /change the milestone/ })).toHaveFocus());
+      await user.click(within(aimSection()).getByRole("button", { name: /^Stop aiming/ }));
+      await waitFor(() => expect(within(aimSection()).getByRole("button", { name: "Add link" })).toHaveFocus());
+    });
+
+    it("from + Add link, focus lands on the new line", async () => {
+      const { user } = await aimBoard();
+      await user.click(within(aimSection()).getByRole("button", { name: "Add link" }));
+      await user.keyboard("{Escape}");
+      await user.selectOptions(newLinkWhen(), "aims for");
+      await user.keyboard("{ArrowDown}{Enter}");
+      await waitFor(() => expect(within(aimSection()).getByRole("combobox", { name: /^Aims for/ })).toHaveFocus());
+    });
+
     it("changing an aim leaves Critical path as it is", async () => {
       useCriticalPathView.setState({ on: { [PROJECT_ID]: false }, defaults: {} });
       try {
@@ -1343,6 +1361,8 @@ describe("history wording", () => {
     expect(describeEntry(entry("resizeBreak", [{ field: "breaks", before: [{ after: 2, length: 4 }], after: [{ after: 2, length: 2 }] }]), names, "t")).toBe("changed an interruption");
     expect(describeEntry(entry("addInterruption", [{ field: "interruptedBy", before: [], after: ["p"] }]), names, "t")).toBe("made “Design” interrupt it");
     expect(describeEntry(entry("removeInterruption", [{ field: "interruptedBy", before: ["p"], after: [] }]), names, "t")).toBe("stopped “Design” interrupting it");
+    expect(describeEntry(entry("setTarget", [{ field: "targetId", before: "gone", after: null }]), names, "t")).toBe("stopped aiming it for a milestone since deleted");
+    expect(describeEntry(entry("removeInterruption", [{ field: "interruptedBy", before: ["gone"], after: [] }]), names, "t")).toBe("stopped a task since deleted interrupting it");
     expect(describeEntry(entry("setTarget", [{ field: "targetId", before: null, after: "p" }]), names, "t")).toBe("aimed it for “Design”");
     expect(describeEntry(entry("setTarget", [{ field: "targetId", before: "p", after: null }]), names, "t")).toBe("stopped aiming it for “Design”");
   });

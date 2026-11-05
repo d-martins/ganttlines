@@ -195,6 +195,11 @@ describe("board", () => {
     const chart = document.querySelector("[data-chart-body]")!;
     fireEvent.wheel(chart, { deltaY: -100, ctrlKey: true });
     expect(barWidth(hooks)).toBe(4 * 16);
+    // Over the task list it zooms the chart too, never the page.
+    expect(fireEvent.wheel(screen.getByRole("treegrid", { name: "Tasks" }), { deltaY: 100, ctrlKey: true })).toBe(false);
+    expect(barWidth(hooks)).toBe(4 * 12);
+    fireEvent.wheel(chart, { deltaY: -100, ctrlKey: true });
+    expect(barWidth(hooks)).toBe(4 * 16);
     fireEvent.wheel(chart, { deltaY: 100 }); // without Ctrl it just scrolls
     expect(barWidth(hooks)).toBe(4 * 16);
     expect(localStorage.getItem("gp.dayWidth")).toBe("16");

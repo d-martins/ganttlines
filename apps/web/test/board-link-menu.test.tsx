@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Calendar, type ProjectState } from "@ganttlines/engine";
 import { useChartDrag } from "../src/board/chart/drag";
 import { optionsFor } from "../src/board/chart/link-choice";
-import { task } from "./board-fixtures";
+import { FakeWebSocket, task } from "./board-fixtures";
 import { board, sentCommands } from "./chart-board";
 import { screen, VIEWER } from "./utils";
 
@@ -164,6 +164,15 @@ describe("the one handle and the menu", () => {
     await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
     expect(useChartDrag.getState().drag).toBeNull();
     expect(sentCommands()).toEqual([]);
+  });
+
+  it("Cmd+Z does nothing while it's open", async () => {
+    await board([hotfix(), login()]);
+    dropOn("Hotfix", 1);
+    await screen.findByRole("menu");
+    const sent = FakeWebSocket.last.sent.length;
+    fireEvent.keyDown(window, { key: "z", metaKey: true });
+    expect(FakeWebSocket.last.sent).toHaveLength(sent);
   });
 
   it("the arrow keys show it too", async () => {

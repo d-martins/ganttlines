@@ -125,16 +125,16 @@ describe("sidebar and top bar", () => {
     expect(document.documentElement.dataset["theme"]).toBe("dark");
   });
 
-  it("cycles the theme from the top bar: match my system, light, dark", async () => {
+  it("cycles the theme from the top bar: match my system, dark, light", async () => {
     signedIn(ADMIN, [project("p1", "Launch")]);
     useTheme.getState().setPreference("system"); // the system is light here
     const { user } = renderApp("/p/p1");
-    await user.click(await screen.findByRole("button", { name: "Theme: matching your system. Switch to light" }));
-    expect(useTheme.getState().preference).toBe("light");
-    await user.click(screen.getByRole("button", { name: "Theme: light. Switch to dark" }));
+    await user.click(await screen.findByRole("button", { name: "Theme: matching your system. Switch to dark" }));
     expect(useTheme.getState().preference).toBe("dark");
     expect(document.documentElement.dataset["theme"]).toBe("dark");
-    await user.click(screen.getByRole("button", { name: "Theme: dark. Switch to matching your system" }));
+    await user.click(screen.getByRole("button", { name: "Theme: dark. Switch to light" }));
+    expect(useTheme.getState().preference).toBe("light");
+    await user.click(screen.getByRole("button", { name: "Theme: light. Switch to matching your system" }));
     expect(useTheme.getState().preference).toBe("system");
     expect(document.documentElement.dataset["theme"]).toBe("light");
     await user.click(screen.getByRole("button", { name: "Account menu" }));

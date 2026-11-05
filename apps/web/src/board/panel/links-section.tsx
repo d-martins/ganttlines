@@ -146,6 +146,8 @@ export function LinksSection({
   // A milestone just created from here: its date is ready to correct.
   const [correcting, setCorrecting] = useState<RowId | null>(null);
   const [focus, setFocus] = useState<FocusRequest | null>(null);
+  // An aim just picked from the new line: the keyboard stays with it.
+  const [focusAim, setFocusAim] = useState(false);
   // After ×, the line that took the removed one's place (or Add link, when none is left) gets focus.
   const [focusAfterRemove, setFocusAfterRemove] = useState<{ index: number; before: number } | null>(null);
   const container = useRef<HTMLDivElement>(null);
@@ -184,6 +186,13 @@ export function LinksSection({
       isAncestor(state, row.id, task.id) ||
       isAncestor(state, task.id, row.id) ||
       state.links[linkKey({ ...between(row.id, thisWaits), kind })] !== undefined;
+
+  useEffect(() => {
+    if (!focusAim) return;
+    setFocusAim(false);
+    // A milestone just made here: its date has the focus.
+    if (correcting === null) aimWhen.current?.focus();
+  }, [focusAim]);
 
   useEffect(() => {
     // Once the removed line is gone.
@@ -305,6 +314,7 @@ export function LinksSection({
       onCorrected={() => setCorrecting(null)}
       onCreated={setCorrecting}
       onGo={select}
+      onStopped={() => addButton.current?.focus()}
       whenSelect={
         <WordSelect<WhenOrAim>
           value={AIMS_FOR}
@@ -488,7 +498,10 @@ export function LinksSection({
               />
               <AimPicker
                 {...aimProps}
-                onDone={() => setDraft(null)}
+                onDone={() => {
+                  setDraft(null);
+                  setFocusAim(true);
+                }}
                 onCreated={setCorrecting}
               />
               <IconButton label="Discard the new link" onClick={() => { setDraft(null); addButton.current?.focus(); }} className="shrink-0">
