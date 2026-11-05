@@ -1,3 +1,4 @@
+import { InterruptionsSection } from "./interruptions-section";
 import { buildTree, childrenOf, computeSchedule, CycleError, fromDay, isParentTask, TASK_COLORS, type Row, type RowId, type Schedule, type TaskRow } from "@ganttlines/engine";
 import { COMMAND_LIMITS } from "@ganttlines/protocol/constants";
 import { useQuery } from "@tanstack/react-query";
@@ -240,6 +241,11 @@ export function DetailsPanel({ numbers, filtering }: { numbers: ReadonlyMap<RowI
       {row.kind === "task" ? (
         <Section title="Tags">
           <TagsSection key={row.id} task={row} />
+        </Section>
+      ) : null}
+      {row.kind === "task" && !isParent && row.duration !== 0 ? (
+        <Section title="Interruptions">
+          <InterruptionsSection key={row.id} task={row} schedule={schedule} calendar={calendar} canEdit={board.canEdit} run={run} />
         </Section>
       ) : null}
       {row.kind === "task" ? (

@@ -87,6 +87,16 @@ export function describeChange(change: Change | LinkKindChange, names: Names, ro
       return null;
     case "tags":
       return describeTags(before, after);
+    case "breaks": {
+      const [was, now] = [(before as unknown[] | undefined)?.length ?? 0, (after as unknown[] | undefined)?.length ?? 0];
+      return now > was ? "added an interruption" : now < was ? "removed an interruption" : "changed an interruption";
+    }
+    case "interruptedBy": {
+      const [was, now] = [(before as string[] | undefined) ?? [], (after as string[] | undefined) ?? []];
+      const added = now.find((id) => !was.includes(id));
+      if (added) return `made ${quote(names.state.rows[added]?.title)} interrupt it`;
+      return `stopped ${quote(names.state.rows[was.find((id) => !now.includes(id)) ?? ""]?.title)} interrupting it`;
+    }
     case "targetId":
       return typeof after === "string" ? `aimed it for ${quote(names.state.rows[after]?.title)}` : `stopped aiming it for ${quote(typeof before === "string" ? names.state.rows[before]?.title : "")}`;
     default:
