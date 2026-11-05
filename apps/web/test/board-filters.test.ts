@@ -316,6 +316,19 @@ describe("filtering by milestone", () => {
     expect(matched(["m"], { people: ["rui"] })).toEqual(["own"]);
   });
 
+  it("takes in what interrupts a matching task", () => {
+    const interrupted: ProjectState = {
+      rows: {
+        a: task("a", { position: "a0", userStart: "2026-10-12", targetId: "m", interruptedBy: ["hotfix"] }),
+        hotfix: task("hotfix", { position: "a1", userStart: "2026-10-13" }),
+        other: task("other", { position: "a2", userStart: "2026-10-13" }),
+        m: task("m", { position: "a3", userStart: "2026-10-20", duration: 0 }),
+      },
+      links: {},
+    };
+    expect([...filterRows(interrupted, { ...NO_FILTERS, milestones: ["m"] }, new Set())!.matches].sort()).toEqual(["a", "hotfix", "m"]);
+  });
+
   it("an id that's gone or no longer a milestone drops out, and the board isn't emptied", () => {
     expect(knownFilters(plan, { ...NO_FILTERS, milestones: ["gone", "plain", "p", "m"] }).milestones).toEqual(["m"]);
     expect(filterRows(plan, { ...NO_FILTERS, milestones: ["gone", "plain"] })).toBeNull();

@@ -23,7 +23,7 @@ import {
   type Schedule,
   type Span,
 } from "./schedule";
-import { clearLostInterruptions, partsOf, workBefore } from "./parts";
+import { clearLostInterruptions, freeHalves, partsOf, visibleParts, workBefore } from "./parts";
 import { buildTree, childrenOf, clearLostTargets, descendantLeafTasks, isAncestor, isParentTask, subtreeIds, type Tree } from "./tree";
 
 export type DayHalf = "morning" | "afternoon";
@@ -354,7 +354,7 @@ class Execution {
     if (!span) throw new Rejection("unscheduled", "This task has no dates");
     const resource = task.resourceId;
     const parts = partsOf(this.computed(id));
-    if (parts.length > 1) return this.resizeParts(task, parts, edge, at);
+    if (parts.length > 1 || (task.interruptedBy ?? []).length > 0) return this.resizeParts(task, parts, edge, at);
     if (edge === "end") {
       const end = this.calendar.snapHalfBack(at, resource);
       return this.patch(task, { duration: this.validDuration(this.durationBetween(spanStart(span), end, resource)) });
@@ -368,14 +368,21 @@ class Execution {
   /** The end edge changes the last part, the start edge the first, down to half a day; gaps and other parts stay. */
   private resizeParts(task: TaskRow, parts: readonly Span[], edge: "start" | "end", at: HalfDay): ProjectState {
     const resource = task.resourceId;
+    // Days someone else is on it aren't work added: only free ones count.
+    const busy = (task.interruptedBy ?? []).flatMap((id) => {
+      const by = this.rows[id];
+      return by?.kind === "task" ? visibleParts(partsOf(this.computed(id)), this.calendar, by.resourceId) : [];
+    });
     if (edge === "end") {
       const last = parts.at(-1)!;
       const end = Math.max(this.calendar.snapHalfBack(at, resource), spanStart(last));
-      return this.patch(task, { duration: this.validDuration(task.duration + this.calendar.workingHalvesBetween(spanEnd(last), end, resource) / 2) });
+      const grown = end > spanEnd(last) ? freeHalves(this.calendar, spanEnd(last) + 1, end + 1, busy, resource) : this.calendar.workingHalvesBetween(spanEnd(last), end, resource);
+      return this.patch(task, { duration: this.validDuration(task.duration + grown / 2) });
     }
     const first = parts[0]!;
     const placement = this.placeLeaf(task, Math.min(at, spanEnd(first)), { keepFinish: true });
-    const grown = this.calendar.workingHalvesBetween(halfDay(toDay(placement.userStart), placement.startsAfternoon), spanStart(first), resource);
+    const start = halfDay(toDay(placement.userStart), placement.startsAfternoon);
+    const grown = start < spanStart(first) ? freeHalves(this.calendar, start, spanStart(first), busy, resource) : this.calendar.workingHalvesBetween(start, spanStart(first), resource);
     if (grown === 0) return this.result();
     return this.patch(task, {
       ...placement,

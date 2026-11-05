@@ -1,4 +1,4 @@
-import { dayOf, fromDay, partsOf, pausesOf, toDay, type Calendar, type Command, type Schedule, type TaskRow } from "@ganttlines/engine";
+import { dayOf, fromDay, isAfternoon, partsOf, pausesOf, toDay, type Calendar, type Command, type HalfDay, type Schedule, type TaskRow } from "@ganttlines/engine";
 import { Plus, X } from "lucide-react";
 import { useState } from "react";
 import { IconButton } from "../../ui/button";
@@ -11,6 +11,9 @@ interface Stored {
   after: number;
   from: string;
   to: string;
+  /** the half work stopped in, and where it picks up, for an end the panel's whole days leave alone */
+  startsAfternoon: boolean;
+  resume: HalfDay;
 }
 
 /** One interruption's dates: Save appears once there's something to save. */
@@ -47,8 +50,21 @@ export function InterruptionsSection({ task, schedule, calendar, canEdit, run }:
     after,
     from: fromDay(dayOf(calendar.nextHalfAfter(lastWorked, resource))),
     to: fromDay(dayOf(calendar.snapHalfBack(resume - 1, resource))),
+    startsAfternoon: isAfternoon(calendar.nextHalfAfter(lastWorked, resource)),
+    resume,
   }));
-  const addition = (from: string, to: string) => ({ type: "addBreak" as const, id: task.id, from, resume: fromDay(calendar.nextAfter(toDay(to), resource)) });
+  const addition = (from: string, to: string, was?: Stored) => {
+    const keepsEnd = was?.to === to;
+    const resume = keepsEnd ? fromDay(dayOf(was!.resume)) : fromDay(calendar.nextAfter(toDay(to), resource));
+    return {
+      type: "addBreak" as const,
+      id: task.id,
+      from,
+      ...(was?.from === from && was.startsAfternoon ? { fromHalf: "afternoon" as const } : {}),
+      resume,
+      ...(keepsEnd && isAfternoon(was!.resume) ? { resumeHalf: "afternoon" as const } : {}),
+    };
+  };
   const finish = computed?.span ? formatDay(computed.span.end) : null;
   const note = finish ? `Still ${formatDays(task.duration)} ${task.duration === 1 ? "day" : "days"} of work. Now finishes ${finish}.` : null;
   if (!canEdit) {
@@ -75,7 +91,7 @@ export function InterruptionsSection({ task, schedule, calendar, canEdit, run }:
               label={` ${line.from}`}
               canEdit
               note={note}
-              onSave={(from, to) => run({ type: "relink", steps: [{ type: "removeBreak", id: task.id, after: line.after }, addition(from, to)] }) !== null}
+              onSave={(from, to) => run({ type: "relink", steps: [{ type: "removeBreak", id: task.id, after: line.after }, addition(from, to, line)] }) !== null}
               onRemove={() => run({ type: "removeBreak", id: task.id, after: line.after })}
             />
           ))}

@@ -39,22 +39,26 @@ export function useBoard(): BoardContextValue {
 export function runCommand(board: Pick<BoardContextValue, "sync" | "calendar" | "canEdit">, command: Command): ProjectState | null {
   if (!board.canEdit) return null;
   const { confirmed, pending } = board.sync.state;
-  const result = applyCommand(replay(confirmed, pending, board.calendar), board.calendar, command);
+  const before = replay(confirmed, pending, board.calendar);
+  const result = applyCommand(before, board.calendar, command);
   if (!result.ok) {
     toast(result.message, { tone: "error" });
     return null;
   }
   board.sync.submit(command);
   // Your own new aim is what you'd want to see the effect of; someone else's doesn't change your view.
-  if (startsAnAim(command)) {
+  if (startsAnAim(before, command)) {
     useCriticalPathView.getState().set(board.sync.projectId, true);
   }
   return result.state;
 }
 
-function startsAnAim(command: Command): boolean {
-  if (command.type === "relink") return command.steps.some(startsAnAim);
-  return command.type === "createTargetMilestone" || (command.type === "setTarget" && command.targetId !== null);
+/** A task that wasn't aiming for anything now is: changing what it aims for doesn't count. */
+function startsAnAim(state: ProjectState, command: Command): boolean {
+  if (command.type === "relink") return command.steps.some((step) => startsAnAim(state, step));
+  if (command.type !== "createTargetMilestone" && (command.type !== "setTarget" || command.targetId === null)) return false;
+  const row = state.rows[command.id];
+  return row?.kind === "task" && (row.targetId ?? null) === null;
 }
 
 export function useRun(): (command: Command) => ProjectState | null {

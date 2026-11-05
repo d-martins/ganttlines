@@ -74,6 +74,24 @@ describe("bars in parts", () => {
     expect(screen.queryByTestId("actual-under")).not.toBeInTheDocument();
   });
 
+  it("a bar split only by a holiday draws an overrun after its last part", async () => {
+    await board([task("t", { userStart: "2026-10-02", duration: 2, actualDuration: 3 })]); // Oct 5 is a holiday
+    expect(parts()).toHaveLength(2);
+    expect(left(screen.getByTestId("actual-over"))).toBeGreaterThan(left(parts()[1]!));
+  });
+
+  it("a bar split only by a holiday doesn't dim across its gap", async () => {
+    await board([task("t", { userStart: "2026-10-02", duration: 2, actualDuration: 1 })]);
+    expect(parts()).toHaveLength(2);
+    expect(screen.queryByTestId("actual-under")).not.toBeInTheDocument();
+  });
+
+  it("critical arrows don't show on a baseline's dates", async () => {
+    const { dependencyColor } = await import("../src/board/chart/dependencies");
+    expect(dependencyColor({ violation: false, critical: true, fromBaseline: true })).toBe("var(--dependency)");
+    expect(dependencyColor({ violation: false, critical: true, fromBaseline: false })).toBe("var(--slack-zero)");
+  });
+
   it("gap edges have handles; holiday and interrupter gaps don't", async () => {
     await board([task("t", split)]);
     expect(screen.getAllByTestId("gap-edge")).toHaveLength(2);

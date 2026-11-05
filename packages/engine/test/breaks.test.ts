@@ -242,6 +242,34 @@ describe("resizeTask with parts", () => {
   });
 });
 
+describe("resizing around what interrupts it", () => {
+  // A on Monday and Tuesday; T placed on Tuesday, so it runs Wednesday and Thursday.
+  const covered = (fields: Partial<TaskRow> = {}) => project(task("a", { userStart: MON, duration: 2 }), task("t", { userStart: TUE, duration: 2, interruptedBy: ["a"], ...fields }));
+
+  it("a start edge dragged under the interrupter changes nothing", () => {
+    expect(applyCommand(covered(), cal, { type: "resizeTask", id: "t", edge: "start", date: TUE })).toMatchObject({ ok: true, changes: [] });
+    expect(applyCommand(covered(), cal, { type: "resizeTask", id: "t", edge: "start", date: MON })).toMatchObject({ ok: true, changes: [] });
+  });
+
+  it("a stored break doesn't move either", () => {
+    const state = covered({ breaks: [{ after: 2, length: 2 }] });
+    expect(applyCommand(state, cal, { type: "resizeTask", id: "t", edge: "start", date: TUE })).toMatchObject({ ok: true, changes: [] });
+  });
+
+  it("past the interrupter, only the free days count", () => {
+    const after = run(covered(), cal, { type: "resizeTask", id: "t", edge: "start", date: "2026-10-30" }); // the Friday before A
+    expect(taskIn(after, "t").duration).toBe(3);
+    expect(dates(after, "t")).toEqual([["2026-10-30", "2026-10-30"], [WED, THU]]);
+  });
+
+  it("an end edge dragged across it lands where the pointer is", () => {
+    const state = project(task("a", { userStart: WED, duration: 2 }), task("t", { userStart: MON, duration: 2, interruptedBy: ["a"] }));
+    const after = run(state, cal, { type: "resizeTask", id: "t", edge: "end", date: FRI });
+    expect(taskIn(after, "t").duration).toBe(3);
+    expect(dates(after, "t")).toEqual([[MON, TUE], [FRI, FRI]]);
+  });
+});
+
 describe("interruptions", () => {
   const pair = (a: Partial<TaskRow> = {}, b: Partial<TaskRow> = {}) => project(task("a", { userStart: TUE, duration: 3, ...a }), task("b", { userStart: MON, duration: 2, ...b }));
   const add: Command = { type: "addInterruption", id: "b", byId: "a" };

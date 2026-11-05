@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { baselineTasks } from "../src/baseline";
+import { restoredRow } from "../src/changes";
 import { applyCommand } from "../src/commands";
 import { fromDay, toDay } from "../src/date";
 import type { Row, RowId, ProjectState, TaskRow } from "../src/model";
@@ -207,6 +208,11 @@ describe("what reads parts", () => {
 
   it("layOutWork with nothing in the way is one part", () => {
     expect(layOutWork(cal, toDay(MON) * 2, 4, [], [], null)).toHaveLength(1);
+  });
+
+  it("a logged row from before aims came back with none", () => {
+    const { targetId: _t, ...old } = task("t");
+    expect(restoredRow(old)).toMatchObject({ targetId: null });
   });
 
   it("pausesOf says where each stored pause sits", () => {

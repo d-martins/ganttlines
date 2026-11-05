@@ -38,6 +38,14 @@ describe("clampCut", () => {
   });
 });
 
+describe("clampCut after a half-day first part", () => {
+  it("skips the task's first half, which has no work before it", () => {
+    const parts = [part(am(MON), am(MON)), part(am("2026-10-16"), pm("2026-10-16"))];
+    expect(clampCut(am("2026-01-01"), parts)).toBe(am("2026-10-16"));
+    expect(clampCut(pm(MON), parts)).toBe(am("2026-10-16"));
+  });
+});
+
 describe("resumeAt", () => {
   it("later than the cut, or nothing", () => {
     expect(resumeAt(am("2026-10-16"), am("2026-10-13"))).toBe(am("2026-10-16"));

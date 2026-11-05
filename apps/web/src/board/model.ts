@@ -144,7 +144,7 @@ export function boardModel(
     if (single && span && row.actualDuration !== null) {
       // The half days it really took, from where it starts.
       const versusPlan = row.actualDuration > row.duration ? "over" : row.actualDuration < row.duration ? "under" : "even";
-      const work = partsOf(computed);
+      const work = visibleParts(partsOf(computed), calendar, row.resourceId);
       let end = calendar.addWorkingHalves(spanStart(span), row.actualDuration * 2 - 1, row.resourceId);
       // Split: what it took beyond or short of the plan is measured from the end, in the last part. Short by more than that part shows nothing.
       if (work.length > 1) {
