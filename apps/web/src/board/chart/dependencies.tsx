@@ -79,11 +79,22 @@ export function Dependencies({
         const from = index.get(byId);
         const by = from === undefined ? undefined : rows[from];
         if (from === undefined || !by?.span) continue;
-        const start = extent(by.kind, by.span, timeline, style).left;
-        // To where the interrupted task stops for it: the end of its last part before that start.
-        const stops = entry.parts.map((part) => extent(entry.kind, part, timeline, style).right).filter((right) => right <= start);
         const y = (i: number) => i * rowHeight + rowHeight / 2;
-        interruptions.push({ key: `${byId}-${entry.row.id}`, d: `M${start},${y(from)} L${stops.at(-1) ?? extent(entry.kind, entry.span, timeline, style).left},${y(to)}` });
+        const direction = to >= from ? 1 : -1;
+        const top = y(from) + direction * halfHeight(shapeOf(by), style);
+        const bottom = y(to) - direction * halfHeight(shapeOf(entry), style);
+        const line = (x: number, end: string) => interruptions.push({ key: `${byId}-${entry.row.id}-${x}-${end}`, d: `M${x},${top} V${bottom}` });
+        const boxes = entry.parts.map((part) => extent(entry.kind, part, timeline, style));
+        // Down each edge of a gap to what's running in it: a pair for each part of the interrupting task.
+        boxes.slice(1).forEach((after, i) => {
+          const gap = { left: boxes[i]!.right, right: after.left };
+          for (const part of by.parts) {
+            const box = extent(by.kind, part, timeline, style);
+            if (box.right <= gap.left || box.left >= gap.right) continue;
+            line(Math.max(box.left, gap.left), "start");
+            line(Math.min(box.right, gap.right), "end");
+          }
+        });
       }
     });
   }

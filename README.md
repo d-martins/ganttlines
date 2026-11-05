@@ -82,7 +82,7 @@ later, so anything waiting on it moves too. There are three ways to make one:
   picks up. Esc cancels.
 - **From the details panel:** **Interruptions → + Add interruption**, with from and to dates.
 - **Have another task interrupt it:** drag from the handle at the end of a bar onto another task and choose
-  "interrupts". The second task stops wherever the first runs. Hover either one to see the line between them.
+  "interrupts". The second task stops wherever the first runs. Hover either one to see where one runs in the gap in the other.
 
 Dragging an edge beside a gap changes that gap and the part next to it. Dragged to the other side, it closes the gap
 and the task keeps that length. Links join whole tasks, never a part of one. Holidays and time off inside a bar show

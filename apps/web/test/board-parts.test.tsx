@@ -1,6 +1,6 @@
 import { fireEvent, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useChartDrag } from "../src/board/chart/drag";
+import { useChartDrag, useHoveredRow } from "../src/board/chart/drag";
 import { board, sentCommands } from "./chart-board";
 import { screen, VIEWER } from "./utils";
 import { task } from "./board-fixtures";
@@ -125,19 +125,48 @@ describe("bars in parts", () => {
     await waitFor(() => expect(sentCommands().at(-1)).toMatchObject({ type: "moveTask", id: "t", start: "2026-10-13" }));
   });
 
-  it("an interruption shows a dashed line only while either task is hovered", async () => {
+  it("an interruption shows dashed lines only while either task is hovered", async () => {
     await board([task("a", { userStart: "2026-10-13", duration: 3 }), task("b", { userStart: MON, duration: 2, interruptedBy: ["a"] }), task("other", { userStart: MON })]);
     const row = (index: number) => document.querySelector(`[data-row="${index}"]`)!;
     expect(screen.queryByTestId("interruption")).not.toBeInTheDocument();
     fireEvent.pointerEnter(row(0));
-    expect(await screen.findByTestId("interruption")).toHaveAttribute("stroke-dasharray");
+    expect((await screen.findAllByTestId("interruption"))[0]).toHaveAttribute("stroke-dasharray");
     fireEvent.pointerLeave(row(0));
     await waitFor(() => expect(screen.queryByTestId("interruption")).not.toBeInTheDocument());
     fireEvent.pointerEnter(row(1));
-    expect(await screen.findByTestId("interruption")).toBeInTheDocument();
+    expect(await screen.findAllByTestId("interruption")).toHaveLength(2);
     fireEvent.pointerLeave(row(1));
     fireEvent.pointerEnter(row(2));
     await waitFor(() => expect(screen.queryByTestId("interruption")).not.toBeInTheDocument());
+  });
+
+  const lineXs = () => screen.queryAllByTestId("interruption").map((line) => {
+    const [, x1, x2] = /^M([\d.]+),[\d.]+ V[\d.]+$/.exec(line.getAttribute("d")!) ?? [];
+    return Number(x1 ?? x2 ?? NaN);
+  });
+  const hover = (index: number) => fireEvent.pointerEnter(document.querySelector(`[data-row="${index}"]`)!);
+
+  it("the lines run straight down from each edge of the gap", async () => {
+    await board([task("a", { userStart: "2026-10-13", duration: 3 }), task("b", { userStart: MON, duration: 2, interruptedBy: ["a"] })]);
+    hover(0);
+    await screen.findAllByTestId("interruption");
+    const [first, second] = parts();
+    const right = left(first!) + parseFloat((first as HTMLElement).style.width);
+    expect(lineXs()).toEqual([right, left(second!)]);
+  });
+
+  it("each part of the interrupting task gets its own pair", async () => {
+    await board([task("a", { userStart: "2026-10-13", duration: 2, breaks: [{ after: 2, length: 2 }] }), task("b", { userStart: MON, duration: 3, interruptedBy: ["a"] })]);
+    hover(0);
+    await screen.findAllByTestId("interruption");
+    expect(lineXs()).toHaveLength(4);
+  });
+
+  it("no gap, no lines", async () => {
+    await board([task("a", { userStart: "2026-11-16", duration: 1 }), task("b", { userStart: MON, duration: 2, interruptedBy: ["a"] })]);
+    hover(0);
+    await waitFor(() => expect(useHoveredRow.getState().id).toBe("a"));
+    expect(screen.queryByTestId("interruption")).not.toBeInTheDocument();
   });
 
   it("a baseline's parts draw as parts, and an old snapshot still draws", async () => {
