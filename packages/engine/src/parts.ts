@@ -1,6 +1,6 @@
 import type { Calendar, ResourceId } from "./calendar";
 import { halfDay, type HalfDay } from "./date";
-import type { Break, Row, RowId } from "./model";
+import type { Break, Row, RowId, TaskRow } from "./model";
 import { spanEnd, spanOfHalves, spanStart, type Computed, type Span } from "./schedule";
 
 /** The stretches a scheduled row is worked: its parts when split, otherwise its whole span. */
@@ -16,6 +16,19 @@ export function workBefore(parts: readonly Span[], half: HalfDay, calendar: Cale
     work += calendar.workingHalvesBetween(from, calendar.snapHalfBack(last, resourceId), resourceId) + 1;
   }
   return work;
+}
+
+/** Where each of a task's stored pauses sits: the half worked before it and the half work picks up again. */
+export function pausesOf(task: Pick<TaskRow, "breaks" | "resourceId">, parts: readonly Span[], calendar: Calendar): { after: number; lastWorked: HalfDay; resume: HalfDay }[] {
+  const pauses: { after: number; lastWorked: HalfDay; resume: HalfDay }[] = [];
+  const stored = new Set((task.breaks ?? []).map((pause) => pause.after));
+  let work = 0;
+  parts.forEach((part, i) => {
+    work += calendar.workingHalvesBetween(spanStart(part), spanEnd(part), task.resourceId) + 1;
+    const next = parts[i + 1];
+    if (next && stored.has(work)) pauses.push({ after: work, lastWorked: spanEnd(part), resume: spanStart(next) });
+  });
+  return pauses;
 }
 
 /** Half days ranges merged and sorted, so a walk can pass them with a moving cursor. */

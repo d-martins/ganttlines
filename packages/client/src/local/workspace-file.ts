@@ -1,5 +1,5 @@
 import { Calendar, findLinkProblem, findTreeProblem, hasCycle, linkKey, toDay, type ProjectState, type Row } from "@ganttlines/engine";
-import type { WorkspaceFile, WorkspaceFileV1, WorkspaceFileV2, WorkspaceFileV3 } from "@ganttlines/protocol";
+import type { WorkspaceFile, WorkspaceFileV1, WorkspaceFileV2, WorkspaceFileV3, WorkspaceFileV4 } from "@ganttlines/protocol";
 import { ApiError } from "../api";
 import { checkFormat, toCalendarDto, WORKSPACE_FORMAT, WORKSPACE_VERSION } from "./records";
 import { upgradeProjectRecord } from "./upgrade";
@@ -31,7 +31,7 @@ export async function readWorkspaceFile(text: string): Promise<WorkspaceFile> {
   checkFormat(json as { format?: unknown; version?: unknown });
   const { protocol, explain } = await validation();
   const version = (json as { version: number }).version;
-  const schema = version === 1 ? protocol.WorkspaceFileV1 : version === 2 ? protocol.WorkspaceFileV2 : version === 3 ? protocol.WorkspaceFileV3 : protocol.WorkspaceFile;
+  const schema = version === 1 ? protocol.WorkspaceFileV1 : version === 2 ? protocol.WorkspaceFileV2 : version === 3 ? protocol.WorkspaceFileV3 : version === 4 ? protocol.WorkspaceFileV4 : protocol.WorkspaceFile;
   const parsed = schema.safeParse(json);
   if (!parsed.success) throw invalid(`This file can't be opened: ${explain(parsed.error)}`);
   const file = parsed.data.version === WORKSPACE_VERSION ? parsed.data : upgradeFile(parsed.data);
@@ -40,7 +40,7 @@ export async function readWorkspaceFile(text: string): Promise<WorkspaceFile> {
   return file;
 }
 
-function upgradeFile(file: WorkspaceFileV1 | WorkspaceFileV2 | WorkspaceFileV3): WorkspaceFile {
+function upgradeFile(file: WorkspaceFileV1 | WorkspaceFileV2 | WorkspaceFileV3 | WorkspaceFileV4): WorkspaceFile {
   return { ...file, version: WORKSPACE_VERSION, projects: file.projects.map((project) => upgradeProjectRecord(project) as WorkspaceFile["projects"][number]) };
 }
 
@@ -106,6 +106,14 @@ function referenceProblem(file: WorkspaceFile): string | null {
       return target?.kind !== "task" || target.duration !== 0 || rows.some((other) => other.parentId === target.id);
     });
     if (astray) return `project “${project.name}”: “${astray.title}” aims for something that isn't a milestone on this board`;
+    const interruptedAstray = rows.find((row) => {
+      if (row.kind !== "task") return false;
+      return row.interruptedBy.some((id) => {
+        const by = byId.get(id);
+        return by?.kind !== "task" || by.duration === 0 || rows.some((other) => other.parentId === id);
+      });
+    });
+    if (interruptedAstray) return `project “${project.name}”: “${interruptedAstray.title}” is interrupted by something that isn't a task on this board`;
     const state: ProjectState = { rows: Object.fromEntries(rows.map((row) => [row.id, row])), links: Object.fromEntries(project.links.map((link) => [linkKey(link), link])) };
     if (hasCycle(state, calendar)) return `project “${project.name}” has tasks that depend on each other in a loop`;
   }

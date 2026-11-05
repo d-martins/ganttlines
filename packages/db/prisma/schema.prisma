@@ -140,6 +140,10 @@ model Row {
   tags          String[] @default([])
   /// the milestone this task aims for; the engine clears it when that stops being a milestone
   targetId      String? @db.Uuid
+  /// the task's own pauses: [{ after, length }] in working half days
+  breaks        Json     @default("[]")
+  /// the tasks that interrupt this one; the engine clears what stops being able to
+  interruptedBy String[] @default([]) @db.Uuid
   linksIn       Link[]  @relation("LinkFollower")
   linksOut      Link[]  @relation("LinkPredecessor")
 

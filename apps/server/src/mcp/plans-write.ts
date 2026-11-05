@@ -1,6 +1,7 @@
 import {
   fromDay,
   halfDay,
+  toDay,
   linkRequirement,
   MAX_LAG,
   MAX_LINKS_PER_TASK,
@@ -183,6 +184,12 @@ const TaskFields = {
     .optional()
     .describe("the task's tags, in order, replacing its list ([] for none); tags are shared by every project and a tag already in use keeps its spelling (\"ui\" becomes \"UI\")"),
   target: z.string().nullable().optional().describe("the milestone on this board the task aims for (id or title; null for none): never moves anything, it's what `slack` measures against"),
+  interruptions: z
+    .array(z.strictObject({ from: z.iso.date(), to: z.iso.date() }))
+    .max(100)
+    .optional()
+    .describe("the task's own pauses, replacing its list ([] for none): its first and last day off. Its days of work stay the same and it finishes later; from must fall inside the task, with work on both sides"),
+  interruptedBy: z.array(z.string()).max(100).optional().describe("the tasks that interrupt this one (id or title), replacing its list ([] for none): it stops wherever they run"),
 };
 
 /** Editing plans: projects, and the tasks on their boards. */
@@ -538,6 +545,8 @@ async function applyTaskFields(
     milestone?: boolean | undefined;
     tags?: string[] | undefined;
     target?: string | null | undefined;
+    interruptions?: { from: string; to: string }[] | undefined;
+    interruptedBy?: string[] | undefined;
   },
   team: Awaited<ReturnType<ToolContext["context"]["instance"]["resources"]>>,
   added: readonly { id: string; title: string }[],
@@ -587,5 +596,22 @@ async function applyTaskFields(
   if (fields.tags !== undefined) await edit.run({ type: "setTags", id, tags: fields.tags });
   if (fields.target !== undefined) {
     await edit.run({ type: "setTarget", id, targetId: fields.target === null ? null : edit.find(fields.target, "task", added).id });
+  }
+  if (fields.interruptedBy !== undefined) {
+    const wanted = fields.interruptedBy.map((ref) => edit.find(ref, "task", added).id);
+    const current = () => edit.row(id)?.row;
+    const now = current();
+    for (const byId of now?.kind === "task" ? now.interruptedBy : []) if (!wanted.includes(byId)) await edit.run({ type: "removeInterruption", id, byId });
+    const left = current();
+    for (const byId of wanted) if (left?.kind === "task" && !left.interruptedBy.includes(byId)) await edit.run({ type: "addInterruption", id, byId });
+  }
+  if (fields.interruptions !== undefined) {
+    const now = edit.row(id)?.row;
+    for (const pause of now?.kind === "task" ? now.breaks : []) await edit.run({ type: "removeBreak", id, after: pause.after });
+    const calendar = await edit.calendar();
+    for (const { from, to } of [...fields.interruptions].sort((a, b) => (a.from < b.from ? -1 : 1))) {
+      const row = edit.row(id)?.row;
+      await edit.run({ type: "addBreak", id, from, resume: fromDay(calendar.nextAfter(toDay(to), row?.kind === "task" ? row.resourceId : null)) });
+    }
   }
 }

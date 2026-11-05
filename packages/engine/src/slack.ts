@@ -1,8 +1,9 @@
 import type { Calendar, ResourceId } from "./calendar";
-import { dayOf, type HalfDay } from "./date";
+import { dayOf, halfDay, toDay, type HalfDay } from "./date";
 import { isFinishLink, linkKey, type Link, type LinkKey } from "./links";
 import type { ProjectState, Row, RowId, TaskRow } from "./model";
-import { finishFloor, linkRequirement, spanEnd, spanOfHalves, spanStart, type Schedule, type Span } from "./schedule";
+import { layOutWork, partsOf } from "./parts";
+import { constraintsFor, finishFloor, linkRequirement, requiredStart, spanEnd, spanOfHalves, spanStart, type Schedule, type Span } from "./schedule";
 import { buildTree, descendantLeafTasks, isParentTask } from "./tree";
 
 /** What stops a task slipping further: a milestone, a locked task, or the end of the board. */
@@ -155,12 +156,29 @@ export function analyseSlack(state: ProjectState, calendar: Calendar, schedule: 
     return { leaves: descendantLeafTasks(tree, follower.id).filter((leaf) => spanOf(leaf.id)), stretched: null };
   };
 
+  const interrupted = new Map<RowId, TaskRow[]>();
+  for (const row of scheduled) {
+    if (row.locked || !isLeaf(row)) continue;
+    for (const by of row.interruptedBy ?? []) interrupted.set(by, [...(interrupted.get(by) ?? []), row]);
+  }
+
+  /** Where `row`'s end lands with `by`'s parts `k` halves later: pauses and other interrupters stay. */
+  const endWith = (row: TaskRow, by: RowId, k: number): HalfDay => {
+    const clock = clockOf(state.rows[by]?.kind === "task" ? (state.rows[by] as TaskRow).resourceId : null);
+    const busy = (row.interruptedBy ?? []).flatMap((id) =>
+      partsOf(schedule.get(id)).map((part) => (id === by ? spanOfHalves(clock.add(spanStart(part), k), clock.add(spanEnd(part), k)) : part)),
+    );
+    const constraints = constraintsFor(state, row).map((link) => ({ link, span: spanOf(link.predecessorId) }));
+    const placed = Math.max(halfDay(toDay(row.userStart!), row.startsAfternoon), requiredStart(calendar, row, constraints));
+    return spanEnd(layOutWork(calendar, placed, row.duration * 2, row.breaks ?? [], busy, row.resourceId).at(-1)!);
+  };
+
   const linksLeaving = (row: TaskRow): Link[] => [row, ...ancestorsOf(row)].flatMap((up) => out.get(up.id) ?? []);
   const dependencies = (row: TaskRow): RowId[] =>
     linksLeaving(row).flatMap((link) => {
       const { leaves, stretched } = heldBy(link);
       return [...leaves.map((leaf) => leaf.id), ...(stretched ? [stretched.id] : [])];
-    });
+    }).concat((interrupted.get(row.id) ?? []).map((other) => other.id));
 
   /** For a leaf, or a parent's own end (only ever asked for what stretches it). */
   const measure = (row: TaskRow): Slack => {
@@ -228,6 +246,19 @@ export function analyseSlack(state: ProjectState, calendar: Calendar, schedule: 
         offer({ halves: room, limit });
       }
     }
+    // Slipping into what it interrupts can push that task's end, in a window: past it, that task finishes
+    // sooner again. So each step is tried, up to the end of that task.
+    for (const other of interrupted.get(row.id) ?? []) {
+      const own = slack.get(other.id);
+      const limit: SlackLimit = own?.limit ?? { kind: "task", id: other.id };
+      const latest = clockOf(other.resourceId).add(spanEnd(spanOf(other.id)!), own?.halves ?? 0);
+      const steps = Math.min(reach, Math.max(0, clock.between(spanStart(span), spanEnd(spanOf(other.id)!))));
+      for (let k = 0; k <= steps; k++) {
+        if (endWith(other, row.id, k) <= latest) continue;
+        offer({ halves: Math.max(k - 1, Math.min(0, own?.halves ?? 0)), limit });
+        break;
+      }
+    }
     return milestone ? { ...best, halves: wholeDays(best.halves) } : best;
   };
 
@@ -264,6 +295,10 @@ export function analyseSlack(state: ProjectState, calendar: Calendar, schedule: 
   // A number needs something behind it: a task connected to nothing would only be measured against
   // whatever happens to be last on the board.
   const linked = new Set(Object.values(state.links).flatMap((link) => [link.predecessorId, link.followerId]));
+  for (const [by, others] of interrupted) {
+    linked.add(by);
+    for (const other of others) linked.add(other.id);
+  }
   const aimedAt = new Set(scheduled.flatMap((row) => (row.targetId ? [row.targetId] : [])));
   for (const leaf of scheduled.filter(isLeaf)) {
     const milestone = leaf.duration === 0;

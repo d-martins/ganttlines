@@ -1,4 +1,4 @@
-import { MAX_DATE, MAX_DURATION, MAX_LAG, MAX_TAG_LENGTH, MAX_TAGS_PER_TASK, MIN_DATE, TASK_COLORS, tagKey } from "@ganttlines/engine";
+import { MAX_BREAKS_PER_TASK, MAX_DATE, MAX_DURATION, MAX_LAG, MAX_LINKS_PER_TASK, MAX_TAG_LENGTH, MAX_TAGS_PER_TASK, MIN_DATE, TASK_COLORS, tagKey } from "@ganttlines/engine";
 import { z } from "zod";
 import { CALENDAR_LIMITS, checkRange } from "./calendar";
 import { LIMITS } from "./api";
@@ -37,7 +37,14 @@ const tags = z
   .array(z.string().min(1).max(MAX_TAG_LENGTH).refine((tag) => tag === tag.trim(), "Tags have no surrounding spaces"))
   .max(MAX_TAGS_PER_TASK)
   .refine((list) => new Set(list.map(tagKey)).size === list.length, "A task has each tag once");
-const TaskRow = z.strictObject({ ...taskFields, tags, targetId: id.nullable() });
+const breaks = z
+  .array(z.strictObject({ after: z.int().min(1).max(MAX_DURATION * 2), length: z.int().min(1).max(MAX_DURATION * 2) }))
+  .max(MAX_BREAKS_PER_TASK)
+  .refine((list) => list.reduce((sum, pause) => sum + pause.length, 0) <= MAX_DURATION * 2, "A task's interruptions can't run that long")
+  .refine((list) => list.every((pause, i) => i === 0 || pause.after > list[i - 1]!.after), "A task's interruptions are in order, each once");
+const TaskRow = z.strictObject({ ...taskFields, tags, targetId: id.nullable(), breaks, interruptedBy: z.array(id).max(MAX_LINKS_PER_TASK) });
+// Before v5, tasks had no interruptions.
+const TaskRowV4 = z.strictObject({ ...taskFields, tags, targetId: id.nullable() });
 // Before v4, tasks had no target.
 const TaskRowV3 = z.strictObject({ ...taskFields, tags });
 const TaskRowV2 = z.strictObject(taskFields);
@@ -98,6 +105,7 @@ const projectFields = {
               end: z.iso.date(),
               startsAfternoon: z.boolean().optional(),
               endsMidday: z.boolean().optional(),
+              parts: z.array(z.strictObject({ start: z.iso.date(), end: z.iso.date(), startsAfternoon: z.boolean(), endsMidday: z.boolean() })).max(1_000).optional(),
             }),
           )
           .max(20_000),
@@ -109,7 +117,7 @@ const projectFields = {
 /** A whole local workspace, as exported to (and imported from) a `.ganttlines.json` file. */
 export const WorkspaceFile = z.strictObject({
   ...workspaceFields,
-  version: z.literal(4),
+  version: z.literal(5),
   projects: z
     .array(
       z.strictObject({
@@ -121,6 +129,22 @@ export const WorkspaceFile = z.strictObject({
     .max(1_000),
 });
 export type WorkspaceFile = z.infer<typeof WorkspaceFile>;
+
+/** The format before interruptions, still accepted on import. */
+export const WorkspaceFileV4 = z.strictObject({
+  ...workspaceFields,
+  version: z.literal(4),
+  projects: z
+    .array(
+      z.strictObject({
+        ...projectFields,
+        rows: z.array(z.discriminatedUnion("kind", [SectionRow, TaskRowV4])).max(20_000),
+        links: z.array(LinkRecord).max(100_000),
+      }),
+    )
+    .max(1_000),
+});
+export type WorkspaceFileV4 = z.infer<typeof WorkspaceFileV4>;
 
 /** The format before targets, still accepted on import. */
 export const WorkspaceFileV3 = z.strictObject({

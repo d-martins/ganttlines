@@ -86,6 +86,7 @@ export type RelinkStep = Extract<Command, { type: "setTarget" | "addLink" | "rem
 
 /** Input limits: keep every calendar walk bounded, so no command can hang the server. */
 export const MAX_DURATION = 3660;
+export const MAX_BREAKS_PER_TASK = 100;
 export const MIN_DATE: IsoDate = "1970-01-01";
 export const MAX_DATE: IsoDate = "2199-12-31";
 
@@ -407,8 +408,13 @@ class Execution {
     const inPart = parts.some((part) => spanStart(part) <= start && start <= spanEnd(part));
     const after = workBefore(parts, start, this.calendar, resource);
     if (!inPart || after < 1 || after >= task.duration * 2) throw new Rejection("invalid", "An interruption has to start inside the task, with work on both sides");
-    const length = this.calendar.workingHalvesBetween(start, end, resource);
     const breaks = task.breaks ?? [];
+    if (!breaks.some((pause) => pause.after === after) && breaks.length >= MAX_BREAKS_PER_TASK) throw new Rejection("invalid", `A task can have at most ${MAX_BREAKS_PER_TASK} interruptions`);
+    // Measured against the limit first, so a far-off date can't send the walk a long way.
+    const paused = breaks.reduce((sum, pause) => sum + pause.length, 0);
+    if (end - start > (MAX_DURATION * 2 - paused) * 2) throw new Rejection("invalid", "An interruption can't run that long");
+    const length = this.calendar.workingHalvesBetween(start, end, resource);
+    if (paused + length > MAX_DURATION * 2) throw new Rejection("invalid", "An interruption can't run that long");
     const merged = breaks.some((pause) => pause.after === after) ? breaks.map((pause) => (pause.after === after ? { after, length: pause.length + length } : pause)) : [...breaks, { after, length }];
     return this.patch(task, { breaks: merged.sort((a, b) => a.after - b.after) });
   }
@@ -454,6 +460,7 @@ class Execution {
     if (isParentTask(this.tree, task) || isParentTask(this.tree, by)) throw new Rejection("invalid", "Parent tasks can't interrupt or be interrupted");
     if (task.locked) throw new Rejection("locked", "This task's dates are locked");
     if ((task.interruptedBy ?? []).includes(byId)) throw new Rejection("invalid", "That task already interrupts this one");
+    if ((task.interruptedBy ?? []).length >= MAX_LINKS_PER_TASK) throw new Rejection("invalid", `A task can have at most ${MAX_LINKS_PER_TASK} tasks interrupting it`);
     if (!this.spanOf(id) || !this.spanOf(byId)) throw new Rejection("unscheduled", "Both tasks need dates first");
     return this.patch(task, { interruptedBy: [...(task.interruptedBy ?? []), byId].sort() });
   }

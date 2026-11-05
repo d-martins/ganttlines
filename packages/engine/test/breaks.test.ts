@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { applyCommand, type Command } from "../src/commands";
+import { applyCommand, MAX_BREAKS_PER_TASK, MAX_DURATION, type Command } from "../src/commands";
+import { MAX_LINKS_PER_TASK } from "../src/links";
 import { fromDay } from "../src/date";
 import type { ProjectState, RowId, TaskRow } from "../src/model";
 import { partsOf } from "../src/parts";
@@ -65,6 +66,27 @@ describe("addBreak", () => {
     expect(refused(twoDays({ duration: 0 }), { type: "addBreak", id: "t", from: MON, resume: FRI }).reason).toBe("invalid");
     expect(refused(twoDays({ userStart: null }), { type: "addBreak", id: "t", from: TUE, resume: FRI }).reason).toBe("unscheduled");
     expect(refused(project(task("t", { userStart: MON }), task("kid", { userStart: MON, parentId: "t" })), { type: "addBreak", id: "t", from: TUE, resume: FRI }).reason).toBe("invalid");
+  });
+});
+
+describe("limits keep every calendar walk bounded", () => {
+  it("refuses pauses longer than a task may be, one at a time or added up", () => {
+    expect(refused(twoDays(), { type: "addBreak", id: "t", from: TUE, resume: "2199-12-30" }).message).toBe("An interruption can't run that long");
+    const nearly = twoDays({ breaks: [{ after: 2, length: MAX_DURATION * 2 - 2 }] });
+    expect(refused(nearly, { type: "addBreak", id: "t", from: MON, fromHalf: "afternoon", resume: FRI }).message).toBe("An interruption can't run that long");
+  });
+
+  it("refuses more breaks than a task may have", () => {
+    const full = project(task("t", { userStart: MON, duration: 200, breaks: Array.from({ length: MAX_BREAKS_PER_TASK }, (_, i) => ({ after: i + 1, length: 1 })) }));
+    const span = computeSchedule(full, cal).get("t")!.span!;
+    const late = fromDay(span.end - 2);
+    expect(refused(full, { type: "addBreak", id: "t", from: late, resume: fromDay(span.end + 5) }).message).toBe(`A task can have at most ${MAX_BREAKS_PER_TASK} interruptions`);
+  });
+
+  it("refuses more interrupters than a task may have", () => {
+    const others = Array.from({ length: MAX_LINKS_PER_TASK + 1 }, (_, i) => task(`o${i}`, { userStart: "2030-01-07" }));
+    const full = project(...others, task("b", { userStart: MON, interruptedBy: others.slice(0, MAX_LINKS_PER_TASK).map((row) => row.id) }));
+    expect(refused(full, { type: "addInterruption", id: "b", byId: `o${MAX_LINKS_PER_TASK}` }).message).toBe(`A task can have at most ${MAX_LINKS_PER_TASK} tasks interrupting it`);
   });
 });
 

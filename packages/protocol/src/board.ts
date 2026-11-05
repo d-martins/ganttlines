@@ -71,6 +71,8 @@ export interface BaselineTaskDto {
   startsAfternoon?: boolean;
   /** ends at midday of `end` */
   endsMidday?: boolean;
+  /** when split: the stretches it's worked */
+  parts?: { start: string; end: string; startsAfternoon: boolean; endsMidday: boolean }[];
 }
 
 /** Response of GET /api/baselines/:id — the saved dates, for switching to or overlaying the baseline. */

@@ -55,12 +55,12 @@ describe("WorkspaceFileV2", () => {
 describe("WorkspaceFile", () => {
   const section = (rowId: string, extra: object = {}) => ({ id: rowId, kind: "section", title: "S", parentId: null, position: "a1", ...extra });
 
-  it("is version 4: tasks have tags and a target, sections a description", () => {
-    const row = (extra: object = {}) => taskRow(A, { tags: ["UI", "Back end"], targetId: null, ...extra });
-    expect(WorkspaceFile.safeParse(file(4, [row(), section(B, { description: "Notes" })], [])).success).toBe(true);
-    expect(WorkspaceFile.safeParse(file(4, [row({ targetId: B })], [])).success).toBe(true);
-    expect(WorkspaceFile.safeParse(file(4, [taskRow(A, { tags: [] })], [])).success).toBe(false);
-    expect(WorkspaceFile.safeParse(file(4, [row({ targetId: "nope" })], [])).success).toBe(false);
+  it("is version 5: tasks have tags, a target and interruptions, sections a description", () => {
+    const row = (extra: object = {}) => taskRow(A, { tags: ["UI", "Back end"], targetId: null, breaks: [], interruptedBy: [], ...extra });
+    expect(WorkspaceFile.safeParse(file(5, [row(), section(B, { description: "Notes" })], [])).success).toBe(true);
+    expect(WorkspaceFile.safeParse(file(5, [row({ targetId: B })], [])).success).toBe(true);
+    expect(WorkspaceFile.safeParse(file(5, [taskRow(A, { tags: [] })], [])).success).toBe(false);
+    expect(WorkspaceFile.safeParse(file(5, [row({ targetId: "nope" })], [])).success).toBe(false);
     expect(WorkspaceFile.safeParse(file(3, [row()], [])).success).toBe(false);
   });
 
@@ -77,7 +77,7 @@ describe("WorkspaceFile", () => {
   });
 
   it("refuses tags the app would never store", () => {
-    const withTags = (tags: string[]) => WorkspaceFile.safeParse(file(4, [taskRow(A, { tags, targetId: null })], [])).success;
+    const withTags = (tags: string[]) => WorkspaceFile.safeParse(file(5, [taskRow(A, { tags, targetId: null, breaks: [], interruptedBy: [] })], [])).success;
     expect(withTags(["Q4 · must-have", "x".repeat(100)])).toBe(true);
     for (const tags of [[""], [" UI"], ["UI", "ui"], ["x".repeat(101)], Array.from({ length: 51 }, (_, i) => `t${i}`)]) expect(withTags(tags), String(tags[0])).toBe(false);
   });

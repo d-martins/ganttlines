@@ -4,7 +4,7 @@ import { ApiError } from "../api";
 
 /** The workspace file's — and the stored records' — format. */
 export const WORKSPACE_FORMAT = "ganttlines-workspace";
-export const WORKSPACE_VERSION = 4;
+export const WORKSPACE_VERSION = 5;
 
 export interface StoredResource {
   id: string;

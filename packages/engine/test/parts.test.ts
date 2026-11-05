@@ -3,7 +3,7 @@ import { baselineTasks } from "../src/baseline";
 import { applyCommand } from "../src/commands";
 import { fromDay, toDay } from "../src/date";
 import type { Row, RowId, ProjectState, TaskRow } from "../src/model";
-import { clearLostInterruptions, layOutWork, partsOf, visibleParts } from "../src/parts";
+import { clearLostInterruptions, layOutWork, partsOf, pausesOf, visibleParts } from "../src/parts";
 import { computeSchedule, hasCycle, linkRequirement, spanEnd, spanStart, type Schedule } from "../src/schedule";
 import { revertChanges } from "../src/undo";
 import { workedDays } from "../src/worked";
@@ -188,5 +188,14 @@ describe("what reads parts", () => {
 
   it("layOutWork with nothing in the way is one part", () => {
     expect(layOutWork(cal, toDay(MON) * 2, 4, [], [], null)).toHaveLength(1);
+  });
+
+  it("pausesOf says where each stored pause sits", () => {
+    const state = project(fixLogin());
+    const row = state.rows["t"] as TaskRow;
+    const [pause] = pausesOf(row, partsOf(computeSchedule(state, cal).get("t")), cal);
+    expect(pause).toMatchObject({ after: 2 });
+    expect(fromDay(pause!.lastWorked >> 1)).toBe(MON);
+    expect(fromDay(pause!.resume >> 1)).toBe("2026-11-06");
   });
 });
