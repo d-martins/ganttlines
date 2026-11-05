@@ -6,6 +6,10 @@ import { layOutWork, partsOf } from "./parts";
 import { constraintsFor, finishFloor, linkRequirement, requiredStart, spanEnd, spanOfHalves, spanStart, type Schedule, type Span } from "./schedule";
 import { buildTree, descendantLeafTasks, isParentTask } from "./tree";
 
+/** Bounds on trying out where an interrupter could slip to: per pair of tasks, and for a whole board. */
+const MAX_SCAN_STEPS = 64;
+const MAX_SCAN_LAYOUTS = 400;
+
 /** What stops a task slipping further: a milestone, a locked task, or the end of the board. */
 export type SlackLimit = { kind: "milestone"; id: RowId } | { kind: "task"; id: RowId } | { kind: "end" };
 /** How many working half days a task's finish can move later before it hits `limit`; negative: already past it. */
@@ -156,6 +160,7 @@ export function analyseSlack(state: ProjectState, calendar: Calendar, schedule: 
     return { leaves: descendantLeafTasks(tree, follower.id).filter((leaf) => spanOf(leaf.id)), stretched: null };
   };
 
+  let layouts = 0;
   const interrupted = new Map<RowId, TaskRow[]>();
   for (const row of scheduled) {
     if (row.locked || !isLeaf(row)) continue;
@@ -247,15 +252,19 @@ export function analyseSlack(state: ProjectState, calendar: Calendar, schedule: 
       }
     }
     // Slipping into what it interrupts can push that task's end, in a window: past it, that task finishes
-    // sooner again. So each step is tried, up to the end of that task.
+    // sooner again. So steps are tried across the window, a limited number of them.
     for (const other of interrupted.get(row.id) ?? []) {
       const own = slack.get(other.id);
       const limit: SlackLimit = own?.limit ?? { kind: "task", id: other.id };
-      const latest = clockOf(other.resourceId).add(spanEnd(spanOf(other.id)!), own?.halves ?? 0);
-      const steps = Math.min(reach, Math.max(0, clock.between(spanStart(span), spanEnd(spanOf(other.id)!))));
-      for (let k = 0; k <= steps; k++) {
+      const otherSpan = spanOf(other.id)!;
+      const latest = clockOf(other.resourceId).add(spanEnd(otherSpan), own?.halves ?? 0);
+      const first = Math.max(0, Math.min(reach, clock.between(spanEnd(span), spanStart(otherSpan))));
+      const last = Math.min(reach, Math.max(first, clock.between(spanStart(span), spanEnd(otherSpan))));
+      const stride = Math.max(1, Math.ceil((last - first) / MAX_SCAN_STEPS));
+      for (let k = first; k <= last && layouts < MAX_SCAN_LAYOUTS; k += stride) {
+        layouts++;
         if (endWith(other, row.id, k) <= latest) continue;
-        offer({ halves: Math.max(k - 1, Math.min(0, own?.halves ?? 0)), limit });
+        offer({ halves: Math.max(k === first ? k - 1 : k - stride, Math.min(0, own?.halves ?? 0)), limit });
         break;
       }
     }

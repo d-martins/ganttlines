@@ -319,6 +319,16 @@ describe("across parts and interruptions", () => {
     expect(slackOf(state).get("a")).toEqual({ halves: 2, limit: { kind: "milestone", id: "m" } });
   });
 
+  it("stays quick on very long interrupted tasks", () => {
+    const interrupters = Array.from({ length: 20 }, (_, i) => task(`a${i}`, { userStart: "2020-01-06", duration: 2 + i }));
+    const interrupted = Array.from({ length: 20 }, (_, i) => task(`b${i}`, { userStart: MON, duration: 3600, interruptedBy: interrupters.map((row) => row.id) }));
+    const state = project(...interrupters, ...interrupted);
+    const schedule = computeSchedule(state, cal);
+    const before = Date.now();
+    computeSlack(state, cal, schedule);
+    expect(Date.now() - before).toBeLessThan(1500);
+  });
+
   it("an interruption connects a task", () => {
     const state = project(task("a", { userStart: MON, duration: 1 }), task("b", { userStart: MON, duration: 2, interruptedBy: ["a"] }), task("loose", { userStart: MON, duration: 1 }));
     expect(slackOf(state).get("a")).toBeDefined();
