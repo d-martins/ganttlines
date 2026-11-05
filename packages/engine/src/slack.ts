@@ -2,7 +2,7 @@ import type { Calendar, ResourceId } from "./calendar";
 import { dayOf, halfDay, toDay, type HalfDay } from "./date";
 import { isFinishLink, linkKey, type Link, type LinkKey } from "./links";
 import type { ProjectState, Row, RowId, TaskRow } from "./model";
-import { layOutWork, partsOf } from "./parts";
+import { layOutWork, partsOf, visibleParts } from "./parts";
 import { constraintsFor, finishFloor, linkRequirement, requiredStart, spanEnd, spanOfHalves, spanStart, type Schedule, type Span } from "./schedule";
 import { buildTree, descendantLeafTasks, isParentTask } from "./tree";
 
@@ -170,9 +170,11 @@ export function analyseSlack(state: ProjectState, calendar: Calendar, schedule: 
   /** Where `row`'s end lands with `by`'s parts `k` halves later: pauses and other interrupters stay. */
   const endWith = (row: TaskRow, by: RowId, k: number): HalfDay => {
     const clock = clockOf(state.rows[by]?.kind === "task" ? (state.rows[by] as TaskRow).resourceId : null);
-    const busy = (row.interruptedBy ?? []).flatMap((id) =>
-      partsOf(schedule.get(id)).map((part) => (id === by ? spanOfHalves(clock.add(spanStart(part), k), clock.add(spanEnd(part), k)) : part)),
-    );
+    const busy = (row.interruptedBy ?? []).flatMap((id) => {
+      const parts = partsOf(schedule.get(id)).map((part) => (id === by ? spanOfHalves(clock.add(spanStart(part), k), clock.add(spanEnd(part), k)) : part));
+      const interrupter = state.rows[id];
+      return visibleParts(parts, calendar, interrupter?.kind === "task" ? interrupter.resourceId : null);
+    });
     const constraints = constraintsFor(state, row).map((link) => ({ link, span: spanOf(link.predecessorId) }));
     const placed = Math.max(halfDay(toDay(row.userStart!), row.startsAfternoon), requiredStart(calendar, row, constraints));
     return spanEnd(layOutWork(calendar, placed, row.duration * 2, row.breaks ?? [], busy, row.resourceId).at(-1)!);

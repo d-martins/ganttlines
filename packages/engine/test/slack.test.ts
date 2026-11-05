@@ -319,6 +319,15 @@ describe("across parts and interruptions", () => {
     expect(slackOf(state).get("a")).toEqual({ halves: 2, limit: { kind: "milestone", id: "m" } });
   });
 
+  it("an interrupter's time off doesn't count as it running", () => {
+    const off = calendar({ timeOff: [{ id: "o", resourceId: "ana", startDate: "2026-10-07", endDate: "2026-10-07" }] });
+    // A on Tuesday and Thursday, Ana off Wednesday. B on Monday and Wednesday has no room. A slipping only frees Tuesday for B.
+    const state = project(task("a", { userStart: "2026-10-06", duration: 2, resourceId: "ana" }), task("b", { userStart: MON, duration: 2, resourceId: "rui", interruptedBy: ["a"], targetId: "m" }), task("m", { userStart: "2026-10-07", duration: 0 }));
+    const schedule = computeSchedule(state, off);
+    expect(computeSlack(state, off, schedule).get("b")).toMatchObject({ halves: 0 });
+    expect(computeSlack(state, off, schedule).get("a")?.limit).toEqual({ kind: "end" });
+  });
+
   it("stays quick on very long interrupted tasks", () => {
     const interrupters = Array.from({ length: 20 }, (_, i) => task(`a${i}`, { userStart: "2020-01-06", duration: 2 + i }));
     const interrupted = Array.from({ length: 20 }, (_, i) => task(`b${i}`, { userStart: MON, duration: 3600, interruptedBy: interrupters.map((row) => row.id) }));

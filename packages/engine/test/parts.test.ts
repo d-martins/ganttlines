@@ -59,6 +59,25 @@ describe("work in parts", () => {
     expect(dates(schedule, "b")).toEqual([[MON, MON], ["2026-11-04", "2026-11-04"], ["2026-11-06", "2026-11-06"]]);
   });
 
+  it("B works while A's person is off: nobody is on A then", () => {
+    const off = calendar({ timeOff: [{ id: "o", resourceId: "ana", startDate: "2026-11-04", endDate: "2026-11-05" }] });
+    const state = project(task("a", { userStart: "2026-11-03", duration: 2, resourceId: "ana" }), task("b", { userStart: MON, duration: 3, resourceId: "rui", interruptedBy: ["a"] }));
+    // A: Tuesday, then Friday. B: Monday, Wednesday, Thursday.
+    expect(dates(computeSchedule(state, off), "b")).toEqual([[MON, MON], ["2026-11-04", "2026-11-05"]]);
+  });
+
+  it("a holiday for everyone stops B too, in its own calendar", () => {
+    const off = calendar({ holidays: [{ id: "h", name: "h", startDate: "2026-11-04", endDate: "2026-11-05", appliesTo: "all" }] });
+    const state = project(task("a", { userStart: "2026-11-03", duration: 2 }), task("b", { userStart: MON, duration: 3, interruptedBy: ["a"] }));
+    // A: Tuesday, Friday. B: Monday, then the next Monday and Tuesday.
+    expect(dates(computeSchedule(state, off), "b")).toEqual([[MON, MON], ["2026-11-09", "2026-11-10"]]);
+  });
+
+  it("a weekend inside A doesn't change anything: B has it off as well", () => {
+    const state = project(task("a", { userStart: "2026-11-05", duration: 3 }), task("b", { userStart: "2026-11-05", duration: 1, interruptedBy: ["a"] }));
+    expect(dates(computeSchedule(state, cal), "b")).toEqual([["2026-11-10", "2026-11-10"]]);
+  });
+
   it("A covering B's start: B starts after A, one part", () => {
     const schedule = computeSchedule(project(task("a", { userStart: MON, duration: 2 }), task("b", { userStart: "2026-11-03", duration: 2, interruptedBy: ["a"] })), cal);
     expect(dates(schedule, "b")).toEqual([["2026-11-04", "2026-11-05"]]);

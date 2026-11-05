@@ -2,7 +2,7 @@ import type { Calendar, ResourceId } from "./calendar";
 import { dayOf, halfDay, isAfternoon, toDay, type DayNum, type HalfDay } from "./date";
 import { isFinishLink, linkKey, type Link, type LinkKey } from "./links";
 import type { ProjectState, Row, RowId, TaskRow } from "./model";
-import { layOutWork, partsOf } from "./parts";
+import { layOutWork, partsOf, visibleParts } from "./parts";
 import { buildTree, childrenOf, isParentTask } from "./tree";
 
 /** A row's dates: the days it starts and ends on, and whether it starts or ends at midday. */
@@ -105,7 +105,13 @@ export function computeSchedule(state: ProjectState, calendar: Calendar): Schedu
     // Visit predecessors before anything else — even for unscheduled tasks — so that every
     // dependency cycle is detected.
     const constraints = existing(collectConstraints(state, task, true, into, rowCount)).map((link) => ({ link, span: compute(link.predecessorId).span }));
-    const interrupters = task.locked ? [] : (task.interruptedBy ?? []).filter((id) => state.rows[id] !== undefined).map((id) => compute(id));
+    // Only while someone is on it: an interrupter's holidays and time off leave this task free to work.
+    const interrupters = task.locked
+      ? []
+      : (task.interruptedBy ?? []).flatMap((id) => {
+          const by = state.rows[id];
+          return by?.kind === "task" ? visibleParts(partsOf(compute(id)), calendar, by.resourceId) : [];
+        });
     if (task.userStart === null) return { span: null, violation: false };
 
     const required = requiredStart(calendar, task, constraints);
@@ -116,7 +122,7 @@ export function computeSchedule(state: ProjectState, calendar: Calendar): Schedu
     if (task.duration === 0) return { span: spanOfHalves(start, halfDay(dayOf(start), true)), violation };
     const breaks = task.breaks ?? [];
     if (breaks.length > 0 || interrupters.length > 0) {
-      const parts = layOutWork(calendar, start, task.duration * 2, breaks, interrupters.flatMap(partsOf), resource);
+      const parts = layOutWork(calendar, start, task.duration * 2, breaks, interrupters, resource);
       const span = spanOfHalves(spanStart(parts[0]!), spanEnd(parts.at(-1)!));
       return parts.length > 1 ? { span, violation, parts } : { span, violation };
     }
