@@ -58,11 +58,18 @@ export type Command =
    * as it was, so it moves to where its remaining links and its own date put it.
    */
   | { type: "removeLink"; predecessorId: RowId; followerId: RowId; kind: LinkKind; keepPlace?: boolean }
+  /**
+   * Turns one link or aim into another as a single change, undone in one step: each step runs on
+   * what the one before left, and if any is refused nothing happens.
+   */
+  | { type: "relink"; steps: RelinkStep[] }
   | { type: "indent"; id: RowId }
   | { type: "outdent"; id: RowId }
   | { type: "moveRow"; id: RowId; parentId: RowId | null; afterId: RowId | null }
   | { type: "deleteRows"; ids: RowId[] }
   | { type: "duplicateTask"; id: RowId; newId: RowId };
+
+export type RelinkStep = Extract<Command, { type: "setTarget" | "addLink" | "removeLink" }>;
 
 /** Input limits: keep every calendar walk bounded, so no command can hang the server. */
 export const MAX_DURATION = 3660;
@@ -122,13 +129,14 @@ class Execution {
   }
 
   run(command: Command): ProjectState {
+    if (command.type === "relink") return command.steps.reduce<ProjectState>((state, step) => new Execution(state, this.calendar).run(step), this.state);
     this.apply(command);
     this.settleFormerParents();
     clearLostTargets(this.rows);
     return this.result();
   }
 
-  private apply(command: Command): ProjectState {
+  private apply(command: Exclude<Command, { type: "relink" }>): ProjectState {
     switch (command.type) {
       case "createRow":
         return this.createRow(command);

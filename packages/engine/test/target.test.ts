@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { applyCommand, isValidTarget, type Command } from "../src/commands";
 import type { Change } from "../src/changes";
 import type { ProjectState, TaskRow } from "../src/model";
+import { linkKey } from "../src/links";
 import { computeSchedule } from "../src/schedule";
 
 import { revertChanges } from "../src/undo";
@@ -174,5 +175,125 @@ describe("undo with other people's edits", () => {
     const made = apply(project(task("t", dated), task("x", dated)), { type: "convertMilestone", id: "x", milestone: true });
     const aiming = run(made.state, cal, { type: "setTarget", id: "t", targetId: "x" });
     expect(taskIn(undo(aiming, made.changes), "t").targetId).toBeNull();
+  });
+});
+
+describe("relink", () => {
+  const linked = () =>
+    run(board(), cal, { type: "addLink", predecessorId: "t", followerId: "m", kind: "FS", lag: 1 });
+  const expectOneUndo = (before: ProjectState, command: Command, check: (after: ProjectState) => void) => {
+    const { after, undone } = undoOf(before, command);
+    check(after);
+    expect(undone).toEqual(before);
+  };
+
+  it("turns an aim into a link, undone in one step", () => {
+    const before = run(board(), cal, { type: "setTarget", id: "t", targetId: "m" });
+    expectOneUndo(
+      before,
+      {
+        type: "relink",
+        steps: [
+          { type: "setTarget", id: "t", targetId: null },
+          { type: "addLink", predecessorId: "m", followerId: "t", kind: "FS" },
+        ],
+      },
+      (after) => {
+        expect(taskIn(after, "t").targetId).toBeNull();
+        expect(Object.values(after.links)).toEqual([{ predecessorId: "m", followerId: "t", kind: "FS", lag: 0 }]);
+      },
+    );
+  });
+
+  it("turns a link into an aim, undone in one step, and nothing moves", () => {
+    const before = linked();
+    expectOneUndo(
+      before,
+      {
+        type: "relink",
+        steps: [
+          { type: "removeLink", predecessorId: "t", followerId: "m", kind: "FS" },
+          { type: "setTarget", id: "t", targetId: "m" },
+        ],
+      },
+      (after) => {
+        expect(Object.values(after.links)).toEqual([]);
+        expect(taskIn(after, "t").targetId).toBe("m");
+        expect(computeSchedule(after, cal).get("m")).toEqual(computeSchedule(before, cal).get("m"));
+      },
+    );
+  });
+
+  it("moves an aim to another task, undone in one step", () => {
+    const before = run(board(), cal, { type: "setTarget", id: "t", targetId: "m" });
+    expectOneUndo(
+      before,
+      {
+        type: "relink",
+        steps: [
+          { type: "setTarget", id: "other", targetId: "m" },
+          { type: "setTarget", id: "t", targetId: null },
+        ],
+      },
+      (after) => {
+        expect(taskIn(after, "t").targetId).toBeNull();
+        expect(taskIn(after, "other").targetId).toBe("m");
+      },
+    );
+  });
+
+  it("moves a link to another task, undone in one step", () => {
+    const before = linked();
+    expectOneUndo(
+      before,
+      {
+        type: "relink",
+        steps: [
+          { type: "removeLink", predecessorId: "t", followerId: "m", kind: "FS", keepPlace: false },
+          { type: "addLink", predecessorId: "other", followerId: "m", kind: "FS", lag: 1 },
+        ],
+      },
+      (after) => {
+        expect(Object.values(after.links)).toEqual([{ predecessorId: "other", followerId: "m", kind: "FS", lag: 1 }]);
+      },
+    );
+  });
+
+  it("refuses the whole change when one step is refused", () => {
+    const before = run(board(), cal, { type: "setTarget", id: "t", targetId: "m" });
+    const refused = applyCommand(before, cal, {
+      type: "relink",
+      steps: [
+        { type: "setTarget", id: "t", targetId: null },
+        { type: "addLink", predecessorId: "t", followerId: "t", kind: "FS" },
+      ],
+    });
+    expect(refused.ok).toBe(false);
+  });
+
+  it("refuses the whole change when it would make a cycle", () => {
+    const before = run(board(), cal, { type: "addLink", predecessorId: "t", followerId: "other", kind: "FS" }, { type: "addLink", predecessorId: "other", followerId: "m", kind: "FS" }, { type: "addLink", predecessorId: "m", followerId: "plain", kind: "FS" });
+    const refused = applyCommand(before, cal, {
+      type: "relink",
+      steps: [
+        { type: "removeLink", predecessorId: "m", followerId: "plain", kind: "FS", keepPlace: false },
+        { type: "addLink", predecessorId: "m", followerId: "t", kind: "FS" },
+      ],
+    });
+    expect(refused).toMatchObject({ ok: false, reason: "cycle" });
+  });
+
+  it("runs each step on what the one before left", () => {
+    // The follower has no date of its own, only what the link gives it: without the link it has none to link with.
+    const before = project(task("a", dated), task("b", dated), task("waiting", { userStart: null }));
+    const state = { ...before, links: { [linkKey({ predecessorId: "a", followerId: "waiting", kind: "FS" })]: { predecessorId: "a", followerId: "waiting", kind: "FS" as const, lag: 0 } } };
+    const refused = applyCommand(state, cal, {
+      type: "relink",
+      steps: [
+        { type: "removeLink", predecessorId: "a", followerId: "waiting", kind: "FS", keepPlace: false },
+        { type: "addLink", predecessorId: "b", followerId: "waiting", kind: "FS" },
+      ],
+    });
+    expect(refused).toMatchObject({ ok: false, reason: "unscheduled" });
   });
 });
