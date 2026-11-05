@@ -140,7 +140,7 @@ describe("the workspace in IndexedDB", () => {
     const db = await openRaw(factory, "v2", 5);
     const { workspace, projects } = await readAll(db);
     db.close();
-    expect(workspace).toMatchObject({ version: 4 });
+    expect(workspace).toMatchObject({ version: 5 });
     expect(projects).toHaveLength(3);
     for (const project of projects as client.ProjectRecord[]) {
       expect(project.rows).toEqual([expect.objectContaining({ id: A, kind: "task", tags: [], targetId: null }), { id: B, kind: "section", title: "S", parentId: null, position: "a1", description: "" }]);
