@@ -56,6 +56,11 @@ export class Calendar {
     for (const [resourceId, off] of this.resourceOff) dropLongRuns(off, (day) => !this.isWorkingDay(day, resourceId));
   }
 
+  /** A day of the week nobody works: a weekend, not a holiday or time off. */
+  isRestDay(day: DayNum): boolean {
+    return !this.weekdays.has(weekday(day));
+  }
+
   isWorkingDay(day: DayNum, resourceId: ResourceId | null): boolean {
     if (!this.weekdays.has(weekday(day))) return false;
     if (this.teamOff.has(day)) return false;

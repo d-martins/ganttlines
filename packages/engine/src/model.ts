@@ -40,6 +40,17 @@ export interface TaskRow extends RowBase {
   tags: string[];
   /** The milestone this task aims for: never moves anything, only measured against; see `isValidTarget`. */
   targetId: RowId | null;
+  /** The task's own pauses, relative to its work so they travel with it; sorted by `after`, each `after` once. */
+  breaks: Break[];
+  /** The tasks that interrupt this one: it stops wherever they run. */
+  interruptedBy: RowId[];
+}
+
+export interface Break {
+  /** working half days of this task done before the pause: 1 … total − 1 */
+  after: number;
+  /** working half days the pause lasts, on the task's calendar */
+  length: number;
 }
 
 export type Row = SectionRow | TaskRow;
@@ -60,4 +71,6 @@ export const TASK_DEFAULTS = {
   tags: [],
   targetId: null,
   actualDuration: null,
+  breaks: [],
+  interruptedBy: [],
 } as const satisfies Partial<TaskRow>;

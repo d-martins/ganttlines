@@ -2,6 +2,7 @@ import type { Calendar, ResourceId } from "./calendar";
 import { dayOf, halfDay, isAfternoon, toDay, type DayNum, type HalfDay } from "./date";
 import { isFinishLink, linkKey, type Link, type LinkKey } from "./links";
 import type { ProjectState, Row, RowId, TaskRow } from "./model";
+import { layOutWork, partsOf } from "./parts";
 import { buildTree, childrenOf, isParentTask } from "./tree";
 
 /** A row's dates: the days it starts and ends on, and whether it starts or ends at midday. */
@@ -31,6 +32,8 @@ export interface Computed {
   span: Span | null;
   /** true when a locked task starts earlier than its predecessor rules require */
   violation: boolean;
+  /** the stretches it's worked, only when more than one; `span` runs from the first to the last */
+  parts?: readonly Span[];
 }
 
 export type Schedule = ReadonlyMap<RowId, Computed>;
@@ -101,6 +104,7 @@ export function computeSchedule(state: ProjectState, calendar: Calendar): Schedu
     // Visit predecessors before anything else — even for unscheduled tasks — so that every
     // dependency cycle is detected.
     const constraints = existing(collectConstraints(state, task, true, into)).map((link) => ({ link, span: compute(link.predecessorId).span }));
+    const interrupters = task.locked ? [] : (task.interruptedBy ?? []).filter((id) => state.rows[id] !== undefined).map((id) => compute(id));
     if (task.userStart === null) return { span: null, violation: false };
 
     const required = requiredStart(calendar, task, constraints);
@@ -109,6 +113,12 @@ export function computeSchedule(state: ProjectState, calendar: Calendar): Schedu
     const violation = task.locked && start < required;
     // A milestone is a point on its day; successors start the next working day.
     if (task.duration === 0) return { span: spanOfHalves(start, halfDay(dayOf(start), true)), violation };
+    const breaks = task.breaks ?? [];
+    if (breaks.length > 0 || interrupters.length > 0) {
+      const parts = layOutWork(calendar, start, task.duration * 2, breaks, interrupters.flatMap(partsOf), resource);
+      const span = spanOfHalves(spanStart(parts[0]!), spanEnd(parts.at(-1)!));
+      return parts.length > 1 ? { span, violation, parts } : { span, violation };
+    }
     // In half days: 2.5 days from a morning take five half days and end at midday of the third.
     return { span: spanOfHalves(start, calendar.addWorkingHalves(start, task.duration * 2 - 1, resource)), violation };
   };
@@ -142,7 +152,7 @@ export function finishFloor(calendar: Calendar, link: Link, span: Span, resource
 /** The earliest start (half day) `link` allows `follower`, given the predecessor's span; -Infinity if unscheduled. */
 export function linkRequirement(
   calendar: Calendar,
-  follower: Pick<TaskRow, "resourceId" | "duration">,
+  follower: Pick<TaskRow, "resourceId" | "duration"> & Partial<Pick<TaskRow, "breaks">>,
   link: Link,
   predecessor: Span | null,
 ): HalfDay {
@@ -160,13 +170,14 @@ export function linkRequirement(
       const end = finishFloor(calendar, link, predecessor, resource);
       // A milestone sits on the day it may end; other tasks start early enough to end on it.
       if (follower.duration === 0) return halfDay(dayOf(end));
-      return calendar.addWorkingHalves(end, -(follower.duration * 2 - 1), resource);
+      const paused = (follower.breaks ?? []).reduce((sum, pause) => sum + pause.length, 0);
+      return calendar.addWorkingHalves(end, -(follower.duration * 2 - 1 + paused), resource);
     }
   }
 }
 
 /** The lowest start a drag may reach against `link` (lag at its floor). */
-export function linkFloor(calendar: Calendar, follower: Pick<TaskRow, "resourceId" | "duration">, link: Link, predecessor: Span): HalfDay {
+export function linkFloor(calendar: Calendar, follower: Pick<TaskRow, "resourceId" | "duration"> & Partial<Pick<TaskRow, "breaks">>, link: Link, predecessor: Span): HalfDay {
   if (link.kind === "FS") return floorStart(calendar, predecessor, follower.resourceId);
   return linkRequirement(calendar, follower, { ...link, lag: 0 }, predecessor);
 }
@@ -174,7 +185,7 @@ export function linkFloor(calendar: Calendar, follower: Pick<TaskRow, "resourceI
 /** The earliest start (a half day) the constraints allow `follower`: the strictest link wins. -Infinity when none applies. */
 export function requiredStart(
   calendar: Calendar,
-  follower: Pick<TaskRow, "resourceId" | "duration">,
+  follower: Pick<TaskRow, "resourceId" | "duration"> & Partial<Pick<TaskRow, "breaks">>,
   constraints: readonly { link: Link; span: Span | null }[],
 ): HalfDay {
   let required = -Infinity;

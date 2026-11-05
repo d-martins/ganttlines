@@ -22,6 +22,7 @@ import {
   type Schedule,
   type Span,
 } from "./schedule";
+import { clearLostInterruptions } from "./parts";
 import { buildTree, childrenOf, clearLostTargets, descendantLeafTasks, isAncestor, isParentTask, subtreeIds, type Tree } from "./tree";
 
 export type DayHalf = "morning" | "afternoon";
@@ -133,6 +134,7 @@ class Execution {
     this.apply(command);
     this.settleFormerParents();
     clearLostTargets(this.rows);
+    clearLostInterruptions(this.rows);
     return this.result();
   }
 
@@ -273,7 +275,7 @@ class Execution {
     if (isParentTask(this.tree, original)) throw new Rejection("invalid", "Only single tasks can be duplicated");
     if (this.rows[newId]) throw new Rejection("invalid", `Row ${newId} already exists`);
     // A copy is new work: it hasn't taken any actual days yet.
-    this.rows[newId] = { ...original, id: newId, actualDuration: null, position: this.positionAfter(original.parentId, original.id) };
+    this.rows[newId] = { ...original, id: newId, actualDuration: null, interruptedBy: [], position: this.positionAfter(original.parentId, original.id) };
     // The copy follows what the original follows.
     for (const link of this.linksInto(id)) this.putLink({ ...link, followerId: newId });
     return this.result();

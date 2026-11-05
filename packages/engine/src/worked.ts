@@ -1,14 +1,16 @@
 import type { Calendar } from "./calendar";
 import type { DayNum } from "./date";
 import type { ProjectState, RowId, TaskRow } from "./model";
+import { partsOf } from "./parts";
 import type { Schedule } from "./schedule";
 import { buildTree, childrenOf, descendantLeafTasks, isParentTask, type Tree } from "./tree";
 
 /** The days a leaf task is worked, on its own person's calendar (none when unscheduled or a milestone). */
 function leafDays(leaf: TaskRow, schedule: Schedule, calendar: Calendar, into: Set<DayNum>): Set<DayNum> {
-  const span = schedule.get(leaf.id)?.span;
-  if (!span || leaf.duration === 0) return into;
-  for (let day = span.start; day <= span.end; day++) if (calendar.isWorkingDay(day, leaf.resourceId)) into.add(day);
+  if (leaf.duration === 0) return into;
+  for (const span of partsOf(schedule.get(leaf.id))) {
+    for (let day = span.start; day <= span.end; day++) if (calendar.isWorkingDay(day, leaf.resourceId)) into.add(day);
+  }
   return into;
 }
 
