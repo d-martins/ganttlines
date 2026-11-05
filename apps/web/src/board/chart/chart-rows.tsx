@@ -1,6 +1,6 @@
 import type { SlackAnalysis } from "@ganttlines/engine";
 import { fromDay, LINK_KIND_WORDS, spanEnd, spanStart, type Command, type DayNum, type LinkKind, type RowId } from "@ganttlines/engine";
-import { UserRound } from "lucide-react";
+import { SquareCenterlineDashedHorizontal, UserRound } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { AssigneePicker } from "../assignee-picker";
 import { runCommand, useBoard } from "../board-context";
@@ -12,6 +12,7 @@ import type { BoardRow } from "../model";
 import { useSelection } from "../selection";
 import type { BarStyle } from "../view-store";
 import { BarMenu } from "./bar-menu";
+import { Cutting, startCutting } from "./cutting";
 import { ActualTrack, BAR_HEIGHT, barDetails, DOT_GAP, DOT_REACH, DOT_SIZE, extent, GhostBar, ROW_HEIGHT, RowBar } from "./bars";
 import { dragCommand, edgeAt, gapCommand, useHoveredRow, linkKindOf, startAt, stepHalf, useChartDrag, type ChartDrag, type DragKind, type LinkEnd } from "./drag";
 import { TagChips, type TagFilter } from "./tag-chips";
@@ -21,15 +22,15 @@ import { AUTO_SCROLL_STEP, AUTO_SCROLL_TICK_MS, edgePush, HEADER_HEIGHT } from "
 const BAR_HELP_ID = "gp-bar-help";
 /** pixels the pointer must travel before a press on a bar becomes a drag (a smaller movement is a click) */
 const DRAG_THRESHOLD = 3;
-/** a bar's quick tools: two 20 px buttons, 4 px apart */
-const TOOLS_WIDTH = 44;
+/** a bar's quick tools: three 20 px buttons, 4 px apart */
+const TOOLS_WIDTH = 68;
 
 /**
  * Where a bar's quick tools start: left of its start dot, 4 px clear; past its end dot when the
  * chart's left edge leaves no room there.
  */
 export const toolsLeft = (box: { left: number; right: number }) =>
-  box.left - DOT_REACH - DOT_GAP >= TOOLS_WIDTH ? Math.max(box.left - 64, 0) : box.right + DOT_GAP + DOT_SIZE + DOT_GAP;
+  box.left - DOT_REACH - DOT_GAP >= TOOLS_WIDTH ? Math.max(box.left - TOOLS_WIDTH - 20, 0) : box.right + DOT_GAP + DOT_SIZE + DOT_GAP;
 
 /** A link dot at chart x `left`: press and drag it onto another task to link them. */
 function LinkDot({ left, top, title, onPointerDown }: { left: number; top: number; title: string; onPointerDown: (event: ReactPointerEvent) => void }) {
@@ -369,6 +370,18 @@ export function ChartRows({
                     style={{ marginLeft: toolsLeft(box), left: "calc(var(--list-width) + 4px)" }}
                     onClick={(event) => event.stopPropagation()}
                   >
+                    {resizable ? (
+                      <button
+                        type="button"
+                        aria-label={`Interrupt “${row.title || "Untitled"}”`}
+                        title="Interrupt this task"
+                        disabled={task!.duration < 1}
+                        onClick={() => startCutting(entry)}
+                        className="flex h-5 w-5 items-center justify-center rounded bg-bg text-muted shadow-sm ring-1 ring-border hover:text-text disabled:opacity-40"
+                      >
+                        <SquareCenterlineDashedHorizontal size={12} />
+                      </button>
+                    ) : null}
                     <AssigneePicker
                       value={task!.resourceId}
                       resources={resources}
@@ -422,6 +435,7 @@ export function ChartRows({
           ) : null}
         </div>
       ) : null}
+      <Cutting rows={allRows} timeline={timeline} style={style} run={run} />
       {drag?.line ? <LinkDragPreview drag={drag} allRows={allRows} timeline={timeline} style={style} /> : null}
       {linkChoice ? <LinkChoiceMenu choice={linkChoice} state={state} run={run} onClose={() => setLinkChoice(null)} /> : null}
     </>

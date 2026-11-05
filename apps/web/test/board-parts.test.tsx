@@ -1,30 +1,11 @@
-import type { Command, Link } from "@ganttlines/engine";
-import type { ProjectStateDto } from "@ganttlines/protocol";
 import { fireEvent, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useChartDrag } from "../src/board/chart/drag";
-import { ADMIN, project, renderApp, screen, signedIn, VIEWER } from "./utils";
-import { CALENDAR, FakeWebSocket, PROJECT_ID, projectState, task } from "./board-fixtures";
+import { board, sentCommands } from "./chart-board";
+import { screen, VIEWER } from "./utils";
+import { task } from "./board-fixtures";
 
 const MON = "2026-10-12";
-const sentCommands = (): Command[] =>
-  FakeWebSocket.last.sent.flatMap((message) => ((message as { type: string }).type === "command" ? [(message as { command: Command }).command] : []));
-
-async function board(rows: ProjectStateDto["rows"], user = ADMIN, links: Link[] = []) {
-  FakeWebSocket.instances = [];
-  vi.stubGlobal("WebSocket", FakeWebSocket);
-  const api = signedIn(user, [project(PROJECT_ID, "Launch")]);
-  api.on(`GET /api/projects/${PROJECT_ID}/state`, () => ({ body: projectState(rows, 5, links) }));
-  api.on("GET /api/calendar", () => ({ body: CALENDAR }));
-  api.on("GET /api/resources", () => ({ body: { resources: [] } }));
-  api.on(`GET /api/projects/${PROJECT_ID}/highlights`, () => ({ body: { highlights: [] } }));
-  api.on(`GET /api/projects/${PROJECT_ID}/baselines`, () => ({ body: { baselines: [] } }));
-  const rendered = renderApp(`/p/${PROJECT_ID}`);
-  await screen.findByRole("treegrid", { name: "Tasks" });
-  await waitFor(() => expect(FakeWebSocket.last.sent).toHaveLength(1));
-  FakeWebSocket.last.deliver({ type: "joined", projectId: PROJECT_ID, version: 5, instanceVersion: 1, viewers: [] });
-  return rendered;
-}
 
 const split = { userStart: MON, duration: 2, breaks: [{ after: 2, length: 6 }] };
 const parts = () => screen.queryAllByTestId("bar-part");

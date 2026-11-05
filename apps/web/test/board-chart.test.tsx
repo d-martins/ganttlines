@@ -1113,9 +1113,9 @@ describe("tags in the bar's menu", () => {
 
 describe("toolsLeft", () => {
   it("puts a bar's quick tools left of its start dot, 4 px clear, or past its end dot when the chart's edge leaves no room", () => {
-    expect(toolsLeft({ left: 200, right: 300 })).toBe(136); // tools 136–180, start dot 186–196
-    expect(toolsLeft({ left: 62, right: 300 })).toBe(0); // just fits: tools 0–44, start dot 48–58
-    expect(toolsLeft({ left: 40, right: 100 })).toBe(118); // end dot 104–114, tools from 118
+    expect(toolsLeft({ left: 200, right: 300 })).toBe(112); // tools 112–180, start dot 186–196
+    expect(toolsLeft({ left: 86, right: 300 })).toBe(0); // just fits: tools 0–68, start dot 72–82
+    expect(toolsLeft({ left: 62, right: 100 })).toBe(118); // end dot 104–114, tools from 118
   });
 });
 
