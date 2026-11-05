@@ -18,7 +18,7 @@ import {
   type TaskRow,
 } from "@ganttlines/engine";
 import { ChevronDown, Plus, X } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { IconButton } from "../../ui/button";
 import { END_WORDS, lineOf, linkOf, WHEN_WORDS, type LinkLine, type LinkShape } from "../link-phrases";
 import { useSelection } from "../selection";
@@ -34,9 +34,15 @@ type Control = "when" | "end" | "task";
 type FocusRequest = { key: LinkKey; control: Control };
 type LineRefs = { when: RefObject<HTMLSelectElement | null>; end: RefObject<HTMLSelectElement | null> };
 
+const INTERRUPTED_BY = "interrupted by";
+const INTERRUPTS = "interrupts";
+const INTERRUPT_WORDS = [INTERRUPTED_BY, INTERRUPTS] as const;
+type InterruptWord = (typeof INTERRUPT_WORDS)[number];
+const isInterruptWord = (word: string): word is InterruptWord => word === INTERRUPTED_BY || word === INTERRUPTS;
+
 const WHEN_OR_AIM = [AIMS_FOR, ...WHEN_WORDS] as const;
 const WHEN_OR_AIMED = [AIMED_BY, ...WHEN_WORDS] as const;
-type WhenOrAim = typeof AIMS_FOR | typeof AIMED_BY | (typeof WHEN_WORDS)[number];
+type WhenOrAim = typeof AIMS_FOR | typeof AIMED_BY | InterruptWord | (typeof WHEN_WORDS)[number];
 
 function WordSelect<T extends string>({
   value,
@@ -74,6 +80,7 @@ function LineControls({
   removeMarker = false,
   onAim,
   aimWords = WHEN_OR_AIM,
+  onInterrupt,
 }: {
   line: LinkLine;
   /** names the line's controls: "Link with #3 Design" */
@@ -88,10 +95,19 @@ function LineControls({
   /** offers "aims for" in the first dropdown, and what choosing it does */
   onAim?: (() => void) | undefined;
   aimWords?: readonly WhenOrAim[];
+  /** offers "interrupted by" and "interrupts" in the first dropdown, and what choosing one does */
+  onInterrupt?: ((word: InterruptWord) => void) | undefined;
 }) {
+  const words: readonly WhenOrAim[] = [...(onAim ? aimWords : WHEN_WORDS), ...(onInterrupt ? INTERRUPT_WORDS : [])];
   return (
     <li data-link-line className="flex min-w-0 items-center gap-1 text-sm">
-      <WordSelect<WhenOrAim> value={line.when} words={onAim ? aimWords : WHEN_WORDS} label={`${label}: this task`} selectRef={refs.when} onChange={(when) => when === AIMS_FOR || when === AIMED_BY ? onAim?.() : onLine({ ...line, when })} />
+      <WordSelect<WhenOrAim>
+        value={line.when}
+        words={words}
+        label={`${label}: this task`}
+        selectRef={refs.when}
+        onChange={(when) => (when === AIMS_FOR || when === AIMED_BY ? onAim?.() : isInterruptWord(when) ? onInterrupt?.(when) : onLine({ ...line, when }))}
+      />
       {task}
       <WordSelect value={line.end} words={END_WORDS} label={`${label}: the other task`} selectRef={refs.end} onChange={(end) => onLine({ ...line, end })} />
       <IconButton {...(removeMarker ? { "data-remove-link": true } : {})} label={removeLabel} onClick={onRemove} className="shrink-0">
@@ -126,7 +142,7 @@ export function LinksSection({
   schedule?: Schedule | null;
 }) {
   const select = useSelection((selection) => selection.select);
-  const [draft, setDraft] = useState<{ line: LinkLine; open: boolean; aim?: boolean } | null>(null);
+  const [draft, setDraft] = useState<{ line: LinkLine; open: boolean; aim?: boolean; interrupt?: InterruptWord } | null>(null);
   // A milestone just created from here: its date is ready to correct.
   const [correcting, setCorrecting] = useState<RowId | null>(null);
   const [focus, setFocus] = useState<FocusRequest | null>(null);
@@ -139,7 +155,8 @@ export function LinksSection({
 
   const numberOf = (id: RowId) => numbers.get(id) ?? 0;
   // A milestone has nothing to aim with.
-  const canAim = task.duration !== 0 || isParentTask(buildTree(state), task);
+  const tree = useMemo(() => buildTree(state), [state]);
+  const canAim = task.duration !== 0 || isParentTask(tree, task);
   const aimProps = { task, state, calendar, schedule, numbers, run };
   const aiming = canAim && effectiveTarget(state, task) !== null;
   // From a milestone's side: the tasks that chose it, not subtasks that only inherit.
@@ -222,6 +239,56 @@ export function LinksSection({
     run({ type: "relink", steps: [remove, aim] });
   };
 
+  // Tasks with work of their own and no subtasks can interrupt or be interrupted.
+  const hasWork = (row: Row | undefined): row is TaskRow => row?.kind === "task" && row.duration !== 0 && !isParentTask(tree, row);
+  const canInterrupt = hasWork(task);
+  const interruptedBy = canInterrupt ? [...(task.interruptedBy ?? [])].filter((id) => state.rows[id]).sort((a, b) => numberOf(a) - numberOf(b)) : [];
+  const interrupting = canInterrupt
+    ? Object.values(state.rows)
+        .filter((row): row is TaskRow => row.kind === "task" && (row.interruptedBy ?? []).includes(task.id))
+        .sort((a, b) => numberOf(a.id) - numberOf(b.id))
+    : [];
+  const canPairWith = (row: Row) => hasWork(row) && row.id !== task.id && !isAncestor(state, row.id, task.id) && !isAncestor(state, task.id, row.id);
+  const interruption = (word: InterruptWord, otherId: RowId) => (word === INTERRUPTED_BY ? { id: task.id, byId: otherId } : { id: otherId, byId: task.id });
+  const taken = (word: InterruptWord, row: Row) => (word === INTERRUPTED_BY ? interruptedBy.includes(row.id) : interrupting.some((other) => other.id === row.id));
+  const stopInterrupt = (word: InterruptWord, otherId: RowId) => ({ type: "removeInterruption" as const, ...interruption(word, otherId) });
+
+  /** An interruption turned into a link with the same task, or flipped. */
+  const interruptToWord = (word: InterruptWord, otherId: RowId, next: WhenOrAim) => {
+    if (isInterruptWord(next)) {
+      run({ type: "relink", steps: [stopInterrupt(word, otherId), { type: "addInterruption", ...interruption(next, otherId) }] });
+      return;
+    }
+    if (next === AIMS_FOR || next === AIMED_BY) return;
+    const { kind, thisWaits } = linkOf({ when: next, end: "finished" });
+    const add = { type: "addLink" as const, ...between(otherId, thisWaits), kind };
+    if (run({ type: "relink", steps: [stopInterrupt(word, otherId), add] }) !== null) setFocus({ key: linkKey(add), control: "when" });
+  };
+
+  /** A link turned into an interruption between the same two tasks. */
+  const linkToInterrupt = (link: Link, word: InterruptWord) => {
+    const remove = { type: "removeLink" as const, predecessorId: link.predecessorId, followerId: link.followerId, kind: link.kind, keepPlace: false };
+    run({ type: "relink", steps: [remove, { type: "addInterruption", ...interruption(word, otherOf(link)) }] });
+  };
+
+  const interruptLines = (lineWord: InterruptWord, others: readonly RowId[]) =>
+    others.map((otherId) => (
+      <InterruptLine
+        key={`${lineWord}-${otherId}`}
+        word={lineWord}
+        name={nameOf(otherId)}
+        title={state.rows[otherId]?.title || "Untitled"}
+        state={state}
+        schedule={schedule}
+        numbers={numbers}
+        exclude={(row) => !canPairWith(row) || taken(lineWord, row)}
+        onWord={(word) => interruptToWord(lineWord, otherId, word)}
+        onTask={(next) => run({ type: "relink", steps: [stopInterrupt(lineWord, otherId), { type: "addInterruption", ...interruption(lineWord, next) }] })}
+        onGo={() => select(otherId)}
+        onRemove={() => run(stopInterrupt(lineWord, otherId))}
+      />
+    ));
+
   const pickForDraft = (line: LinkLine, otherId: RowId) => {
     const { kind, thisWaits } = linkOf(line);
     const add = { type: "addLink" as const, ...between(otherId, thisWaits), kind };
@@ -244,14 +311,22 @@ export function LinksSection({
           words={WHEN_OR_AIM}
           label={`Aims for ${nameOf(effectiveTarget(state, task)!)}: this task`}
           selectRef={aimWhen}
-          onChange={(when) => when !== AIMS_FOR && when !== AIMED_BY && task.targetId !== null && aimAsLink(task.id, task.targetId, when)}
+          onChange={(when) => when !== AIMS_FOR && when !== AIMED_BY && !isInterruptWord(when) && task.targetId !== null && aimAsLink(task.id, task.targetId, when)}
         />
       }
     />
   ) : null;
 
   if (!canEdit) {
-    if (links.length === 0 && !aiming && aimers.length === 0) return <p className="text-sm text-muted">None</p>;
+    if (links.length === 0 && !aiming && aimers.length === 0 && interruptedBy.length === 0 && interrupting.length === 0) return <p className="text-sm text-muted">None</p>;
+    const readLine = (word: InterruptWord, otherId: RowId) => (
+      <li key={`${word}-${otherId}`}>
+        {word}{" "}
+        <button type="button" onClick={() => select(otherId)} className="rounded px-0.5 font-medium hover:bg-surface-2">
+          {nameOf(otherId)}
+        </button>
+      </li>
+    );
     return (
       <ul aria-label="Links" className="flex flex-col gap-1 text-sm">
         {aimLine}
@@ -269,6 +344,8 @@ export function LinksSection({
             </li>
           );
         })}
+        {interruptedBy.map((id) => readLine(INTERRUPTED_BY, id))}
+        {interrupting.map((row) => readLine(INTERRUPTS, row.id))}
         {links.map((link) => {
           const otherId = otherOf(link);
           const { when, end } = lineOf({ kind: link.kind, thisWaits: link.followerId === task.id });
@@ -288,8 +365,8 @@ export function LinksSection({
 
   return (
     <div ref={container} className="flex flex-col gap-2">
-      {links.length === 0 && !draft && !aiming && aimers.length === 0 ? <p className="text-sm text-muted">None</p> : null}
-      {links.length > 0 || draft || aiming || aimers.length > 0 ? (
+      {links.length === 0 && !draft && !aiming && aimers.length === 0 && interruptedBy.length === 0 && interrupting.length === 0 ? <p className="text-sm text-muted">None</p> : null}
+      {links.length > 0 || draft || aiming || aimers.length > 0 || interruptedBy.length > 0 || interrupting.length > 0 ? (
         <ul aria-label="Links" className="flex flex-col gap-1">
           {aimLine}
           {aimers.map((aimer) => (
@@ -308,6 +385,8 @@ export function LinksSection({
               onRemove={() => run({ type: "setTarget", id: aimer.id, targetId: null })}
             />
           ))}
+          {interruptLines(INTERRUPTED_BY, interruptedBy)}
+          {interruptLines(INTERRUPTS, interrupting.map((row) => row.id))}
           {links.map((link, index) => (
             <LinkLineEditor
               key={linkKey(link)}
@@ -323,6 +402,7 @@ export function LinksSection({
               onLine={(line, control) => changeLine(link, line, control)}
               onAim={(canAim && isValidTarget(state, otherOf(link))) || (isTarget && !isValidTarget(state, otherOf(link))) ? () => linkToAim(link) : undefined}
               aimWords={aimWords}
+              onInterrupt={canInterrupt && hasWork(state.rows[otherOf(link)]) ? (word) => linkToInterrupt(link, word) : undefined}
               onTask={(otherId) => changeTask(link, otherId)}
               onGo={() => select(otherOf(link))}
               onRemove={() => {
@@ -332,14 +412,48 @@ export function LinksSection({
               }}
             />
           ))}
-          {draft?.aim && isTarget ? (
+          {draft?.interrupt ? (
+            <li data-link-line className="flex min-w-0 items-center gap-1 text-sm">
+              <WordSelect<WhenOrAim>
+                value={draft.interrupt}
+                words={[...WHEN_WORDS, ...INTERRUPT_WORDS]}
+                label="New link: this task"
+                selectRef={draftRefs.when}
+                onChange={(when) => {
+                  if (isInterruptWord(when)) setDraft({ ...draft, interrupt: when, open: false });
+                  else if (when !== AIMS_FOR && when !== AIMED_BY) setDraft({ line: { ...draft.line, when }, open: false });
+                }}
+              />
+              <TaskPicker
+                exclude={(row) => !canPairWith(row) || taken(draft.interrupt!, row)}
+                onPick={(otherId) => {
+                  if (run({ type: "addInterruption", ...interruption(draft.interrupt!, otherId) }) !== null) setDraft(null);
+                }}
+                state={state}
+                schedule={schedule}
+                numbers={numbers}
+                searchLabel="Find a task to interrupt with"
+                open={draft.open}
+                onOpenChange={(open) => setDraft((current) => current && { ...current, open })}
+                trigger={
+                  <button type="button" aria-label="New link: choose a task" className={`${TASK_BUTTON} text-muted`}>
+                    <span className="truncate">choose a task…</span>
+                    <ChevronDown aria-hidden size={13} className="ml-auto shrink-0" />
+                  </button>
+                }
+              />
+              <IconButton label="Discard the new link" onClick={() => { setDraft(null); addButton.current?.focus(); }} className="shrink-0">
+                <X size={14} />
+              </IconButton>
+            </li>
+          ) : draft?.aim && isTarget ? (
             <li data-link-line className="flex min-w-0 items-center gap-1 text-sm">
               <WordSelect<WhenOrAim>
                 value={AIMED_BY}
                 words={WHEN_OR_AIMED}
                 label="New link: this task"
                 selectRef={draftRefs.when}
-                onChange={(when) => when !== AIMED_BY && when !== AIMS_FOR && setDraft({ line: { ...draft.line, when }, open: false })}
+                onChange={(when) => when !== AIMED_BY && when !== AIMS_FOR && !isInterruptWord(when) && setDraft({ line: { ...draft.line, when }, open: false })}
               />
               <TaskPicker
                 exclude={(row) => !canAimHere(row)}
@@ -370,7 +484,7 @@ export function LinksSection({
                 words={WHEN_OR_AIM}
                 label="New link: this task"
                 selectRef={draftRefs.when}
-                onChange={(when) => when !== AIMS_FOR && when !== AIMED_BY && setDraft({ line: { ...draft.line, when }, open: false })}
+                onChange={(when) => when !== AIMS_FOR && when !== AIMED_BY && !isInterruptWord(when) && setDraft({ line: { ...draft.line, when }, open: false })}
               />
               <AimPicker
                 {...aimProps}
@@ -385,6 +499,7 @@ export function LinksSection({
             <LineControls
               onAim={canAim ? () => setDraft({ ...draft, aim: true, open: false }) : isTarget ? () => setDraft({ ...draft, aim: true, open: true }) : undefined}
               aimWords={aimWords}
+              onInterrupt={canInterrupt ? (word) => setDraft({ ...draft, interrupt: word, open: true }) : undefined}
               line={draft.line}
               label="New link"
               refs={draftRefs}
@@ -446,6 +561,7 @@ function LinkLineEditor({
   onRemove,
   onAim,
   aimWords,
+  onInterrupt,
 }: {
   link: Link;
   taskId: RowId;
@@ -463,6 +579,7 @@ function LinkLineEditor({
   onRemove: () => void;
   onAim?: (() => void) | undefined;
   aimWords: readonly WhenOrAim[];
+  onInterrupt?: ((word: InterruptWord) => void) | undefined;
 }) {
   const [open, setOpen] = useState(false);
   const refs: LineRefs = { when: useRef<HTMLSelectElement>(null), end: useRef<HTMLSelectElement>(null) };
@@ -486,6 +603,7 @@ function LinkLineEditor({
       onRemove={onRemove}
       onAim={onAim}
       aimWords={aimWords}
+      onInterrupt={onInterrupt}
       task={
         <TaskPicker
           exclude={exclude(shape)}
@@ -517,6 +635,73 @@ function LinkLineEditor({
         />
       }
     />
+  );
+}
+
+/** `[interrupted by ▾] [#4 Hotfix ▾] ×`, or `[interrupts ▾]`, from either of the two tasks. */
+function InterruptLine({
+  word,
+  name,
+  title,
+  state,
+  schedule,
+  numbers,
+  exclude,
+  onWord,
+  onTask,
+  onGo,
+  onRemove,
+}: {
+  word: InterruptWord;
+  name: string;
+  title: string;
+  state: ProjectState;
+  schedule: Schedule | null;
+  numbers: ReadonlyMap<RowId, number>;
+  exclude: (row: Row) => boolean;
+  onWord: (word: WhenOrAim) => void;
+  onTask: (otherId: RowId) => void;
+  onGo: () => void;
+  onRemove: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const when = useRef<HTMLSelectElement>(null);
+  const label = word === INTERRUPTED_BY ? `Interrupted by ${name}` : `Interrupts ${name}`;
+  return (
+    <li data-link-line className="flex min-w-0 items-center gap-1 text-sm">
+      <WordSelect<WhenOrAim> value={word} words={[...WHEN_WORDS, ...INTERRUPT_WORDS]} label={`${label}: this task`} selectRef={when} onChange={(next) => next !== word && onWord(next)} />
+      <TaskPicker
+        exclude={exclude}
+        onPick={onTask}
+        state={state}
+        schedule={schedule}
+        numbers={numbers}
+        searchLabel="Find a task to interrupt with"
+        open={open}
+        onOpenChange={setOpen}
+        footer={
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              onGo();
+            }}
+            className="text-xs text-muted hover:text-text"
+          >
+            Go to {name}
+          </button>
+        }
+        trigger={
+          <button type="button" aria-label={`${label}: change the task`} title={name} className={TASK_BUTTON}>
+            <span className="truncate">{name}</span>
+            <ChevronDown aria-hidden size={13} className="ml-auto shrink-0 text-muted" />
+          </button>
+        }
+      />
+      <IconButton label={`Stop “${title}” interrupting`} onClick={onRemove} className="shrink-0">
+        <X size={14} />
+      </IconButton>
+    </li>
   );
 }
 
@@ -556,7 +741,7 @@ function AimedByLine({
           words={WHEN_OR_AIMED}
           label={`Aimed by ${name}: this task`}
           selectRef={when}
-          onChange={(word) => word !== AIMED_BY && word !== AIMS_FOR && onWhen(word)}
+          onChange={(word) => word !== AIMED_BY && word !== AIMS_FOR && !isInterruptWord(word) && onWhen(word)}
         />
         <TaskPicker
           exclude={exclude}

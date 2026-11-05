@@ -297,3 +297,56 @@ describe("analyseSlack", () => {
     expect(pastTarget).toEqual(new Set(["t"]));
   });
 });
+
+describe("across parts and interruptions", () => {
+  const MON = "2026-10-05";
+
+  it("a split task slips from its last part", () => {
+    // Monday and Friday, aiming for the Monday after.
+    const state = project(task("t", { userStart: MON, duration: 2, breaks: [{ after: 2, length: 6 }], targetId: "m" }), task("m", { userStart: "2026-10-12", duration: 0 }));
+    expect(days(state, "t")).toBe(1);
+  });
+
+  it("an interrupter inside its task has room: the gap just moves", () => {
+    const state = project(task("a", { userStart: "2026-10-06", duration: 1 }), task("b", { userStart: MON, duration: 3, interruptedBy: ["a"], targetId: "m" }), task("m", { userStart: "2026-10-08", duration: 0 }));
+    expect(slackOf(state).get("a")?.limit).not.toEqual({ kind: "milestone", id: "m" });
+  });
+
+  it("an interrupter limits when slipping would push the interrupted task past its own limit", () => {
+    // A on Monday, B on Wednesday and Thursday with no room: A can reach Tuesday, but not into Wednesday.
+    const state = project(task("a", { userStart: MON, duration: 1 }), task("b", { userStart: "2026-10-07", duration: 2, interruptedBy: ["a"], targetId: "m" }), task("m", { userStart: "2026-10-08", duration: 0 }));
+    expect(slackOf(state).get("b")).toMatchObject({ halves: 0 });
+    expect(slackOf(state).get("a")).toEqual({ halves: 2, limit: { kind: "milestone", id: "m" } });
+  });
+
+  it("an interrupter's time off doesn't count as it running", () => {
+    const off = calendar({ timeOff: [{ id: "o", resourceId: "ana", startDate: "2026-10-07", endDate: "2026-10-07" }] });
+    // A on Tuesday and Thursday, Ana off Wednesday. B on Monday and Wednesday has no room. A slipping only frees Tuesday for B.
+    const state = project(task("a", { userStart: "2026-10-06", duration: 2, resourceId: "ana" }), task("b", { userStart: MON, duration: 2, resourceId: "rui", interruptedBy: ["a"], targetId: "m" }), task("m", { userStart: "2026-10-07", duration: 0 }));
+    const schedule = computeSchedule(state, off);
+    expect(computeSlack(state, off, schedule).get("b")).toMatchObject({ halves: 0 });
+    expect(computeSlack(state, off, schedule).get("a")?.limit).toEqual({ kind: "end" });
+  });
+
+  it("stays quick on very long interrupted tasks", () => {
+    const interrupters = Array.from({ length: 20 }, (_, i) => task(`a${i}`, { userStart: "2020-01-06", duration: 2 + i }));
+    const interrupted = Array.from({ length: 20 }, (_, i) => task(`b${i}`, { userStart: MON, duration: 3600, interruptedBy: interrupters.map((row) => row.id) }));
+    const state = project(...interrupters, ...interrupted);
+    const schedule = computeSchedule(state, cal);
+    const before = Date.now();
+    computeSlack(state, cal, schedule);
+    expect(Date.now() - before).toBeLessThan(5000);
+  });
+
+  it("an interruption connects a task", () => {
+    const state = project(task("a", { userStart: MON, duration: 1 }), task("b", { userStart: MON, duration: 2, interruptedBy: ["a"] }), task("loose", { userStart: MON, duration: 1 }));
+    expect(slackOf(state).get("a")).toBeDefined();
+    expect(slackOf(state).get("b")).toBeDefined();
+    expect(slackOf(state).get("loose")).toBeUndefined();
+  });
+
+  it("a locked task ignores interrupters, so it's no limit", () => {
+    const state = project(task("a", { userStart: MON, duration: 1 }), task("b", { userStart: "2026-10-07", duration: 2, locked: true, interruptedBy: ["a"], targetId: "m" }), task("m", { userStart: "2026-10-08", duration: 0 }));
+    expect(slackOf(state).get("a")).toBeUndefined();
+  });
+});

@@ -6,7 +6,7 @@ const PROJECTS = "projects";
  * 2: projects keep their links as records of their own (version 1 kept one predecessor on each task).
  * 3: tasks have tags and sections a description.
  */
-const VERSION = 4;
+const VERSION = 5;
 
 /** This browser's workspace in IndexedDB: one workspace record, one record per project. */
 export class IndexedDbStore implements LocalStore {

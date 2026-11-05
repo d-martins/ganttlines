@@ -286,7 +286,7 @@ describe("details panel", () => {
     // hooks waits for ui to finish (FS); qa starts once hooks starts (SS, qa waits).
     const when = within(ui!).getByRole("combobox", { name: "Link with #2 ui: this task" });
     expect(when).toHaveDisplayValue("starts after");
-    expect(within(when).getAllByRole("option").map((option) => option.textContent)).toEqual(["starts before", "starts after", "ends before", "ends after"]);
+    expect(within(when).getAllByRole("option").map((option) => option.textContent)).toEqual(["starts before", "starts after", "ends before", "ends after", "interrupted by", "interrupts"]);
     expect(within(ui!).getByRole("button", { name: "Link with #2 ui: change the task" })).toHaveTextContent("#2 ui");
     const end = within(ui!).getByRole("combobox", { name: "Link with #2 ui: the other task" });
     expect(end).toHaveDisplayValue("finished");
@@ -483,6 +483,170 @@ describe("details panel", () => {
     expect(within(panel()).queryByRole("button", { name: /^(Add link|Remove link with|Link with)/ })).not.toBeInTheDocument();
     await user.click(within(lines()[0]!).getByRole("button", { name: "#2 ui" })); // goes to the linked task
     expect(panel()).toHaveAccessibleName("Details of “ui”");
+  });
+
+  describe("interruptions", () => {
+    const MON = "2026-10-12";
+    const interruptionsBoard = async (fields: Partial<TaskRow> = {}, user = ADMIN, extra: ProjectStateDto["rows"] = []) => {
+      const rows = [ROWS[0]!, task("t", { parentId: "x", position: "a1", userStart: MON, duration: 2, ...fields }), ...extra];
+      const app = await panelBoard(rows, user, [], []);
+      await selectRow(app.user, "t");
+      return app;
+    };
+    const section = () => within(panel()).getByRole("heading", { name: "Interruptions" }).closest("section")!;
+    const lastCommand = () => sentCommands().at(-1);
+    const from = () => within(section()).getByLabelText(/^Interrupted from/);
+    const to = () => within(section()).getByLabelText(/^Interrupted until/);
+    const setDate = (input: HTMLElement, value: string) => fireEvent.change(input, { target: { value } });
+
+    it("sits above Links, only for tasks with work of their own", async () => {
+      await interruptionsBoard();
+      const titles = within(panel()).getAllByRole("heading").map((heading) => heading.textContent);
+      expect(titles.indexOf("Interruptions")).toBe(titles.indexOf("Links") - 1);
+    });
+
+    it("isn't there for milestones", async () => {
+      await interruptionsBoard({ duration: 0 });
+      expect(within(panel()).queryByRole("heading", { name: "Interruptions" })).not.toBeInTheDocument();
+    });
+
+    it("adds one: Save sends where it starts and the working day after it ends", async () => {
+      const { user } = await interruptionsBoard();
+      await user.click(within(section()).getByRole("button", { name: "Add interruption" }));
+      setDate(from(), "2026-10-13");
+      setDate(to(), "2026-10-15");
+      await user.click(within(section()).getByRole("button", { name: "Save" }));
+      expect(lastCommand()).toEqual({ type: "addBreak", id: "t", from: "2026-10-13", resume: "2026-10-16" });
+    });
+
+    it("a refused one shows why, and the draft stays", async () => {
+      const { user } = await interruptionsBoard();
+      await user.click(within(section()).getByRole("button", { name: "Add interruption" }));
+      setDate(from(), "2026-11-20");
+      setDate(to(), "2026-11-25");
+      await user.click(within(section()).getByRole("button", { name: "Save" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent(/inside the task/);
+      expect(from()).toHaveValue("2026-11-20");
+    });
+
+    it("an end before the start is refused: a new one's draft stays, a stored one stays as it was", async () => {
+      const { user } = await interruptionsBoard();
+      await user.click(within(section()).getByRole("button", { name: "Add interruption" }));
+      setDate(from(), "2026-10-13");
+      setDate(to(), "2026-10-12");
+      await user.click(within(section()).getByRole("button", { name: "Save" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent(/end after it starts/);
+      expect(from()).toHaveValue("2026-10-13");
+    });
+
+    it("a stored one reads back its dates and what it does", async () => {
+      await interruptionsBoard({ breaks: [{ after: 2, length: 6 }] });
+      expect(from()).toHaveValue("2026-10-13");
+      expect(to()).toHaveValue("2026-10-15");
+      expect(within(section()).getByText(new RegExp(`^Still 2 days of work\\. Now finishes ${formatDay(toDay("2026-10-16"))}\\.$`))).toBeInTheDocument();
+    });
+
+    it("changing its dates and saving is one change; × removes it", async () => {
+      const { user } = await interruptionsBoard({ breaks: [{ after: 2, length: 6 }] });
+      expect(within(section()).queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+      setDate(to(), "2026-10-14");
+      await user.click(within(section()).getByRole("button", { name: "Save" }));
+      expect(lastCommand()).toEqual({
+        type: "relink",
+        steps: [
+          { type: "removeBreak", id: "t", after: 2 },
+          { type: "addBreak", id: "t", from: "2026-10-13", resume: "2026-10-15" },
+        ],
+      });
+      await user.click(within(section()).getByRole("button", { name: /^Remove interruption/ }));
+      expect(lastCommand()).toMatchObject({ type: "removeBreak", id: "t" });
+    });
+
+    it("viewers read them", async () => {
+      await interruptionsBoard({ breaks: [{ after: 2, length: 6 }] }, VIEWER);
+      expect(within(section()).queryByRole("button")).not.toBeInTheDocument();
+      expect(section()).toHaveTextContent(new RegExp(`${formatDay(toDay("2026-10-13"))} to ${formatDay(toDay("2026-10-15"))}`));
+    });
+
+    describe("in Links", () => {
+      const links = () => within(panel()).getByRole("list", { name: "Links" });
+      const hotfix = task("hotfix", { parentId: "x", position: "a2", userStart: "2026-10-13", duration: 3 });
+      const free = task("free", { parentId: "x", position: "a3", userStart: "2026-10-20", duration: 1 });
+      const whenOfLine = () => within(links()).getAllByRole("combobox").find((box) => (box as HTMLSelectElement).options.length > 0)!;
+
+      it("lists who interrupts it, and offers another task", async () => {
+        const { user } = await interruptionsBoard({ interruptedBy: ["hotfix"] }, ADMIN, [hotfix, free]);
+        expect(whenOfLine()).toHaveValue("interrupted by");
+        await user.click(within(links()).getByRole("button", { name: /hotfix: change the task/ }));
+        await user.type(await screen.findByRole("combobox", { name: "Find a task to interrupt with" }), "free{Enter}");
+        expect(lastCommand()).toEqual({
+          type: "relink",
+          steps: [
+            { type: "removeInterruption", id: "t", byId: "hotfix" },
+            { type: "addInterruption", id: "t", byId: "free" },
+          ],
+        });
+      });
+
+      it("the other task lists it as interrupts", async () => {
+        const { user } = await interruptionsBoard({ interruptedBy: ["hotfix"] }, ADMIN, [hotfix]);
+        await selectRow(user, "hotfix");
+        expect(whenOfLine()).toHaveValue("interrupts");
+        await user.click(within(links()).getByRole("button", { name: /^Stop .* interrupting/ }));
+        expect(lastCommand()).toEqual({ type: "removeInterruption", id: "t", byId: "hotfix" });
+      });
+
+      it("turns into a link, and flips", async () => {
+        const { user } = await interruptionsBoard({ interruptedBy: ["hotfix"] }, ADMIN, [hotfix]);
+        await user.selectOptions(whenOfLine(), "starts after");
+        expect(lastCommand()).toEqual({
+          type: "relink",
+          steps: [
+            { type: "removeInterruption", id: "t", byId: "hotfix" },
+            { type: "addLink", predecessorId: "hotfix", followerId: "t", kind: "FS" },
+          ],
+        });
+      });
+
+      it("flipping it swaps who interrupts whom, as one change", async () => {
+        const { user } = await interruptionsBoard({ interruptedBy: ["hotfix"] }, ADMIN, [hotfix]);
+        await user.selectOptions(whenOfLine(), "interrupts");
+        expect(lastCommand()).toEqual({
+          type: "relink",
+          steps: [
+            { type: "removeInterruption", id: "t", byId: "hotfix" },
+            { type: "addInterruption", id: "hotfix", byId: "t" },
+          ],
+        });
+      });
+
+      it("a link turns into one", async () => {
+        const { user } = await panelBoard([ROWS[0]!, task("t", { parentId: "x", position: "a1", userStart: "2026-10-20", duration: 2 }), hotfix], ADMIN, [], [{ predecessorId: "hotfix", followerId: "t", kind: "FS", lag: 0 }]);
+        await selectRow(user, "t");
+        await user.selectOptions(whenOfLine(), "interrupted by");
+        expect(lastCommand()).toEqual({
+          type: "relink",
+          steps: [
+            { type: "removeLink", predecessorId: "hotfix", followerId: "t", kind: "FS", keepPlace: false },
+            { type: "addInterruption", id: "t", byId: "hotfix" },
+          ],
+        });
+      });
+
+      it("+ Add link offers both", async () => {
+        const { user } = await interruptionsBoard({}, ADMIN, [hotfix]);
+        await user.click(within(panel()).getByRole("button", { name: "Add link" }));
+        await user.keyboard("{Escape}");
+        await user.selectOptions(within(panel()).getByRole("combobox", { name: "New link: this task" }), "interrupted by");
+        await user.type(await screen.findByRole("combobox", { name: "Find a task to interrupt with" }), "hotfix{Enter}");
+        expect(lastCommand()).toEqual({ type: "addInterruption", id: "t", byId: "hotfix" });
+      });
+
+      it("viewers read the line", async () => {
+        await interruptionsBoard({ interruptedBy: ["hotfix"] }, VIEWER, [hotfix]);
+        expect(within(links()).getByRole("listitem")).toHaveTextContent(/^interrupted by #\d+ hotfix/);
+      });
+    });
   });
 
   describe("aiming for", () => {
@@ -800,10 +964,11 @@ describe("details panel", () => {
     const chips = () => within(tagSection()).queryAllByRole("listitem").map((item) => item.querySelector("[data-tag]")!.textContent);
     const lastSetTags = () => sentCommands().filter((command) => command.type === "setTags").at(-1);
 
-    it("sits above Links: a borderless Add tag until focused", async () => {
+    it("sits above Links and Interruptions: a borderless Add tag until focused", async () => {
       const { user } = await tagsBoard();
       const headings = within(panel()).getAllByRole("heading").map((heading) => heading.textContent);
-      expect(headings.indexOf("Tags")).toBe(headings.indexOf("Links") - 1);
+      expect(headings.indexOf("Tags")).toBeLessThan(headings.indexOf("Links"));
+      expect(headings.indexOf("Interruptions")).toBe(headings.indexOf("Links") - 1);
       expect(chips()).toEqual([]);
       expect(tagInput()).toHaveAttribute("placeholder", "Add tag");
       expect(tagInput().className).toContain("border-transparent");
@@ -1146,6 +1311,11 @@ describe("history wording", () => {
     changes: changes.map((change) => ({ rowId: "t", ...change })),
   });
   it("words aiming", () => {
+    expect(describeEntry(entry("addBreak", [{ field: "breaks", before: [], after: [{ after: 2, length: 4 }] }]), names, "t")).toBe("added an interruption");
+    expect(describeEntry(entry("removeBreak", [{ field: "breaks", before: [{ after: 2, length: 4 }], after: [] }]), names, "t")).toBe("removed an interruption");
+    expect(describeEntry(entry("resizeBreak", [{ field: "breaks", before: [{ after: 2, length: 4 }], after: [{ after: 2, length: 2 }] }]), names, "t")).toBe("changed an interruption");
+    expect(describeEntry(entry("addInterruption", [{ field: "interruptedBy", before: [], after: ["p"] }]), names, "t")).toBe("made “Design” interrupt it");
+    expect(describeEntry(entry("removeInterruption", [{ field: "interruptedBy", before: ["p"], after: [] }]), names, "t")).toBe("stopped “Design” interrupting it");
     expect(describeEntry(entry("setTarget", [{ field: "targetId", before: null, after: "p" }]), names, "t")).toBe("aimed it for “Design”");
     expect(describeEntry(entry("setTarget", [{ field: "targetId", before: "p", after: null }]), names, "t")).toBe("stopped aiming it for “Design”");
   });

@@ -452,6 +452,19 @@ describe("AI access: editing plans", () => {
     await client.close();
   });
 
+  it("reads and writes interruptions", async () => {
+    const { client } = await editorsApp();
+    await call(client, "add_tasks", { project: "Launch", tasks: [{ title: "Build", start: "2026-11-02", durationDays: 2 }, { title: "Hotfix", start: "2026-11-16", durationDays: 1 }] });
+    await call(client, "update_task", { project: "Launch", task: "Build", interruptions: [{ from: "2026-11-03", to: "2026-11-05" }], interruptedBy: ["Hotfix"] });
+    const rows = async () => (await call(client, "get_project", { project: "Launch" }))["rows"] as { title: string; end: string; interruptions?: unknown; interruptedBy?: { title: string }[] }[];
+    expect((await rows()).find((row) => row.title === "Build")).toMatchObject({ end: "2026-11-06", interruptions: [{ from: "2026-11-03", to: "2026-11-05" }], interruptedBy: [{ title: "Hotfix" }] });
+    await call(client, "update_task", { project: "Launch", task: "Build", interruptions: [], interruptedBy: [] });
+    const cleared = (await rows()).find((row) => row.title === "Build")!;
+    expect(cleared.end).toBe("2026-11-03");
+    expect(cleared).not.toHaveProperty("interruptions");
+    expect(cleared).not.toHaveProperty("interruptedBy");
+  });
+
   it("shows what a task aims for and how far it can slip; update_task sets and clears the target", async () => {
     const { client } = await editorsApp();
     await call(client, "add_tasks", { project: "Launch", tasks: [{ title: "Build", start: "2026-10-05", durationDays: 2 }, { title: "Cutoff", start: "2026-10-09", milestone: true }, { title: "Other", start: "2026-10-05" }] });

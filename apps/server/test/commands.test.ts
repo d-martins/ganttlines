@@ -387,6 +387,21 @@ describe("tags", () => {
     expect(after.rows.find((r: { id: string }) => r.id === id)).toMatchObject({ targetId: milestone });
   });
 
+  it("keeps interruptions through a reload, and undoes as one step", async () => {
+    const { editor, projectId } = await editorWithProject();
+    const [a, b] = [randomUUID(), randomUUID()];
+    await send(editor, projectId, createTask(a, "A", "2026-11-03"));
+    await send(editor, projectId, createTask(b, "B", "2026-11-02"));
+    await send(editor, projectId, { type: "setDuration", id: b, duration: 2 });
+    expect((await send(editor, projectId, { type: "addBreak", id: b, from: "2026-11-03", resume: "2026-11-05" })).statusCode).toBe(200);
+    expect((await send(editor, projectId, { type: "addInterruption", id: b, byId: a })).statusCode).toBe(200);
+    const rowOf = async (rowId: string) => (await reload(editor, projectId)).rows.find((r: { id: string }) => r.id === rowId);
+    expect(await rowOf(b)).toMatchObject({ breaks: [{ after: 2, length: 4 }], interruptedBy: [a] });
+    const undo = await t.app.inject({ method: "POST", url: `/api/projects/${projectId}/undo`, headers: { cookie: editor }, payload: { commandId: randomUUID() } });
+    expect(undo.json()).toMatchObject({ skipped: 0 });
+    expect(await rowOf(b)).toMatchObject({ breaks: [{ after: 2, length: 4 }], interruptedBy: [] });
+  });
+
   it("matches spellings only within the board for share-link editors, so other projects' tags stay hidden", async () => {
     const { admin, editor, projectId } = await editorWithProject();
     const secret = (await t.app.inject({ method: "POST", url: "/api/projects", headers: { cookie: editor }, payload: { name: "Secret" } })).json().project.id as string;

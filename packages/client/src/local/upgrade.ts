@@ -11,7 +11,7 @@ type RowV1 = Row & { predecessorId?: string | null; offset?: number };
  */
 export function upgradeProjectRecord(record: unknown): ProjectRecord {
   if (!isRecordShaped(record)) return record as ProjectRecord;
-  return withTargets(withTagsAndDescriptions(withLinks(record as Omit<ProjectRecord, "rows" | "links"> & { rows: RowV1[]; links?: Link[] })));
+  return withInterruptions(withTargets(withTagsAndDescriptions(withLinks(record as Omit<ProjectRecord, "rows" | "links"> & { rows: RowV1[]; links?: Link[] }))));
 }
 
 /**
@@ -49,6 +49,13 @@ function withTargets(project: ProjectRecord): ProjectRecord {
   const outdated = (row: Row) => row.kind === "task" && row.targetId === undefined;
   if (!project.rows.some(outdated)) return project;
   return { ...project, rows: project.rows.map((row): Row => (row.kind === "task" && outdated(row) ? { ...row, targetId: null } : row)) };
+}
+
+/** Version 4 → 5: tasks have no interruptions yet. */
+function withInterruptions(project: ProjectRecord): ProjectRecord {
+  const outdated = (row: Row) => row.kind === "task" && (row.breaks === undefined || row.interruptedBy === undefined);
+  if (!project.rows.some(outdated)) return project;
+  return { ...project, rows: project.rows.map((row): Row => (row.kind === "task" && outdated(row) ? { ...row, breaks: row.breaks ?? [], interruptedBy: row.interruptedBy ?? [] } : row)) };
 }
 
 function isRecordShaped(record: unknown): boolean {

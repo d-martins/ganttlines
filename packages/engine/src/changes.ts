@@ -39,6 +39,10 @@ const DROPPED_FIELDS = ["predecessorId", "offset"];
 export function restoredRow(snapshot: unknown): Row {
   const row: Record<string, unknown> = { ...(snapshot as Record<string, unknown>) };
   for (const field of DROPPED_FIELDS) delete row[field];
+  if (row["kind"] === "task") {
+    row["breaks"] ??= [];
+    row["interruptedBy"] ??= [];
+  }
   return row as unknown as Row;
 }
 

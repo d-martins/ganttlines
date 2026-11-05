@@ -5,12 +5,15 @@ import {
   CycleError,
   halfDay,
   linkKey,
+  partsOf,
+  pausesOf,
   spanEnd,
   spanOfHalves,
   spanStart,
   toDay,
   TASK_DEFAULTS,
   violatedLinks,
+  visibleParts,
   workedDaysOfAll,
   type Calendar,
   type Link,
@@ -30,11 +33,17 @@ export type CompareMode = "overlay" | "switch";
 export interface Ghost {
   kind: BaselineTaskDto["kind"];
   span: Span;
+  /** when split: the stretches it was worked */
+  parts?: readonly Span[];
 }
 
 export interface BoardRow extends ListRow {
   /** dates to draw (the baseline's own when viewing one) */
   span: Span | null;
+  /** what to draw: its stretches of work, also split at holidays and time off (one, for most bars) */
+  parts: readonly Span[];
+  /** its own pauses, whose edges can be dragged */
+  pauses: readonly { after: number; lastWorked: number; resume: number }[];
   kind: DrawKind;
   /** a locked task starts before one of its links allows */
   violation: boolean;
@@ -110,7 +119,8 @@ export function boardModel(
   for (const task of baseline?.tasks ?? []) {
     // Baselines saved before half-day scheduling have whole days.
     const span = { start: toDay(task.start), end: toDay(task.end), startsAfternoon: task.startsAfternoon ?? false, endsMidday: task.endsMidday ?? false };
-    saved.set(task.rowId, { kind: task.kind, span });
+    const parts = task.parts?.map((part) => ({ start: toDay(part.start), end: toDay(part.end), startsAfternoon: part.startsAfternoon, endsMidday: part.endsMidday }));
+    saved.set(task.rowId, { kind: task.kind, span, ...(parts ? { parts } : {}) });
   }
   const switched = baseline?.mode === "switch";
   const sectionSpans = switched ? rollUpSections(state, saved) : null;
@@ -126,20 +136,29 @@ export function boardModel(
     if (switched) {
       const ghost = saved.get(row.id);
       const span = row.kind === "section" ? (sectionSpans!.get(row.id) ?? null) : (ghost?.span ?? null);
-      return { ...entry, span, kind: ghost?.kind ?? liveKind, violation: false, ghost: null, actualDays, workedDays: null, actual: null, fromBaseline: true };
+      return { ...entry, span, parts: ghost?.parts ?? (span ? [span] : []), pauses: [], kind: ghost?.kind ?? liveKind, violation: false, ghost: null, actualDays, workedDays: null, actual: null, fromBaseline: true };
     }
     const span = computed?.span ?? null;
     const single = row.kind === "task" && liveKind === "task";
     let actual: BoardRow["actual"] = null;
     if (single && span && row.actualDuration !== null) {
       // The half days it really took, from where it starts.
-      const end = calendar.addWorkingHalves(spanStart(span), row.actualDuration * 2 - 1, row.resourceId);
       const versusPlan = row.actualDuration > row.duration ? "over" : row.actualDuration < row.duration ? "under" : "even";
+      const work = partsOf(computed);
+      let end = calendar.addWorkingHalves(spanStart(span), row.actualDuration * 2 - 1, row.resourceId);
+      // Split: what it took beyond or short of the plan is measured from the end, in the last part. Short by more than that part shows nothing.
+      if (work.length > 1) {
+        const fromEnd = calendar.addWorkingHalves(spanEnd(span), (row.actualDuration - row.duration) * 2, row.resourceId);
+        end = fromEnd < spanStart(work.at(-1)!) ? spanEnd(span) : fromEnd;
+      }
       actual = { span: spanOfHalves(spanStart(span), end), versusPlan };
     }
+    const work = partsOf(computed);
     return {
       ...entry,
       span,
+      parts: single ? visibleParts(work, calendar, row.resourceId) : span ? [span] : [],
+      pauses: single && row.kind === "task" && row.breaks?.length ? pausesOf(row, work, calendar) : [],
       kind: liveKind,
       violation: computed?.violation ?? false,
       ghost: saved.get(row.id) ?? null,
@@ -162,6 +181,8 @@ export function boardModel(
         collapsed: false,
         context: false,
         span: saved.get(task.rowId)!.span,
+        parts: saved.get(task.rowId)!.parts ?? [saved.get(task.rowId)!.span],
+        pauses: [],
         kind: task.kind,
         violation: false,
         ghost: null,

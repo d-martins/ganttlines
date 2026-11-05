@@ -1,8 +1,8 @@
-import { TASK_COLORS, type Row, type TaskColor } from "@ganttlines/engine";
-import type { Row as DbRow } from "../generated/prisma/client";
+import { TASK_COLORS, type Break, type Row, type TaskColor } from "@ganttlines/engine";
+import type { Prisma, Row as DbRow } from "../generated/prisma/client";
 
 /** Stored row → engine row. Sections drop the task-only columns (they keep a description). */
-export function toEngineRow(row: DbRow): Row {
+export function toEngineRow(row: Omit<DbRow, "breaks"> & { breaks: unknown }): Row {
   const base = {
     id: row.id,
     title: row.title,
@@ -25,11 +25,13 @@ export function toEngineRow(row: DbRow): Row {
     actualDuration: row.actualDuration,
     tags: [...row.tags],
     targetId: row.targetId,
+    breaks: row.breaks as unknown as Break[],
+    interruptedBy: [...row.interruptedBy],
   };
 }
 
 /** Engine row → columns to store (without projectId). Sections store task-column defaults. */
-export function toDbColumns(row: Row): Omit<DbRow, "projectId"> {
+export function toDbColumns(row: Row): Omit<DbRow, "projectId" | "breaks"> & { breaks: Prisma.InputJsonValue } {
   const base = {
     id: row.id,
     kind: row.kind,
@@ -50,6 +52,8 @@ export function toDbColumns(row: Row): Omit<DbRow, "projectId"> {
       actualDuration: null,
       tags: [],
       targetId: null,
+      breaks: [],
+      interruptedBy: [],
     };
   }
   return {
@@ -64,5 +68,7 @@ export function toDbColumns(row: Row): Omit<DbRow, "projectId"> {
     actualDuration: row.actualDuration,
     tags: [...row.tags],
     targetId: row.targetId,
+    breaks: row.breaks.map((pause) => ({ ...pause })),
+    interruptedBy: [...row.interruptedBy],
   };
 }

@@ -14,6 +14,15 @@ export interface BaselineTask {
   end: IsoDate;
   startsAfternoon: boolean;
   endsMidday: boolean;
+  /** when split: the stretches it's worked */
+  parts?: BaselinePart[];
+}
+
+export interface BaselinePart {
+  start: IsoDate;
+  end: IsoDate;
+  startsAfternoon: boolean;
+  endsMidday: boolean;
 }
 
 /** The current computed dates of every scheduled task (what a baseline saves). */
@@ -22,7 +31,8 @@ export function baselineTasks(state: ProjectState, calendar: Calendar): Baseline
   const tree = buildTree(state);
   const tasks: BaselineTask[] = [];
   for (const row of Object.values(state.rows)) {
-    const span = schedule.get(row.id)?.span;
+    const computed = schedule.get(row.id);
+    const span = computed?.span;
     if (row.kind !== "task" || !span) continue;
     const kind = isParentTask(tree, row) ? "parent" : row.duration === 0 ? "milestone" : "task";
     tasks.push({
@@ -33,6 +43,7 @@ export function baselineTasks(state: ProjectState, calendar: Calendar): Baseline
       end: fromDay(span.end),
       startsAfternoon: span.startsAfternoon,
       endsMidday: span.endsMidday,
+      ...(computed?.parts ? { parts: computed.parts.map((part) => ({ start: fromDay(part.start), end: fromDay(part.end), startsAfternoon: part.startsAfternoon, endsMidday: part.endsMidday })) } : {}),
     });
   }
   return tasks;

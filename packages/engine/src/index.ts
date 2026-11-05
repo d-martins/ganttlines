@@ -3,6 +3,7 @@ export { applyChanges, changedRowIds, diffState, isLinkChange, type Change, type
 export {
   applyCommand,
   isValidTarget,
+  MAX_BREAKS_PER_TASK,
   MAX_DATE,
   MAX_DURATION,
   MIN_DATE,
@@ -33,6 +34,7 @@ export {
 export {
   TASK_COLORS,
   TASK_DEFAULTS,
+  type Break,
   type ProjectState,
   type Row,
   type RowId,
@@ -41,9 +43,10 @@ export {
   type TaskRow,
 } from "./model";
 export { computeSchedule, CycleError, hasCycle, linkRequirement, spanEnd, spanOfHalves, spanStart, violatedLinks, type Computed, type Schedule, type Span } from "./schedule";
+export { clearLostInterruptions, layOutWork, partsOf, pausesOf, visibleParts, workBefore } from "./parts";
 export { buildTree, childrenOf, findTreeProblem, isAncestor, isParentTask, type Tree } from "./tree";
 export { revertChanges, type Reverted } from "./undo";
-export { baselineTasks, type BaselineTask } from "./baseline";
+export { baselineTasks, type BaselinePart, type BaselineTask } from "./baseline";
 export { workedDays, workedDaysOfAll } from "./worked";
 export { analyseSlack, computeSlack, effectiveTarget, type Slack, type SlackAnalysis, type SlackLimit, type SlackMap } from "./slack";
 export { canonicalTags, MAX_TAG_LENGTH, MAX_TAGS_PER_TASK, normalizeTags, rankTags, tagKey, type TagUse } from "./tags";

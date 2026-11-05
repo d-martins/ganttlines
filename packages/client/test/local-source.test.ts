@@ -28,7 +28,8 @@ describe("local records", () => {
     expect(() => checkFormat({ format: "ganttlines-workspace", version: 2 })).not.toThrow();
     expect(() => checkFormat({ format: "ganttlines-workspace", version: 3 })).not.toThrow();
     expect(() => checkFormat({ format: "ganttlines-workspace", version: 4 })).not.toThrow();
-    expect(() => checkFormat({ format: "ganttlines-workspace", version: 5 })).toThrow(expect.objectContaining({ code: "newer_version" }));
+    expect(() => checkFormat({ format: "ganttlines-workspace", version: 5 })).not.toThrow();
+    expect(() => checkFormat({ format: "ganttlines-workspace", version: 6 })).toThrow(expect.objectContaining({ code: "newer_version" }));
     expect(() => checkFormat({ format: "ganttlines-workspace", version: 1.5 })).toThrow(expect.objectContaining({ code: "invalid_file" }));
   });
 
@@ -214,7 +215,7 @@ describe("local boards", () => {
     const board = await source.openBoard(project.id).load();
     expect(board.links).toEqual([{ predecessorId: TASK, followerId: BUILD, kind: "FS", lag: -0.5 }]);
     expect(board.rows[1]).not.toHaveProperty("predecessorId");
-    expect(source.exportFile().version).toBe(4);
+    expect(source.exportFile().version).toBe(5);
     expect(board.rows.map((entry) => entry.kind === "task" && entry.tags)).toEqual([[], []]);
 
     // The next change writes the project back in the new shape.

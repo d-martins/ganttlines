@@ -9,6 +9,10 @@ import {
   childrenOf,
   type Command,
   computeSchedule,
+  dayOf,
+  fromDay,
+  partsOf,
+  pausesOf,
   diffState,
   findLinkProblem,
   findTreeProblem,
@@ -81,6 +85,8 @@ export interface OutlineRow {
   span: Span | null;
   /** a locked task starting before one of its links allows */
   violation: boolean;
+  /** the task's own interruptions, first and last day off */
+  interruptions: { from: string; to: string }[];
   /** the links it waits on and those that wait on it, each ordered by key */
   links: { into: Link[]; outOf: Link[] };
   /** the keys of the links it waits on that it starts too early for */
@@ -226,6 +232,7 @@ export class ProjectService {
             isParent: isParentTask(tree, row),
             span: computed?.span ?? null,
             violation: computed?.violation ?? false,
+            interruptions: row.kind === "task" ? pausesOf(row, partsOf(computed), calendar).map(({ lastWorked, resume }) => ({ from: fromDay(dayOf(calendar.nextHalfAfter(lastWorked, row.resourceId))), to: fromDay(dayOf(calendar.snapHalfBack(resume - 1, row.resourceId))) })) : [],
             links,
             violatedLinks: links.into.map(linkKey).filter((key) => violated.has(key)),
             slack: slack.get(row.id) ?? null,

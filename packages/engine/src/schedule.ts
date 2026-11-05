@@ -2,6 +2,7 @@ import type { Calendar, ResourceId } from "./calendar";
 import { dayOf, halfDay, isAfternoon, toDay, type DayNum, type HalfDay } from "./date";
 import { isFinishLink, linkKey, type Link, type LinkKey } from "./links";
 import type { ProjectState, Row, RowId, TaskRow } from "./model";
+import { layOutWork, partsOf, visibleParts } from "./parts";
 import { buildTree, childrenOf, isParentTask } from "./tree";
 
 /** A row's dates: the days it starts and ends on, and whether it starts or ends at midday. */
@@ -31,6 +32,8 @@ export interface Computed {
   span: Span | null;
   /** true when a locked task starts earlier than its predecessor rules require */
   violation: boolean;
+  /** the stretches it's worked, only when more than one; `span` runs from the first to the last */
+  parts?: readonly Span[];
 }
 
 export type Schedule = ReadonlyMap<RowId, Computed>;
@@ -66,6 +69,7 @@ export function computeSchedule(state: ProjectState, calendar: Calendar): Schedu
   const into = indexByFollower(state);
   const results = new Map<RowId, Computed>();
   const inProgress = new Set<RowId>();
+  const rowCount = Object.keys(state.rows).length;
   // Links whose predecessor no longer exists are ignored.
   const existing = (links: readonly Link[]) => links.filter(({ predecessorId }) => state.rows[predecessorId] !== undefined);
 
@@ -100,7 +104,14 @@ export function computeSchedule(state: ProjectState, calendar: Calendar): Schedu
     const resource = task.resourceId;
     // Visit predecessors before anything else — even for unscheduled tasks — so that every
     // dependency cycle is detected.
-    const constraints = existing(collectConstraints(state, task, true, into)).map((link) => ({ link, span: compute(link.predecessorId).span }));
+    const constraints = existing(collectConstraints(state, task, true, into, rowCount)).map((link) => ({ link, span: compute(link.predecessorId).span }));
+    // Only while someone is on it: an interrupter's holidays and time off leave this task free to work.
+    const interrupters = task.locked
+      ? []
+      : (task.interruptedBy ?? []).flatMap((id) => {
+          const by = state.rows[id];
+          return by?.kind === "task" ? visibleParts(partsOf(compute(id)), calendar, by.resourceId) : [];
+        });
     if (task.userStart === null) return { span: null, violation: false };
 
     const required = requiredStart(calendar, task, constraints);
@@ -109,6 +120,12 @@ export function computeSchedule(state: ProjectState, calendar: Calendar): Schedu
     const violation = task.locked && start < required;
     // A milestone is a point on its day; successors start the next working day.
     if (task.duration === 0) return { span: spanOfHalves(start, halfDay(dayOf(start), true)), violation };
+    const breaks = task.breaks ?? [];
+    if (breaks.length > 0 || interrupters.length > 0) {
+      const parts = layOutWork(calendar, start, task.duration * 2, breaks, interrupters, resource);
+      const span = spanOfHalves(spanStart(parts[0]!), spanEnd(parts.at(-1)!));
+      return parts.length > 1 ? { span, violation, parts } : { span, violation };
+    }
     // In half days: 2.5 days from a morning take five half days and end at midday of the third.
     return { span: spanOfHalves(start, calendar.addWorkingHalves(start, task.duration * 2 - 1, resource)), violation };
   };
@@ -142,7 +159,7 @@ export function finishFloor(calendar: Calendar, link: Link, span: Span, resource
 /** The earliest start (half day) `link` allows `follower`, given the predecessor's span; -Infinity if unscheduled. */
 export function linkRequirement(
   calendar: Calendar,
-  follower: Pick<TaskRow, "resourceId" | "duration">,
+  follower: Pick<TaskRow, "resourceId" | "duration"> & Partial<Pick<TaskRow, "breaks">>,
   link: Link,
   predecessor: Span | null,
 ): HalfDay {
@@ -160,13 +177,14 @@ export function linkRequirement(
       const end = finishFloor(calendar, link, predecessor, resource);
       // A milestone sits on the day it may end; other tasks start early enough to end on it.
       if (follower.duration === 0) return halfDay(dayOf(end));
-      return calendar.addWorkingHalves(end, -(follower.duration * 2 - 1), resource);
+      const paused = (follower.breaks ?? []).reduce((sum, pause) => sum + pause.length, 0);
+      return calendar.addWorkingHalves(end, -(follower.duration * 2 - 1 + paused), resource);
     }
   }
 }
 
 /** The lowest start a drag may reach against `link` (lag at its floor). */
-export function linkFloor(calendar: Calendar, follower: Pick<TaskRow, "resourceId" | "duration">, link: Link, predecessor: Span): HalfDay {
+export function linkFloor(calendar: Calendar, follower: Pick<TaskRow, "resourceId" | "duration"> & Partial<Pick<TaskRow, "breaks">>, link: Link, predecessor: Span): HalfDay {
   if (link.kind === "FS") return floorStart(calendar, predecessor, follower.resourceId);
   return linkRequirement(calendar, follower, { ...link, lag: 0 }, predecessor);
 }
@@ -174,7 +192,7 @@ export function linkFloor(calendar: Calendar, follower: Pick<TaskRow, "resourceI
 /** The earliest start (a half day) the constraints allow `follower`: the strictest link wins. -Infinity when none applies. */
 export function requiredStart(
   calendar: Calendar,
-  follower: Pick<TaskRow, "resourceId" | "duration">,
+  follower: Pick<TaskRow, "resourceId" | "duration"> & Partial<Pick<TaskRow, "breaks">>,
   constraints: readonly { link: Link; span: Span | null }[],
 ): HalfDay {
   let required = -Infinity;
@@ -191,10 +209,10 @@ export function constraintsFor(state: ProjectState, task: TaskRow, own = true, i
   return collectConstraints(state, task, own, into);
 }
 
-function collectConstraints(state: ProjectState, task: TaskRow, own: boolean, into: FollowerIndex): Link[] {
+function collectConstraints(state: ProjectState, task: TaskRow, own: boolean, into: FollowerIndex, rowCount = Object.keys(state.rows).length): Link[] {
   const constraints: Link[] = [];
   // Bounded by the row count so corrupted parent links can never loop forever.
-  let steps = Object.keys(state.rows).length + 1;
+  let steps = rowCount + 1;
   for (let row: Row | undefined = task; row && steps > 0; row = row.parentId === null ? undefined : state.rows[row.parentId], steps--) {
     if (row.kind !== "task" || (!own && row === task)) continue;
     for (const link of into.get(row.id) ?? []) {

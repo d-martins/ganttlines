@@ -120,7 +120,7 @@ describe("the workspace in IndexedDB", () => {
     (await versionOneDatabase(factory, "old", ["p1", "p2"])).close();
     await new IndexedDbStore("old", factory).load();
     // Written back in the upgrade itself, not on the next save: the stored records are the current version.
-    const db = await openRaw(factory, "old", 4);
+    const db = await openRaw(factory, "old", 5);
     const { workspace, projects } = await readAll(db);
     db.close();
     expect(workspace).toMatchObject({ version: WORKSPACE_VERSION });
@@ -137,10 +137,10 @@ describe("the workspace in IndexedDB", () => {
     (await versionTwoDatabase(factory, "v2", ["p1", "p2", "p3"])).close();
     await new IndexedDbStore("v2", factory).load();
     // Written back in the upgrade itself, not on the next save: the stored records are current.
-    const db = await openRaw(factory, "v2", 4);
+    const db = await openRaw(factory, "v2", 5);
     const { workspace, projects } = await readAll(db);
     db.close();
-    expect(workspace).toMatchObject({ version: 4 });
+    expect(workspace).toMatchObject({ version: 5 });
     expect(projects).toHaveLength(3);
     for (const project of projects as client.ProjectRecord[]) {
       expect(project.rows).toEqual([expect.objectContaining({ id: A, kind: "task", tags: [], targetId: null }), { id: B, kind: "section", title: "S", parentId: null, position: "a1", description: "" }]);
@@ -162,11 +162,11 @@ describe("the workspace in IndexedDB", () => {
     });
     old.close();
     await new IndexedDbStore("v3", factory).load();
-    const db = await openRaw(factory, "v3", 4);
+    const db = await openRaw(factory, "v3", 5);
     const { workspace, projects } = await readAll(db);
     db.close();
-    expect(workspace).toMatchObject({ version: 4 });
-    expect((projects as client.ProjectRecord[])[0]!.rows).toEqual([expect.objectContaining({ id: A, tags: ["UI"], targetId: null })]);
+    expect(workspace).toMatchObject({ version: 5 });
+    expect((projects as client.ProjectRecord[])[0]!.rows).toEqual([expect.objectContaining({ id: A, tags: ["UI"], targetId: null, breaks: [], interruptedBy: [] })]);
   });
 
   it("a failed version-2 upgrade leaves the version-2 data", async () => {

@@ -3,6 +3,7 @@ import { linkKey, type LinkKind } from "@ganttlines/engine";
 import type { BoardModel, BoardRow } from "../model";
 import type { BarStyle } from "../view-store";
 import { extent, halfHeight, shapeOf, ROW_HEIGHT } from "./bars";
+import { useHoveredRow } from "./drag";
 import type { Timeline } from "./timeline";
 
 const STUB = 8;
@@ -68,6 +69,35 @@ export function Dependencies({
   const rowHeight = ROW_HEIGHT[style];
   const critical = useCriticalLinks();
   const index = new Map(rows.map((entry, i) => [entry.row.id, i]));
+  const hovered = useHoveredRow((store) => store.id);
+  const interruptions: { key: string; d: string }[] = [];
+  if (hovered !== null) {
+    rows.forEach((entry, to) => {
+      if (entry.row.kind !== "task" || !entry.span) return;
+      for (const byId of entry.row.interruptedBy ?? []) {
+        if (hovered !== byId && hovered !== entry.row.id) continue;
+        const from = index.get(byId);
+        const by = from === undefined ? undefined : rows[from];
+        if (from === undefined || !by?.span) continue;
+        const y = (i: number) => i * rowHeight + rowHeight / 2;
+        const direction = to >= from ? 1 : -1;
+        const top = y(from) + direction * halfHeight(shapeOf(by), style);
+        const bottom = y(to) - direction * halfHeight(shapeOf(entry), style);
+        const line = (x: number, end: string) => interruptions.push({ key: `${byId}-${entry.row.id}-${x}-${end}`, d: `M${x},${top} V${bottom}` });
+        const boxes = entry.parts.map((part) => extent(entry.kind, part, timeline, style));
+        // Down each edge of a gap to what's running in it: a pair for each part of the interrupting task.
+        boxes.slice(1).forEach((after, i) => {
+          const gap = { left: boxes[i]!.right, right: after.left };
+          for (const part of by.parts) {
+            const box = extent(by.kind, part, timeline, style);
+            if (box.right <= gap.left || box.left >= gap.right) continue;
+            line(Math.max(box.left, gap.left), "start");
+            line(Math.min(box.right, gap.right), "end");
+          }
+        });
+      }
+    });
+  }
   const paths: { key: string; d: string; violation: boolean }[] = [];
   for (const { link, violation } of links) {
     const from = index.get(link.predecessorId);
@@ -95,6 +125,9 @@ export function Dependencies({
           <path d="M0,0 L6,3 L0,6 z" fill="var(--violation)" />
         </marker>
       </defs>
+      {interruptions.map((path) => (
+        <path key={path.key} data-testid="interruption" d={path.d} fill="none" stroke="var(--dependency)" strokeWidth={1.25} strokeDasharray="4 3" />
+      ))}
       {paths.map((path) => (
         <path
           key={path.key}
