@@ -96,7 +96,7 @@ export function LinkChoiceMenu({ choice, state, calendar, run, onClose }: { choi
           align="start"
           sideOffset={4}
           avoidCollisions={false}
-          onPointerMove={() => (moved.current = true)}
+          onPointerMoveCapture={() => (moved.current = true)}
           onKeyDownCapture={(event) => {
             if (event.key === "ArrowDown" || event.key === "ArrowUp") moved.current = true;
           }}
@@ -127,6 +127,10 @@ export function LinkChoiceMenu({ choice, state, calendar, run, onClose }: { choi
               disabled={option.refused !== undefined}
               className={ITEM}
               onFocus={() => moved.current && preview(option.command)}
+              // Pointing at the option that already has focus: no focus event comes.
+              onPointerMove={() => {
+                if (useChartDrag.getState().drag?.command !== option.command) preview(option.command);
+              }}
               onBlur={() => preview(null)}
               onSelect={() => {
                 preview(null);

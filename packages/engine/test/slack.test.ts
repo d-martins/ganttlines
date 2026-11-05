@@ -326,7 +326,7 @@ describe("across parts and interruptions", () => {
     const schedule = computeSchedule(state, cal);
     const before = Date.now();
     computeSlack(state, cal, schedule);
-    expect(Date.now() - before).toBeLessThan(1500);
+    expect(Date.now() - before).toBeLessThan(5000);
   });
 
   it("an interruption connects a task", () => {

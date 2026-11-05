@@ -65,13 +65,31 @@ Platform, bind it with `DATABASE_CA_CERT=${db.CA_CERT}`.
 
 In a task's details, **+ Add link → aims for** picks the milestone it has to make, or names a new one on the
 spot. From the milestone, **+ Add link → aimed by** does the same for any task. Dragging a link between a task
-and a milestone asks whether to aim or to link.
+and a milestone offers aiming first.
 A parent's choice covers its subtasks. Aiming moves nothing: the milestone stays on its date and shows as
 a dashed line down the chart, and a task that would miss it gets a red outline, as do the tasks feeding it.
 
 The **Critical path** button in the top bar shows how many working days each task can slip before it hits
 its tightest limit, whether that's a milestone it's heading for or the end of the board, and highlights the
 tasks and links with no room left. **+ Filter → Milestone** narrows the board to what a milestone depends on.
+
+## Interruptions
+
+A bar can have gaps, for when a task stops and picks up again later. Its days of work stay the same and it finishes
+later, so anything waiting on it moves too. There are three ways to make one:
+
+- **Cut the bar:** the split icon on a bar's hover tools starts a cut. Click where the task stops, then where it
+  picks up. Esc cancels.
+- **From the details panel:** **Interruptions → + Add interruption**, with from and to dates.
+- **Have another task interrupt it:** drag from the handle at the end of a bar onto another task and choose
+  "interrupts". The second task stops wherever the first runs. Hover either one to see the line between them.
+
+Dragging an edge beside a gap changes that gap and the part next to it. Dragged to the other side, it closes the gap
+and the task keeps that length. Links join whole tasks, never a part of one. Holidays and time off inside a bar show
+as gaps by themselves. Weekends don't.
+
+Dragging from a bar's handle onto another task always asks which relation you mean, in either direction with
+**Swap**, and pointing at an option shows it on the board first.
 
 ## Locations and public holidays
 
