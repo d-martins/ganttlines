@@ -141,8 +141,14 @@ export function GhostBar({ ghost, timeline, style }: { ghost: Ghost; timeline: T
     );
   }
   // At the very bottom of the row, clear of the actual-days track just under the bar.
-  return <div data-testid="baseline-ghost" className="absolute h-[2px] rounded-sm bg-[var(--baseline)]" style={{ left, width: right - left, top: rowHeight - 2 }} />;
+  return baselineGhostSegments(ghost).map((part, i) => {
+    const box = extent(ghost.kind, part, timeline, style);
+    return <div key={i} data-testid="baseline-ghost" className="absolute h-[2px] rounded-sm bg-[var(--baseline)]" style={{ left: box.left, width: box.right - box.left, top: rowHeight - 2 }} />;
+  });
 }
+
+/** What a baseline's task draws: its parts when it was saved split, otherwise its whole span. */
+export const baselineGhostSegments = (ghost: Ghost): readonly Span[] => ghost.parts ?? [ghost.span];
 
 /** Props for the drawn shape when it can be edited (focus, pointer and key handlers). */
 export type ShapeProps = HTMLAttributes<HTMLDivElement>;
@@ -240,7 +246,7 @@ export function RowBar({
   const radius = style === "compact" ? 3 : 4;
   // Overrun: the bar's right end is square where the extension joins it.
   const squareEnd = actual?.versusPlan === "over" ? "rounded-r-none!" : "";
-  const onBar = actual ? (
+  const onBar = actual && actualRight !== planRight ? (
     <ActualOnBar
       from={Math.min(planRight, actualRight)}
       to={Math.max(planRight, actualRight)}
@@ -250,33 +256,68 @@ export function RowBar({
       radius={radius}
     />
   ) : null;
+  const split = entry.parts.length > 1;
+  const boxes = split ? entry.parts.map((part) => extent("task", part, timeline, style)) : [];
+  // Split: the first part is the bar itself, for keyboard and screen readers; the rest follow it.
+  const firstWidth = split ? boxes[0]!.right - boxes[0]!.left : width;
+  const partMark = split ? ({ "data-testid": "bar-part" } as ShapeProps) : {};
+  const violation = entry.violation ? "outline-2 outline-offset-1 outline-[var(--violation)]" : "";
+  const restOfBar = split ? (
+    <>
+      {boxes.slice(1).map((box, i) => (
+        <div
+          key={i}
+          aria-hidden
+          data-testid="bar-part"
+          title={label}
+          {...marked}
+          onPointerDown={shape?.onPointerDown}
+          className={`absolute rounded-[${radius}px] ${i === boxes.length - 2 ? squareEnd : ""} ${violation} ${shapeClass} ${shape?.className ?? ""}`}
+          style={{ left: box.left, width: box.right - box.left, top: barTop, height: barHeight, background: fill }}
+        />
+      ))}
+      {boxes.slice(1).map((box, i) => (
+        <div
+          key={i}
+          aria-hidden
+          data-testid="bar-gap"
+          className="pointer-events-none absolute border-t-2 border-dotted"
+          style={{ left: boxes[i]!.right, width: box.left - boxes[i]!.right, top: rowHeight / 2 - 1, borderColor: fill }}
+        />
+      ))}
+    </>
+  ) : null;
+  const mainEnd = split ? "" : squareEnd;
   if (style === "compact") {
     return (
       <>
         <div
           {...shapeAttrs}
-          className={`absolute rounded-[3px] ${squareEnd} ${entry.violation ? "outline-2 outline-offset-1 outline-[var(--violation)]" : ""} ${shapeClass}`}
-          style={{ left, width, top: barTop, height: barHeight, background: fill }}
+          {...partMark}
+          className={`absolute rounded-[3px] ${mainEnd} ${violation} ${shapeClass}`}
+          style={{ left, width: firstWidth, top: barTop, height: barHeight, background: fill }}
         />
+        {restOfBar}
         {onBar}
         {outsideTitle}
       </>
     );
   }
   // Roomy: avatar then the title inside when it fits; otherwise the title goes to the right of the bar.
-  const showAvatar = Boolean(assignee) && width >= 44;
+  const showAvatar = Boolean(assignee) && firstWidth >= 44;
   const contentWidth = 12 + (showAvatar ? 24 : 0) + (locked ? 16 : 0) + titleWidth(row.title);
-  const inside = contentWidth <= width;
+  const inside = contentWidth <= firstWidth;
   // When the bar starts under the list, its avatar and title move along to stay readable.
-  const shift = Math.min(Math.max(visibleLeft - left, 0), Math.max(width - (inside ? contentWidth : 36), 0));
+  const shift = Math.min(Math.max(visibleLeft - left, 0), Math.max(firstWidth - (inside ? contentWidth : 36), 0));
   return (
     <>
       <Tooltip.Root>
         <Tooltip.Trigger asChild>
           <div
             {...shapeAttrs}
-            className={`absolute flex items-center gap-1.5 overflow-hidden rounded-[4px] pr-1.5 text-xs font-semibold ${squareEnd} ${entry.violation ? "outline-2 outline-offset-1 outline-[var(--violation)]" : ""} ${shapeClass}`}
-            style={{ left, width, top: barTop, height: barHeight, background: fill, color: ink, paddingLeft: 6 + shift }}
+            {...partMark}
+            className={`absolute flex items-center gap-1.5 overflow-hidden rounded-[4px] pr-1.5 text-xs font-semibold ${mainEnd} ${violation} ${shapeClass}`}
+            style={{ left, width: firstWidth, top: barTop, height: barHeight, background: fill, color: ink, paddingLeft: 6 + shift }}
           >
             {showAvatar ? <Avatar name={assignee!.name} color={assignee!.avatarColor} size={18} /> : null}
             {inside ? (
@@ -294,6 +335,7 @@ export function RowBar({
           </Tooltip.Content>
         </Tooltip.Portal>
       </Tooltip.Root>
+      {restOfBar}
       {onBar}
       {inside ? (
         tags ? (

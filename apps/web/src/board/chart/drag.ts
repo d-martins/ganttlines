@@ -2,7 +2,7 @@ import { dayOf, fromDay, halfDay, isAfternoon, spanEnd, spanStart, type Command,
 import { create } from "zustand";
 import { DAY_WIDTH, type Timeline } from "./timeline";
 
-export type DragKind = "move" | "start" | "end" | "link";
+export type DragKind = "move" | "start" | "end" | "link" | "gapStart" | "gapEnd";
 
 /** A drag in progress on the chart; the board previews `command` through the engine. */
 export interface ChartDrag {
@@ -23,6 +23,9 @@ export type LinkEnd = "start" | "end";
 
 /** The kind of a link from the predecessor's end `from` to the follower's end `to`. */
 export const linkKindOf = (from: LinkEnd, to: LinkEnd): LinkKind => (from === "end" ? (to === "start" ? "FS" : "FF") : to === "start" ? "SS" : "SF");
+
+/** The row under the pointer: a hovered task shows its interruptions. */
+export const useHoveredRow = create<{ id: RowId | null }>(() => ({ id: null }));
 
 export const useChartDrag = create<{
   drag: ChartDrag | null;
@@ -45,7 +48,7 @@ export const edgeAt = (half: HalfDay) => ({ date: fromDay(dayOf(half)), half: ha
  * where it is (`x`). Snaps to visible columns (hidden weekends are skipped) — to half columns at day
  * zoom; at wider zooms a move keeps the half the task starts in. Null when the task would stay as it is.
  */
-export function dragCommand(kind: Exclude<DragKind, "link">, rowId: RowId, span: Span, timeline: Timeline, dx: number, x: number): Command | null {
+export function dragCommand(kind: "move" | "start" | "end", rowId: RowId, span: Span, timeline: Timeline, dx: number, x: number): Command | null {
   const halves = snapsToHalves(timeline);
   const [from, to] = [spanStart(span), spanEnd(span)];
   if (kind === "move") {
@@ -63,6 +66,14 @@ export function dragCommand(kind: Exclude<DragKind, "link">, rowId: RowId, span:
   }
   const start = Math.min(at, to);
   return start === from ? null : { type: "resizeTask", id: rowId, edge: "start", ...edgeAt(start) };
+}
+
+/** One of a pause's edges dragged to `x`: `gapStart` is the last half worked before it, `gapEnd` the first after. */
+export function gapCommand(kind: "gapStart" | "gapEnd", rowId: RowId, pause: { after: number; lastWorked: HalfDay; resume: HalfDay }, timeline: Timeline, x: number): Command | null {
+  const atEnd = kind === "gapStart";
+  const at = snapsToHalves(timeline) ? timeline.halfAt(x) : halfDay(timeline.dayAt(x), atEnd);
+  if (at === (atEnd ? pause.lastWorked : pause.resume)) return null;
+  return { type: "resizeBreak", id: rowId, after: pause.after, edge: atEnd ? "start" : "end", ...edgeAt(at) };
 }
 
 /** The visible day `steps` columns away from `day` (keyboard moves skip hidden weekends too). */

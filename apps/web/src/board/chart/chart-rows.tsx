@@ -13,7 +13,7 @@ import { useSelection } from "../selection";
 import type { BarStyle } from "../view-store";
 import { BarMenu } from "./bar-menu";
 import { ActualTrack, BAR_HEIGHT, barDetails, DOT_GAP, DOT_REACH, DOT_SIZE, extent, GhostBar, ROW_HEIGHT, RowBar } from "./bars";
-import { dragCommand, edgeAt, linkKindOf, startAt, stepHalf, useChartDrag, type ChartDrag, type DragKind, type LinkEnd } from "./drag";
+import { dragCommand, edgeAt, gapCommand, useHoveredRow, linkKindOf, startAt, stepHalf, useChartDrag, type ChartDrag, type DragKind, type LinkEnd } from "./drag";
 import { TagChips, type TagFilter } from "./tag-chips";
 import type { Timeline } from "./timeline";
 import { AUTO_SCROLL_STEP, AUTO_SCROLL_TICK_MS, edgePush, HEADER_HEIGHT } from "../auto-scroll";
@@ -113,7 +113,7 @@ export function ChartRows({
   const run = (command: Command) => runCommand(latest.current.board, command);
 
   /** `linkFrom`: for link drags, the end of the bar the link leaves from. */
-  const startDrag = (event: ReactPointerEvent, entry: BoardRow, absoluteIndex: number, kind: DragKind, linkFrom: LinkEnd = "end") => {
+  const startDrag = (event: ReactPointerEvent, entry: BoardRow, absoluteIndex: number, kind: DragKind, linkFrom: LinkEnd = "end", pause?: BoardRow["pauses"][number]) => {
     if (!canEdit || event.button !== 0 || !entry.span) return;
     event.preventDefault();
     event.stopPropagation();
@@ -170,6 +170,8 @@ export function ChartRows({
           from: linkFrom,
           targetEnd: tie?.end ?? null,
         };
+      } else if (kind === "gapStart" || kind === "gapEnd") {
+        current = { rowId, command: gapCommand(kind, rowId, pause!, now, x), line: null, targetId: null };
       } else {
         current = { rowId, command: dragCommand(kind, rowId, span, now, x - grabOffset - now.x(span.start), x), line: null, targetId: null };
       }
@@ -269,8 +271,12 @@ export function ChartRows({
             data-row={absoluteIndex}
             className={`group/row absolute right-0 left-0 ${drag?.targetId === row.id ? "bg-accent-soft/60" : ""} ${entry.context ? "opacity-45" : ""}`}
             style={{ top: absoluteIndex * rowHeight, height: rowHeight }}
+            onPointerEnter={() => useHoveredRow.setState({ id: row.id })}
             onPointerMove={(event) => unscheduledLeaf && trackDay(event, absoluteIndex)}
-            onPointerLeave={() => hover?.index === absoluteIndex && setHover(null)}
+            onPointerLeave={() => {
+              useHoveredRow.setState((current) => (current.id === row.id ? { id: null } : current));
+              if (hover?.index === absoluteIndex) setHover(null);
+            }}
             onClick={() => {
               if (unscheduledLeaf && canEdit && hover?.index === absoluteIndex) run({ type: "moveTask", id: row.id, start: fromDay(hover.day) });
               select(row.id, false);
@@ -326,6 +332,28 @@ export function ChartRows({
                     />
                   </>
                 ) : null}
+                {resizable
+                  ? entry.pauses.flatMap((pause) => [
+                      <div
+                        key={`${pause.after}-start`}
+                        aria-hidden
+                        data-testid="gap-edge"
+                        title="Drag to change the interruption"
+                        onPointerDown={(event) => startDrag(event, entry, absoluteIndex, "gapStart", "end", pause)}
+                        className="absolute cursor-ew-resize rounded-r opacity-0 group-hover/row:opacity-100 hover:bg-text/30"
+                        style={{ left: timeline.xHalfEnd(pause.lastWorked) - 5, width: 7, top: center - barHeight / 2, height: barHeight }}
+                      />,
+                      <div
+                        key={`${pause.after}-end`}
+                        aria-hidden
+                        data-testid="gap-edge"
+                        title="Drag to change the interruption"
+                        onPointerDown={(event) => startDrag(event, entry, absoluteIndex, "gapEnd", "end", pause)}
+                        className="absolute cursor-ew-resize rounded-l opacity-0 group-hover/row:opacity-100 hover:bg-text/30"
+                        style={{ left: timeline.xHalf(pause.resume) - 2, width: 7, top: center - barHeight / 2, height: barHeight }}
+                      />,
+                    ])
+                  : null}
                 <LinkDot
                   left={box.left - DOT_REACH}
                   top={center}

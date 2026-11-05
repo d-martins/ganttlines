@@ -3,6 +3,7 @@ import { linkKey, type LinkKind } from "@ganttlines/engine";
 import type { BoardModel, BoardRow } from "../model";
 import type { BarStyle } from "../view-store";
 import { extent, halfHeight, shapeOf, ROW_HEIGHT } from "./bars";
+import { useHoveredRow } from "./drag";
 import type { Timeline } from "./timeline";
 
 const STUB = 8;
@@ -68,6 +69,24 @@ export function Dependencies({
   const rowHeight = ROW_HEIGHT[style];
   const critical = useCriticalLinks();
   const index = new Map(rows.map((entry, i) => [entry.row.id, i]));
+  const hovered = useHoveredRow((store) => store.id);
+  const interruptions: { key: string; d: string }[] = [];
+  if (hovered !== null) {
+    rows.forEach((entry, to) => {
+      if (entry.row.kind !== "task" || !entry.span) return;
+      for (const byId of entry.row.interruptedBy ?? []) {
+        if (hovered !== byId && hovered !== entry.row.id) continue;
+        const from = index.get(byId);
+        const by = from === undefined ? undefined : rows[from];
+        if (from === undefined || !by?.span) continue;
+        const start = extent(by.kind, by.span, timeline, style).left;
+        // To where the interrupted task stops for it: the end of its last part before that start.
+        const stops = entry.parts.map((part) => extent(entry.kind, part, timeline, style).right).filter((right) => right <= start);
+        const y = (i: number) => i * rowHeight + rowHeight / 2;
+        interruptions.push({ key: `${byId}-${entry.row.id}`, d: `M${start},${y(from)} L${stops.at(-1) ?? extent(entry.kind, entry.span, timeline, style).left},${y(to)}` });
+      }
+    });
+  }
   const paths: { key: string; d: string; violation: boolean }[] = [];
   for (const { link, violation } of links) {
     const from = index.get(link.predecessorId);
@@ -95,6 +114,9 @@ export function Dependencies({
           <path d="M0,0 L6,3 L0,6 z" fill="var(--violation)" />
         </marker>
       </defs>
+      {interruptions.map((path) => (
+        <path key={path.key} data-testid="interruption" d={path.d} fill="none" stroke="var(--dependency)" strokeWidth={1.25} strokeDasharray="4 3" />
+      ))}
       {paths.map((path) => (
         <path
           key={path.key}
