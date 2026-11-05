@@ -69,6 +69,7 @@ export function computeSchedule(state: ProjectState, calendar: Calendar): Schedu
   const into = indexByFollower(state);
   const results = new Map<RowId, Computed>();
   const inProgress = new Set<RowId>();
+  const rowCount = Object.keys(state.rows).length;
   // Links whose predecessor no longer exists are ignored.
   const existing = (links: readonly Link[]) => links.filter(({ predecessorId }) => state.rows[predecessorId] !== undefined);
 
@@ -103,7 +104,7 @@ export function computeSchedule(state: ProjectState, calendar: Calendar): Schedu
     const resource = task.resourceId;
     // Visit predecessors before anything else — even for unscheduled tasks — so that every
     // dependency cycle is detected.
-    const constraints = existing(collectConstraints(state, task, true, into)).map((link) => ({ link, span: compute(link.predecessorId).span }));
+    const constraints = existing(collectConstraints(state, task, true, into, rowCount)).map((link) => ({ link, span: compute(link.predecessorId).span }));
     const interrupters = task.locked ? [] : (task.interruptedBy ?? []).filter((id) => state.rows[id] !== undefined).map((id) => compute(id));
     if (task.userStart === null) return { span: null, violation: false };
 
@@ -202,10 +203,10 @@ export function constraintsFor(state: ProjectState, task: TaskRow, own = true, i
   return collectConstraints(state, task, own, into);
 }
 
-function collectConstraints(state: ProjectState, task: TaskRow, own: boolean, into: FollowerIndex): Link[] {
+function collectConstraints(state: ProjectState, task: TaskRow, own: boolean, into: FollowerIndex, rowCount = Object.keys(state.rows).length): Link[] {
   const constraints: Link[] = [];
   // Bounded by the row count so corrupted parent links can never loop forever.
-  let steps = Object.keys(state.rows).length + 1;
+  let steps = rowCount + 1;
   for (let row: Row | undefined = task; row && steps > 0; row = row.parentId === null ? undefined : state.rows[row.parentId], steps--) {
     if (row.kind !== "task" || (!own && row === task)) continue;
     for (const link of into.get(row.id) ?? []) {

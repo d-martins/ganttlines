@@ -1,12 +1,12 @@
 import type { SlackAnalysis } from "@ganttlines/engine";
-import { fromDay, LINK_KIND_WORDS, spanEnd, spanStart, type Command, type DayNum, type LinkKind, type RowId } from "@ganttlines/engine";
+import { fromDay, spanEnd, spanStart, type Command, type DayNum, type RowId } from "@ganttlines/engine";
 import { SquareCenterlineDashedHorizontal, UserRound } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { AssigneePicker } from "../assignee-picker";
 import { runCommand, useBoard } from "../board-context";
 import { useCriticalPath } from "../critical-path-view";
 import { useSlackAnalysis } from "../slack";
-import { LinkChoiceMenu, linkChoiceFor, type LinkChoice } from "./link-choice";
+import { LinkChoiceMenu, type LinkChoice } from "./link-choice";
 import { addAtEnd, deleteRow } from "../list/list-actions";
 import type { BoardRow } from "../model";
 import { useSelection } from "../selection";
@@ -14,7 +14,7 @@ import type { BarStyle } from "../view-store";
 import { BarMenu } from "./bar-menu";
 import { Cutting, startCutting } from "./cutting";
 import { ActualTrack, BAR_HEIGHT, barDetails, DOT_GAP, DOT_REACH, DOT_SIZE, extent, GhostBar, ROW_HEIGHT, RowBar } from "./bars";
-import { dragCommand, edgeAt, gapCommand, useHoveredRow, linkKindOf, startAt, stepHalf, useChartDrag, type ChartDrag, type DragKind, type LinkEnd } from "./drag";
+import { dragCommand, edgeAt, gapCommand, useHoveredRow, startAt, stepHalf, useChartDrag, type ChartDrag, type DragKind } from "./drag";
 import { TagChips, type TagFilter } from "./tag-chips";
 import type { Timeline } from "./timeline";
 import { AUTO_SCROLL_STEP, AUTO_SCROLL_TICK_MS, edgePush, HEADER_HEIGHT } from "../auto-scroll";
@@ -113,8 +113,8 @@ export function ChartRows({
 
   const run = (command: Command) => runCommand(latest.current.board, command);
 
-  /** `linkFrom`: for link drags, the end of the bar the link leaves from. */
-  const startDrag = (event: ReactPointerEvent, entry: BoardRow, absoluteIndex: number, kind: DragKind, linkFrom: LinkEnd = "end", pause?: BoardRow["pauses"][number]) => {
+  /** `pause`: for dragging an edge of a gap, which pause. */
+  const startDrag = (event: ReactPointerEvent, entry: BoardRow, absoluteIndex: number, kind: DragKind, pause?: BoardRow["pauses"][number]) => {
     if (!canEdit || event.button !== 0 || !entry.span) return;
     event.preventDefault();
     event.stopPropagation();
@@ -155,21 +155,13 @@ export function ChartRows({
       const { timeline: now, allRows: shown } = latest.current;
       if (kind === "link") {
         const target = shown[Math.floor(y / rowHeight)];
-        // The follower's start when the pointer is over the left half of its bar, otherwise its end.
-        let tie: { id: RowId; end: LinkEnd; kind: LinkKind } | null = null;
-        if (target && target.row.kind === "task" && target.span && target.row.id !== rowId) {
-          const box = extent(target.kind, target.span, now, style);
-          const end: LinkEnd = x < (box.left + box.right) / 2 ? "start" : "end";
-          tie = { id: target.row.id, end, kind: linkKindOf(linkFrom, end) };
-        }
+        const onTask = target && target.row.kind === "task" && target.span && target.row.id !== rowId;
         const from = extent(entry.kind, span, now, style);
         current = {
           rowId,
-          command: tie ? { type: "addLink", predecessorId: rowId, followerId: tie.id, kind: tie.kind } : null,
-          line: { x1: linkFrom === "end" ? from.right + 8 : from.left - 8, y1: absoluteIndex * rowHeight + rowHeight / 2, x2: x, y2: y },
-          targetId: tie?.id ?? null,
-          from: linkFrom,
-          targetEnd: tie?.end ?? null,
+          command: null,
+          line: { x1: from.right + 8, y1: absoluteIndex * rowHeight + rowHeight / 2, x2: x, y2: y },
+          targetId: onTask ? target.row.id : null,
         };
       } else if (kind === "gapStart" || kind === "gapEnd") {
         current = { rowId, command: gapCommand(kind, rowId, pause!, now, x), line: null, targetId: null };
@@ -190,12 +182,8 @@ export function ChartRows({
         if (kind === "move") pressed.focus({ preventScroll: true });
         return;
       }
-      if (commit && current?.command) {
-        // Between a task and a milestone it could mean aiming, too: ask, whichever way it was dragged.
-        const choice = current.command.type === "addLink" ? linkChoiceFor(board.state, current.command) : null;
-        if (choice) setLinkChoice({ ...choice, x: last?.clientX ?? startX, y: last?.clientY ?? startY });
-        else run(current.command);
-      }
+      if (commit && current?.targetId) setLinkChoice({ x: last?.clientX ?? startX, y: last?.clientY ?? startY, fromId: rowId, toId: current.targetId });
+      else if (commit && current?.command) run(current.command);
     };
     const up = (upEvent: PointerEvent) => {
       move(upEvent); // the drop lands where the pointer is, even if no move event came since
@@ -340,7 +328,7 @@ export function ChartRows({
                         aria-hidden
                         data-testid="gap-edge"
                         title="Drag to change the interruption"
-                        onPointerDown={(event) => startDrag(event, entry, absoluteIndex, "gapStart", "end", pause)}
+                        onPointerDown={(event) => startDrag(event, entry, absoluteIndex, "gapStart", pause)}
                         className="absolute cursor-ew-resize rounded-r opacity-0 group-hover/row:opacity-100 hover:bg-text/30"
                         style={{ left: timeline.xHalfEnd(pause.lastWorked) - 5, width: 7, top: center - barHeight / 2, height: barHeight }}
                       />,
@@ -349,18 +337,12 @@ export function ChartRows({
                         aria-hidden
                         data-testid="gap-edge"
                         title="Drag to change the interruption"
-                        onPointerDown={(event) => startDrag(event, entry, absoluteIndex, "gapEnd", "end", pause)}
+                        onPointerDown={(event) => startDrag(event, entry, absoluteIndex, "gapEnd", pause)}
                         className="absolute cursor-ew-resize rounded-l opacity-0 group-hover/row:opacity-100 hover:bg-text/30"
                         style={{ left: timeline.xHalf(pause.resume) - 2, width: 7, top: center - barHeight / 2, height: barHeight }}
                       />,
                     ])
                   : null}
-                <LinkDot
-                  left={box.left - DOT_REACH}
-                  top={center}
-                  title="Drag from the start onto another task to link them"
-                  onPointerDown={(event) => startDrag(event, entry, absoluteIndex, "link", "start")}
-                />
                 <LinkDot left={box.right + DOT_GAP} top={center} title="Drag onto another task to link them" onPointerDown={(event) => startDrag(event, entry, absoluteIndex, "link")} />
                 {/* Left of the bar, clear of its start dot; sticky, so it stays past the task list while the bar starts under it (and leaves with the bar). */}
                 <div className="pointer-events-none absolute left-0 flex items-center" style={{ width: Math.max(box.right, toolsLeft(box) + TOOLS_WIDTH), top: center - 10, height: 20 }}>
@@ -436,49 +418,19 @@ export function ChartRows({
         </div>
       ) : null}
       <Cutting rows={allRows} timeline={timeline} style={style} run={run} />
-      {drag?.line ? <LinkDragPreview drag={drag} allRows={allRows} timeline={timeline} style={style} /> : null}
-      {linkChoice ? <LinkChoiceMenu choice={linkChoice} state={state} run={run} onClose={() => setLinkChoice(null)} /> : null}
+      {drag?.line ? <LinkDragPreview line={drag.line} /> : null}
+      {linkChoice ? <LinkChoiceMenu choice={linkChoice} state={board.state} calendar={board.calendar} run={run} onClose={() => setLinkChoice(null)} /> : null}
     </>
   );
 }
 
-/** A link being dragged: the line to the pointer, the end of the target it would tie to, and the kind in words. */
-function LinkDragPreview({ drag, allRows, timeline, style }: { drag: ChartDrag; allRows: readonly BoardRow[]; timeline: Timeline; style: BarStyle }) {
-  const line = drag.line!;
-  const rowHeight = ROW_HEIGHT[style];
-  const index = drag.targetId ? allRows.findIndex((entry) => entry.row.id === drag.targetId) : -1;
-  const target = index >= 0 ? allRows[index]! : null;
-  const end = target?.span && drag.targetEnd ? drag.targetEnd : null;
-  const box = end ? extent(target!.kind, target!.span!, timeline, style) : null;
-  const kind = end ? linkKindOf(drag.from ?? "end", end) : null;
+/** A link being dragged: the line to the pointer. */
+function LinkDragPreview({ line }: { line: NonNullable<ChartDrag["line"]> }) {
   return (
-    <>
-      <svg aria-hidden className="pointer-events-none absolute top-0 left-0 overflow-visible" width={1} height={1}>
-        <line x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} stroke="var(--accent)" strokeWidth={2} strokeDasharray="4 3" />
-        <circle cx={line.x2} cy={line.y2} r={4} fill="var(--accent)" />
-        {box ? (
-          <circle
-            data-testid="link-target-end"
-            data-end={end}
-            cx={end === "start" ? box.left : box.right}
-            cy={index * rowHeight + rowHeight / 2}
-            r={5}
-            fill="var(--bg)"
-            stroke="var(--accent)"
-            strokeWidth={2}
-          />
-        ) : null}
-      </svg>
-      {kind ? (
-        <span
-          data-testid="link-kind"
-          className="pointer-events-none absolute z-10 rounded bg-text px-1.5 py-0.5 text-[11px] whitespace-nowrap text-bg shadow"
-          style={{ left: line.x2 + 12, top: line.y2 + 12 }}
-        >
-          {LINK_KIND_WORDS[kind]}
-        </span>
-      ) : null}
-    </>
+    <svg aria-hidden className="pointer-events-none absolute top-0 left-0 overflow-visible" width={1} height={1}>
+      <line x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} stroke="var(--accent)" strokeWidth={2} strokeDasharray="4 3" />
+      <circle cx={line.x2} cy={line.y2} r={4} fill="var(--accent)" />
+    </svg>
   );
 }
 

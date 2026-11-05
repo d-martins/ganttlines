@@ -77,9 +77,8 @@ describe("chart editing", () => {
     const tools = screen.getByRole("button", { name: "Options for “ui”" }).closest("[data-bar-tools]") as HTMLElement;
     expect(tools.className).toContain("sticky");
     expect(tools.style.left).toBe("calc(var(--list-width) + 4px)");
-    // Clear of the start dot: its right edge (two 20 px buttons, 4 px apart) 4 px or more left of the dot.
-    const dot = within(bar(/^ui,/).parentElement!).getByTitle("Drag from the start onto another task to link them");
-    expect(parseFloat(tools.style.marginLeft) + 44).toBeLessThanOrEqual(parseFloat(dot.style.left) - 4);
+    // Clear of the bar: its right edge (three 20 px buttons, 4 px apart) 4 px or more left of the bar.
+    expect(parseFloat(tools.style.marginLeft) + 68).toBeLessThanOrEqual(parseFloat(bar(/^ui,/).style.left) - 4);
   });
 
   it("shows sections as dividers across the chart, without dates", async () => {
@@ -132,75 +131,16 @@ describe("chart editing", () => {
     expect(bar(`hooks, ${d("2026-10-12")} – ${d("2026-10-13")}`)).toBeInTheDocument();
   });
 
-  it("links two tasks by dragging the bullet onto the other one", async () => {
+  it("linking two tasks asks which relation, and the target stands out while dragging", async () => {
     await chartBoard();
     const bullet = within(bar(/^ui,/).parentElement!).getByTitle("Drag onto another task to link them");
     // rows are 30 px tall: hooks is the third row (index 2)
-    drag(bullet, 500, 600, 2 * 30 + 15);
-    expect(sentCommands()).toEqual([{ type: "addLink", predecessorId: "ui", followerId: "hooks", kind: "FS" }]);
-  });
-
-  // hooks spans Oct 12–13: chart x 1344 → 1408 (the chart starts Mon Aug 31; days are 32 px), its middle at 1376.
-  const HOOKS_LEFT_HALF = 1350;
-  const HOOKS_RIGHT_HALF = 1400;
-  const HOOKS_Y = 2 * 30 + 15;
-  const startDot = () => within(bar(/^ui,/).parentElement!).getByTitle("Drag from the start onto another task to link them");
-  const endDot = () => within(bar(/^ui,/).parentElement!).getByTitle("Drag onto another task to link them");
-
-  it("dragging from the end dot onto the left half of a bar sends FS; onto the right half sends FF", async () => {
-    await chartBoard();
-    drag(endDot(), 500, HOOKS_LEFT_HALF, HOOKS_Y);
-    drag(endDot(), 500, HOOKS_RIGHT_HALF, HOOKS_Y);
-    expect(sentCommands()).toEqual([
-      { type: "addLink", predecessorId: "ui", followerId: "hooks", kind: "FS" },
-      { type: "addLink", predecessorId: "ui", followerId: "hooks", kind: "FF" },
-    ]);
-  });
-
-  it("dragging from the start dot onto the left half sends SS", async () => {
-    await chartBoard();
-    drag(startDot(), 500, HOOKS_LEFT_HALF, HOOKS_Y);
-    expect(sentCommands()).toEqual([{ type: "addLink", predecessorId: "ui", followerId: "hooks", kind: "SS" }]);
-  });
-
-  it("start dot onto the right half sends addLink SF", async () => {
-    await chartBoard();
-    drag(startDot(), 500, HOOKS_RIGHT_HALF, HOOKS_Y);
-    expect(sentCommands()).toEqual([{ type: "addLink", predecessorId: "ui", followerId: "hooks", kind: "SF" }]);
-  });
-
-  /** Presses `dot` and moves the pointer to (x, y) without dropping. */
-  const hoverLink = (dot: HTMLElement, x: number, y: number) => {
-    fireEvent.pointerDown(dot, { button: 0, clientX: 500, clientY: 0 });
-    fireEvent.pointerMove(window, { clientX: x, clientY: y });
-  };
-  const targetMarker = () => document.querySelector('[data-testid="link-target-end"]');
-  const kindLabel = () => document.querySelector('[data-testid="link-kind"]');
-
-  it("while linking, marks the end of the target it would tie to and says the kind", async () => {
-    await chartBoard();
-    hoverLink(endDot(), HOOKS_LEFT_HALF, HOOKS_Y);
-    expect(targetMarker()).toHaveAttribute("data-end", "start");
-    expect(targetMarker()).toHaveAttribute("cx", "1344");
-    expect(kindLabel()).toHaveTextContent("after it finishes");
-    fireEvent.pointerMove(window, { clientX: HOOKS_RIGHT_HALF, clientY: HOOKS_Y });
-    expect(targetMarker()).toHaveAttribute("data-end", "end");
-    expect(targetMarker()).toHaveAttribute("cx", "1408");
-    expect(kindLabel()).toHaveTextContent("can't finish before it finishes");
-    fireEvent.keyDown(window, { key: "Escape" });
-    expect(targetMarker()).toBeNull();
-    expect(kindLabel()).toBeNull();
-  });
-
-  it("while linking from the start dot onto a right half, marks the target's end and says the kind", async () => {
-    await chartBoard();
-    hoverLink(startDot(), HOOKS_RIGHT_HALF, HOOKS_Y);
-    expect(targetMarker()).toHaveAttribute("data-end", "end");
-    expect(targetMarker()).toHaveAttribute("cx", "1408");
-    expect(kindLabel()).toHaveTextContent("can't finish before it starts");
-    const hooksStrip = document.querySelector('[data-chart-body] [data-row="2"]')!;
-    expect(hooksStrip.className).toContain("bg-accent-soft"); // the target is highlighted
-    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.pointerDown(bullet, { button: 0, clientX: 500, clientY: 0 });
+    fireEvent.pointerMove(window, { clientX: 600, clientY: 2 * 30 + 15 });
+    expect(document.querySelector('[data-chart-body] [data-row="2"]')!.className).toContain("bg-accent-soft");
+    fireEvent.pointerUp(window, { clientX: 600, clientY: 2 * 30 + 15 });
+    expect(await screen.findByRole("menu", { name: "Link ui and hooks" })).toBeInTheDocument();
+    expect(sentCommands()).toEqual([]);
   });
 
   const WITH_API = [...ROWS, task("api", { parentId: "x", position: "a3", userStart: "2026-09-28", duration: 2 })];
@@ -516,14 +456,18 @@ describe("dragging between a task and a milestone", () => {
   ];
   const handle = (name: string) => within(screen.getByRole("button", { name: new RegExp(`^${name.replace(".", "\\.")}, `) }).parentElement!).getByTitle("Drag onto another task to link them");
   const dragTo = (name: string, row: number) => drag(handle(name), 500, 900, row * 30 + 15);
-  const choices = () => screen.getAllByRole("menuitem").map((item) => item.textContent);
+  /** The options, below the menu's Swap. */
+  const options = () => screen.getAllByRole("menuitem").slice(1);
+  const choices = () => options().map((item) => item.textContent);
   const commands = () => sentCommands().filter((command) => command.type === "addLink" || command.type === "setTarget");
+  const LINKS_FROM_BUILD = ["8.10 starts when build starts", "8.10 finishes when build finishes", "8.10 finishes when build starts"];
+  const LINKS_INTO_BUILD = ["build starts when 8.10 starts", "build finishes when 8.10 finishes", "build finishes when 8.10 starts"];
 
   it("from the task: asks, aiming first, and sends nothing yet", async () => {
     await chartBoard(PLAN());
     dragTo("build", 3); // 8.10
     expect(await screen.findByRole("menu", { name: "Link build and 8.10" })).toBeInTheDocument();
-    expect(choices()).toEqual(["build aims for 8.10Never moves the milestone", "Link: 8.10 waits for buildThe milestone moves if build is late"]);
+    expect(choices()).toEqual(["build aims for 8.10Never moves the milestone", "8.10 starts after build finishesThe milestone moves if build is late", ...LINKS_FROM_BUILD]);
     expect(commands()).toEqual([]);
   });
 
@@ -531,13 +475,13 @@ describe("dragging between a task and a milestone", () => {
     await chartBoard(PLAN());
     dragTo("8.10", 1); // build
     await screen.findByRole("menu");
-    expect(choices()).toEqual(["build aims for 8.10Never moves the milestone", "Link: build waits for 8.10build starts after the milestone"]);
+    expect(choices()).toEqual(["build aims for 8.10Never moves the milestone", "build starts after 8.10 finishes", ...LINKS_INTO_BUILD]);
   });
 
   it("Enter takes the first choice: aiming", async () => {
     const { user } = await chartBoard(PLAN());
     dragTo("build", 3);
-    await waitFor(() => expect(screen.getAllByRole("menuitem")[0]).toHaveFocus());
+    await waitFor(() => expect(options()[0]).toHaveFocus());
     await user.keyboard("{Enter}");
     expect(commands()).toEqual([{ type: "setTarget", id: "build", targetId: "8.10" }]);
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
@@ -546,7 +490,8 @@ describe("dragging between a task and a milestone", () => {
   it("aiming works from the milestone's side too", async () => {
     const { user } = await chartBoard(PLAN());
     dragTo("8.10", 1);
-    await user.click((await screen.findAllByRole("menuitem"))[0]!);
+    await screen.findByRole("menu");
+    await user.click(options()[0]!);
     expect(commands()).toEqual([{ type: "setTarget", id: "build", targetId: "8.10" }]);
   });
 
@@ -556,15 +501,9 @@ describe("dragging between a task and a milestone", () => {
   ])("the link choice makes the link dragged, %s", async (_name, from, row, predecessorId, followerId) => {
     const { user } = await chartBoard(PLAN());
     dragTo(from, row);
-    await user.click((await screen.findAllByRole("menuitem"))[1]!);
-    expect(commands()).toEqual([expect.objectContaining({ type: "addLink", predecessorId, followerId })]);
-  });
-
-  it("describes the link it would make when that isn't a plain finish-to-start", async () => {
-    await chartBoard(PLAN());
-    drag(handle("8.10"), 500, 9000, 1 * 30 + 15); // the right half of build: its end
     await screen.findByRole("menu");
-    expect(choices()[1]).toBe("Link: build waits for 8.10build ends after 8.10 finished");
+    await user.click(options()[1]!);
+    expect(commands()).toEqual([expect.objectContaining({ type: "addLink", predecessorId, followerId })]);
   });
 
   it("says what it replaces when already aiming elsewhere", async () => {
@@ -583,14 +522,11 @@ describe("dragging between a task and a milestone", () => {
     expect(commands()).toEqual([]);
   });
 
-  it("two tasks, and two milestones, just link", async () => {
+  it("two milestones offer the links, and nothing to aim or interrupt", async () => {
     await chartBoard(PLAN());
-    dragTo("build", 2); // next
-    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
-    expect(commands()).toEqual([expect.objectContaining({ type: "addLink", predecessorId: "build", followerId: "next" })]);
     dragTo("8.10", 4); // 8.11
-    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
-    expect(commands().at(-1)).toEqual(expect.objectContaining({ type: "addLink", predecessorId: "8.10", followerId: "8.11" }));
+    await screen.findByRole("menu");
+    expect(choices()).toEqual(["8.11 starts after 8.10 finishes", "8.11 starts when 8.10 starts", "8.11 finishes when 8.10 finishes", "8.11 finishes when 8.10 starts"]);
   });
 });
 
@@ -785,14 +721,14 @@ describe("the Critical path button's default", () => {
     useCriticalPathView.setState({ on: { [PROJECT_ID]: false } });
     const { user } = await chartBoard(rows(false));
     drag(handle("build"), 500, 900, 2 * 30 + 15);
-    await user.click((await screen.findAllByRole("menuitem"))[0]!);
+    await user.click((await screen.findAllByRole("menuitem"))[1]!);
     expect(button()).toHaveAttribute("aria-pressed", "true");
   });
 
   it("stays as it is when you add a plain link", async () => {
     const { user } = await chartBoard(rows(false));
     drag(handle("build"), 500, 900, 2 * 30 + 15);
-    await user.click((await screen.findAllByRole("menuitem"))[1]!);
+    await user.click((await screen.findAllByRole("menuitem"))[2]!);
     expect(button()).toHaveAttribute("aria-pressed", "false");
   });
 
