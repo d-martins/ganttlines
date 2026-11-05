@@ -569,8 +569,8 @@ describe("details panel", () => {
         await user.click(within(aimSection()).getByRole("button", { name: /hooks: change the task/ }));
         await user.type(await screen.findByRole("combobox", { name: "Find a task to aim here" }), "free{Enter}");
         expect(sentCommands().slice(-2)).toEqual([
+          { type: "setTarget", id: "free", targetId: "soon" }, // the new one first, so a refusal loses nothing
           { type: "setTarget", id: "hooks", targetId: null },
-          { type: "setTarget", id: "free", targetId: "soon" },
         ]);
       });
 
@@ -580,7 +580,7 @@ describe("details panel", () => {
         const linkLine = linkLines().find((line) => within(line).queryByRole("button", { name: /ui: change the task/ }))!;
         await user.selectOptions(whenOf(linkLine), "aimed by");
         expect(sentCommands().slice(-2)).toEqual([
-          { type: "removeLink", predecessorId: "ui", followerId: "soon", kind: "FS", keepPlace: false },
+          { type: "removeLink", predecessorId: "ui", followerId: "soon", kind: "FS" }, // nothing moves
           { type: "setTarget", id: "ui", targetId: "soon" },
         ]);
       });

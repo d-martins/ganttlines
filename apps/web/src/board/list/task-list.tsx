@@ -514,7 +514,7 @@ export function ListRows({
                 </CellButton>
               )}
             </span>
-            {critical ? <SlipCell slack={entry.fromBaseline ? undefined : slack.get(row.id)} /> : null}
+            {critical ? row.kind === "section" ? <span role="gridcell" /> : <SlipCell slack={entry.fromBaseline ? undefined : slack.get(row.id)} /> : null}
             <span role="gridcell" className={`flex justify-end gap-1 ${selected ? "" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"}`}>
               <RowActions id={row.id} title={row.title} />
             </span>
@@ -543,6 +543,18 @@ export function ListRows({
 /** How far the row can slip. Pointing at it says what limits it, and picks out that milestone's line. */
 function SlipCell({ slack }: { slack: Slack | undefined }) {
   const { state } = useBoard();
+  const hovering = useRef(false);
+  const setHovered = (id: RowId | null) => {
+    hovering.current = id !== null;
+    useHoveredMilestone.setState({ id });
+  };
+  // No pointer leave comes when the cell itself goes away.
+  useEffect(
+    () => () => {
+      if (hovering.current) useHoveredMilestone.setState({ id: null });
+    },
+    [],
+  );
   if (!slack) {
     return (
       <span role="gridcell" aria-label="Can slip: nothing to measure against" className="px-1 text-right text-xs text-muted">
@@ -553,10 +565,9 @@ function SlipCell({ slack }: { slack: Slack | undefined }) {
   const amount = formatSlack(slack.halves);
   const limit = slack.limit;
   const tone = slack.halves < 0 ? "font-semibold text-[var(--slack-late)]" : slack.halves === 0 ? "font-semibold text-[var(--slack-zero)]" : "text-muted";
-  const hint = limit.kind === "end" ? "Limited by the end of the board" : `Limited by ${state.rows[limit.id]?.title || "Untitled"}`;
-  const setHovered = (id: RowId | null) => useHoveredMilestone.setState({ id });
+  const limitedBy = limit.kind === "end" ? "the end of the board" : state.rows[limit.id]?.title || "Untitled";
   return (
-    <span role="gridcell" aria-label={`Can slip ${amount}`} className={`px-1 text-right text-xs tabular-nums ${tone}`}>
+    <span role="gridcell" aria-label={`Can slip ${amount}, limited by ${limitedBy}`} className={`px-1 text-right text-xs tabular-nums ${tone}`}>
       <Tooltip.Root>
         <Tooltip.Trigger asChild>
           <span onPointerEnter={() => setHovered(limit.kind === "milestone" ? limit.id : null)} onPointerLeave={() => setHovered(null)}>
@@ -565,7 +576,7 @@ function SlipCell({ slack }: { slack: Slack | undefined }) {
         </Tooltip.Trigger>
         <Tooltip.Portal>
           <Tooltip.Content sideOffset={6} className="z-50 rounded bg-text px-2 py-1 text-xs text-bg shadow">
-            {hint}
+            Limited by {limitedBy}
           </Tooltip.Content>
         </Tooltip.Portal>
       </Tooltip.Root>

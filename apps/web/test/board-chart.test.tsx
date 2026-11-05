@@ -4,6 +4,7 @@ import type { ProjectStateDto } from "@ganttlines/protocol";
 import { act, fireEvent, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { toolsLeft } from "../src/board/chart/chart-rows";
+import { aimedMilestones } from "../src/board/chart/milestone-lines";
 import { isCriticalPathOn, useCriticalPathView } from "../src/board/critical-path-view";
 import { LIST_WIDTH, SLIP_COLUMN } from "../src/board/view-store";
 import { linkPath } from "../src/board/chart/dependencies";
@@ -22,7 +23,7 @@ const ROWS = [
   task("idea", { parentId: "x", position: "a2", duration: 2 }),
 ];
 
-async function chartBoard(rows: ProjectStateDto["rows"] = ROWS, user = ADMIN, links: Link[] = [], search = "") {
+async function chartBoard(rows: ProjectStateDto["rows"] = ROWS, user = ADMIN, links: Link[] = [], search = "", join = true) {
   FakeWebSocket.instances = [];
   vi.stubGlobal("WebSocket", FakeWebSocket);
   const api = signedIn(user, [project(PROJECT_ID, "Launch")]);
@@ -34,7 +35,7 @@ async function chartBoard(rows: ProjectStateDto["rows"] = ROWS, user = ADMIN, li
   const app = renderApp(`/p/${PROJECT_ID}${search}`);
   await screen.findByRole("treegrid", { name: "Tasks" });
   await waitFor(() => expect(FakeWebSocket.last.sent).toHaveLength(1));
-  FakeWebSocket.last.deliver({ type: "joined", projectId: PROJECT_ID, version: 5, instanceVersion: 1, viewers: [] });
+  if (join) FakeWebSocket.last.deliver({ type: "joined", projectId: PROJECT_ID, version: 5, instanceVersion: 1, viewers: [] });
   return { api, ...app };
 }
 
@@ -461,6 +462,27 @@ describe("milestones being aimed at", () => {
     expect(flags()).toEqual(["cut"]);
   });
 
+  it("a hidden milestone far beyond the visible rows keeps its true date", async () => {
+    const rows = [
+      section("work", { position: "a0" }),
+      task("ui", { parentId: "work", position: "a0", userStart: "2026-10-12", duration: 1, targetId: "cut" }),
+      section("dates", { position: "a1" }),
+      task("cut", { parentId: "dates", position: "a0", userStart: "2027-06-14", duration: 0 }),
+    ];
+    const { unmount } = await chartBoard(rows);
+    const shown = lines()[0]!.style.left;
+    unmount();
+    await chartBoard(rows, ADMIN, [], `?q=${encodeURIComponent("ui")}`);
+    expect(screen.queryByRole("button", { name: /^cut, / })).not.toBeInTheDocument();
+    expect(lines()[0]!.style.left).toBe(shown);
+  });
+
+  it("works out no dates for lines on a board nobody aims on", () => {
+    const schedule = vi.fn(() => null);
+    expect(aimedMilestones({ rows: { t: task("t") }, links: {} }, schedule, [])).toEqual([]);
+    expect(schedule).not.toHaveBeenCalled();
+  });
+
   it("a miss is outlined even when a locked follower is the tighter limit", async () => {
     const rows = [
       section("x", { position: "a0" }),
@@ -536,6 +558,13 @@ describe("dragging between a task and a milestone", () => {
     dragTo(from, row);
     await user.click((await screen.findAllByRole("menuitem"))[1]!);
     expect(commands()).toEqual([expect.objectContaining({ type: "addLink", predecessorId, followerId })]);
+  });
+
+  it("describes the link it would make when that isn't a plain finish-to-start", async () => {
+    await chartBoard(PLAN());
+    drag(handle("8.10"), 500, 9000, 1 * 30 + 15); // the right half of build: its end
+    await screen.findByRole("menu");
+    expect(choices()[1]).toBe("Link: build waits for 8.10build ends after 8.10 finished");
   });
 
   it("says what it replaces when already aiming elsewhere", async () => {
@@ -627,6 +656,22 @@ describe("the Critical path button", () => {
     expect(line).not.toHaveAttribute("data-hovered");
   });
 
+  it("sections have an empty cell, and the value names its limit for screen readers", async () => {
+    const { user } = await chartBoard(PLAN);
+    await user.click(button());
+    expect(within(rowNamed("x")).queryByRole("gridcell", { name: /^Can slip/ })).toBeNull();
+    expect(canSlip("tight")).toHaveAccessibleName("Can slip 0 days, limited by cut");
+  });
+
+  it("the highlight goes when the value it came from does", async () => {
+    const { user } = await chartBoard(PLAN);
+    await user.click(button());
+    await user.hover(canSlip("tight")!.firstElementChild!);
+    expect(screen.getByTestId("milestone-line")).toHaveAttribute("data-hovered", "true");
+    fireEvent.click(button()); // the pointer never leaves it: the column just goes
+    expect(screen.getByTestId("milestone-line")).not.toHaveAttribute("data-hovered");
+  });
+
   it("says when the end of the board is the limit, without highlighting anything", async () => {
     const rows = [...PLAN, task("linked", { parentId: "x", position: "a5", userStart: "2026-10-12", duration: 1 }), task("onward", { parentId: "x", position: "a6", userStart: "2026-10-12", duration: 1 })];
     const { user } = await chartBoard(rows, ADMIN, [{ predecessorId: "linked", followerId: "onward", kind: "FS", lag: 0 }]);
@@ -709,6 +754,11 @@ describe("the Critical path button's default", () => {
 
   it("is on when the board has an aim", async () => {
     await chartBoard(rows(true));
+    await waitFor(() => expect(button()).toHaveAttribute("aria-pressed", "true"));
+  });
+
+  it("settles as soon as the board shows, before the connection is up", async () => {
+    await chartBoard(rows(true), ADMIN, [], "", false);
     await waitFor(() => expect(button()).toHaveAttribute("aria-pressed", "true"));
   });
 

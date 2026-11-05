@@ -13,8 +13,10 @@ export interface AimedMilestone {
  * The dated milestones at least one task aims for, whether or not their own rows are on screen (collapsed,
  * filtered out). `rows` are the rows on screen: their dates win, as they may be a baseline's.
  */
-export function aimedMilestones(state: ProjectState, schedule: Schedule | null, rows: readonly BoardRow[]): AimedMilestone[] {
+export function aimedMilestones(state: ProjectState, scheduleOf: () => Schedule | null, rows: readonly BoardRow[]): AimedMilestone[] {
   const aimed = new Set(Object.values(state.rows).flatMap((row) => (row.kind === "task" && row.targetId ? [row.targetId] : [])));
+  if (aimed.size === 0) return [];
+  const schedule = scheduleOf();
   const shown = new Map(rows.map((entry) => [entry.row.id, entry.span]));
   return [...aimed].flatMap((id) => {
     const span = shown.has(id) ? shown.get(id) : schedule?.get(id)?.span;

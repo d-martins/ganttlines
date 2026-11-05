@@ -159,7 +159,7 @@ function LiveBoard({ sync, share }: { sync: BoardSync; share: ShareAccess | null
   }, [canEdit, canManage]);
   useEffect(resetSelection, [projectId]);
   // Before painting, so the Can slip column doesn't appear a moment after the board.
-  const opened = state.status === "live";
+  const opened = state.project !== null;
   useLayoutEffect(() => {
     if (opened) useCriticalPathView.getState().settleDefault(projectId, Object.values(rendered.rows).some((row) => row.kind === "task" && row.targetId));
   }, [opened, projectId]);

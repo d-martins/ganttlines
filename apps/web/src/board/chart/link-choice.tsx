@@ -1,6 +1,7 @@
 import { isValidTarget, type Command, type ProjectState, type RowId, type TaskRow } from "@ganttlines/engine";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useEffect, useRef } from "react";
+import { lineOf } from "../link-phrases";
 
 /** A link dragged between a task and a milestone: it could mean either, so the drop asks. */
 export interface LinkChoice {
@@ -19,6 +20,13 @@ export function linkChoiceFor(state: ProjectState, link: Extract<Command, { type
   const fromIsMilestone = isValidTarget(state, from.id);
   if (fromIsMilestone === isValidTarget(state, to.id)) return null;
   return { task: fromIsMilestone ? to : from, milestone: fromIsMilestone ? from : to, link };
+}
+
+/** What the link does, in the words the panel uses for anything but the usual kind. */
+function linkNote(link: LinkChoice["link"], taskName: string, milestoneName: string, fromTask: boolean): string {
+  if (link.kind === "FS") return fromTask ? `The milestone moves if ${taskName} is late` : `${taskName} starts after the milestone`;
+  const { when, end } = lineOf({ kind: link.kind, thisWaits: true });
+  return fromTask ? `${milestoneName} ${when} ${taskName} ${end}` : `${taskName} ${when} ${milestoneName} ${end}`;
 }
 
 const ITEM = "cursor-pointer rounded px-2 py-1.5 outline-none hover:bg-surface-2 data-[highlighted]:bg-surface-2";
@@ -56,7 +64,7 @@ export function LinkChoiceMenu({ choice, state, run, onClose }: { choice: LinkCh
           </DropdownMenu.Item>
           <DropdownMenu.Item className={ITEM} onSelect={() => run(link)}>
             Link: {fromTask ? `${milestoneName} waits for ${taskName}` : `${taskName} waits for ${milestoneName}`}
-            <span className={NOTE}>{fromTask ? `The milestone moves if ${taskName} is late` : `${taskName} starts after the milestone`}</span>
+            <span className={NOTE}>{linkNote(link, taskName, milestoneName, fromTask)}</span>
           </DropdownMenu.Item>
         </DropdownMenu.Content>
       </DropdownMenu.Portal>

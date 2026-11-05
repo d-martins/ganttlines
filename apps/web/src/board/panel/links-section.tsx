@@ -239,12 +239,14 @@ export function LinksSection({
 
   /** From the milestone: the aim here moved to another task. */
   const changeAimer = (aimer: TaskRow, otherId: RowId) => {
-    if (run({ type: "setTarget", id: aimer.id, targetId: null }) !== null) run({ type: "setTarget", id: otherId, targetId: task.id });
+    // The new aim first: if it's refused, the old one is still there.
+    if (run({ type: "setTarget", id: otherId, targetId: task.id }) !== null) run({ type: "setTarget", id: aimer.id, targetId: null });
   };
 
   /** A link between a task and a milestone turned into an aim, both or neither. */
   const linkToAim = (link: Link) => {
-    const remove: Command = { type: "removeLink", predecessorId: link.predecessorId, followerId: link.followerId, kind: link.kind, keepPlace: false };
+    // Aiming moves nothing: whatever the link was holding stays where it's shown.
+    const remove: Command = { type: "removeLink", predecessorId: link.predecessorId, followerId: link.followerId, kind: link.kind };
     const aim: Command = isTarget ? { type: "setTarget", id: otherOf(link), targetId: task.id } : { type: "setTarget", id: task.id, targetId: otherOf(link) };
     const removed = applyCommand(state, calendar, remove);
     const checked = removed.ok ? applyCommand(removed.state, calendar, aim) : removed;

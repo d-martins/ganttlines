@@ -130,7 +130,7 @@ export function Board({
     () => boardModel(displayed, calendar, baseline, filters, collapsed, team, shownMatches),
     [displayed, calendar, baseline, filters, collapsed, team, shownMatches],
   );
-  const milestones = useMemo(() => aimedMilestones(displayed, boardSchedule(displayed, calendar), model.rows), [displayed, calendar, model.rows]);
+  const milestones = useMemo(() => aimedMilestones(displayed, () => boardSchedule(displayed, calendar), model.rows), [displayed, calendar, model.rows]);
   const known = useMemo(() => knownFilters(state, filters, team), [state, filters, team]);
   const DetailsPanel = useDetailsPanel();
   const onListKey = useListKeys(model.rows, model.filtering);
@@ -147,13 +147,14 @@ export function Board({
   }, [calendarDto.holidays]);
 
   const { first, last } = useMemo(() => {
-    const days: DayNum[] = highlightDays.map(({ day }) => day);
+    // Milestones too: a line for one whose row is hidden still has to land on its date.
+    const days: DayNum[] = [...highlightDays.map(({ day }) => day), ...milestones.map(({ day }) => day)];
     for (const { span, ghost } of model.rows) {
       if (span) days.push(span.start, span.end);
       if (ghost) days.push(ghost.span.start, ghost.span.end);
     }
     return chartRange(days, todayDay);
-  }, [model, highlightDays, todayDay]);
+  }, [model, milestones, highlightDays, todayDay]);
   const timeline = useMemo(() => {
     const working = new Set(calendarDto.workingWeekdays);
     const hidden = showWeekends ? undefined : (day: DayNum) => !working.has(weekday(day));
