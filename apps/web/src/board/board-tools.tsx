@@ -1,8 +1,9 @@
+import { useCriticalPath, useCriticalPathView } from "./critical-path-view";
 import type { ResourceDto, Viewer } from "@ganttlines/protocol";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { CalendarRange, GalleryVertical, Layers, Redo2, Undo2, ZoomIn, ZoomOut } from "lucide-react";
+import { CalendarRange, GalleryVertical, Layers, Redo2, Undo2, ZoomIn, ZoomOut, Route } from "lucide-react";
 import { useState } from "react";
 import { useStore } from "zustand";
 import { errorMessage } from "../api/client";
@@ -37,6 +38,8 @@ export function BoardTools({ sync }: { sync: BoardSync }) {
   const { dayWidth, barStyle, showWeekends, setDayWidth, setBarStyle, setShowWeekends, goToToday } = useBoardView();
   const canEdit = useActiveBoard((state) => state.canEdit);
   const capabilities = useCapabilities();
+  const criticalPath = useCriticalPath(sync.projectId);
+  const toggleCriticalPath = useCriticalPathView((view) => view.toggle);
   const mod = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
   return (
     <>
@@ -49,6 +52,9 @@ export function BoardTools({ sync }: { sync: BoardSync }) {
           <Redo2 size={16} />
         </IconButton>
         <BaselinePicker projectId={sync.projectId} />
+        <IconButton label="Critical path" aria-pressed={criticalPath} onClick={() => toggleCriticalPath(sync.projectId)} className={criticalPath ? "bg-accent-soft text-accent" : ""}>
+          <Route size={16} />
+        </IconButton>
         <div role="group" aria-label="Zoom" className="ml-1 flex items-center rounded-md border border-border bg-bg p-0.5">
           <IconButton label="Zoom out" className="h-6 w-6 disabled:opacity-40" disabled={dayWidth <= ZOOM_STEPS[0]} onClick={() => setDayWidth(zoomStep(dayWidth, -1))}>
             <ZoomOut size={14} />

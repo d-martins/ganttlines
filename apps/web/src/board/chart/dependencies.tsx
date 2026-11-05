@@ -1,3 +1,4 @@
+import { useCriticalLinks } from "../slack";
 import { linkKey, type LinkKind } from "@ganttlines/engine";
 import type { BoardModel, BoardRow } from "../model";
 import type { BarStyle } from "../view-store";
@@ -65,6 +66,7 @@ export function Dependencies({
   style: BarStyle;
 }) {
   const rowHeight = ROW_HEIGHT[style];
+  const critical = useCriticalLinks();
   const index = new Map(rows.map((entry, i) => [entry.row.id, i]));
   const paths: { key: string; d: string; violation: boolean }[] = [];
   for (const { link, violation } of links) {
@@ -86,6 +88,9 @@ export function Dependencies({
         <marker id="dep-arrow" viewBox="0 0 6 6" refX="5" refY="3" markerWidth="6" markerHeight="6" orient="auto">
           <path d="M0,0 L6,3 L0,6 z" fill="var(--dependency)" />
         </marker>
+        <marker id="dep-arrow-critical" viewBox="0 0 6 6" refX="5" refY="3" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M0,0 L6,3 L0,6 z" fill="var(--slack-zero)" />
+        </marker>
         <marker id="dep-arrow-violation" viewBox="0 0 6 6" refX="5" refY="3" markerWidth="6" markerHeight="6" orient="auto">
           <path d="M0,0 L6,3 L0,6 z" fill="var(--violation)" />
         </marker>
@@ -95,11 +100,12 @@ export function Dependencies({
           key={path.key}
           data-testid="dependency"
           data-violation={path.violation || undefined}
+          data-critical={critical.has(path.key) || undefined}
           d={path.d}
           fill="none"
-          stroke={path.violation ? "var(--violation)" : "var(--dependency)"}
+          stroke={path.violation ? "var(--violation)" : critical.has(path.key) ? "var(--slack-zero)" : "var(--dependency)"}
           strokeWidth={1.25}
-          markerEnd={`url(#${path.violation ? "dep-arrow-violation" : "dep-arrow"})`}
+          markerEnd={`url(#${path.violation ? "dep-arrow-violation" : critical.has(path.key) ? "dep-arrow-critical" : "dep-arrow"})`}
         />
       ))}
     </svg>

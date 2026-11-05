@@ -1,9 +1,12 @@
-import type { Command, Link } from "@ganttlines/engine";
+import type { Command, Link, TaskRow } from "@ganttlines/engine";
 import { toDay } from "@ganttlines/engine";
 import type { ProjectStateDto } from "@ganttlines/protocol";
 import { act, fireEvent, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { toolsLeft } from "../src/board/chart/chart-rows";
+import { aimedMilestones } from "../src/board/chart/milestone-lines";
+import { isCriticalPathOn, useCriticalPathView } from "../src/board/critical-path-view";
+import { LIST_WIDTH, SLIP_COLUMN } from "../src/board/view-store";
 import { linkPath } from "../src/board/chart/dependencies";
 import { formatDay } from "../src/board/format";
 import { useBoardView } from "../src/board/view-store";
@@ -20,7 +23,7 @@ const ROWS = [
   task("idea", { parentId: "x", position: "a2", duration: 2 }),
 ];
 
-async function chartBoard(rows: ProjectStateDto["rows"] = ROWS, user = ADMIN, links: Link[] = [], search = "") {
+async function chartBoard(rows: ProjectStateDto["rows"] = ROWS, user = ADMIN, links: Link[] = [], search = "", join = true) {
   FakeWebSocket.instances = [];
   vi.stubGlobal("WebSocket", FakeWebSocket);
   const api = signedIn(user, [project(PROJECT_ID, "Launch")]);
@@ -32,7 +35,7 @@ async function chartBoard(rows: ProjectStateDto["rows"] = ROWS, user = ADMIN, li
   const app = renderApp(`/p/${PROJECT_ID}${search}`);
   await screen.findByRole("treegrid", { name: "Tasks" });
   await waitFor(() => expect(FakeWebSocket.last.sent).toHaveLength(1));
-  FakeWebSocket.last.deliver({ type: "joined", projectId: PROJECT_ID, version: 5, instanceVersion: 1, viewers: [] });
+  if (join) FakeWebSocket.last.deliver({ type: "joined", projectId: PROJECT_ID, version: 5, instanceVersion: 1, viewers: [] });
   return { api, ...app };
 }
 
@@ -376,6 +379,430 @@ describe("tags on the chart", () => {
     const popover = await screen.findByRole("dialog", { name: "Tags of “ui”" });
     await user.click(within(popover).getByRole("button", { name: "Filter by the tag “Back end”" }));
     await waitFor(() => expect(router.state.location.search).toEqual({ tags: ["Back end"] }));
+  });
+});
+
+describe("milestones being aimed at", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 8, 29, 12));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const AIMED = (fields: Partial<TaskRow> = {}) => [
+    section("x", { position: "a0" }),
+    task("ui", { parentId: "x", position: "a0", userStart: "2026-10-05", duration: 2, ...fields }),
+    task("free", { parentId: "x", position: "a1", userStart: "2026-10-05", duration: 1 }),
+    task("cut", { parentId: "x", position: "a2", userStart: "2026-10-14", duration: 0 }),
+    task("other", { parentId: "x", position: "a3", userStart: "2026-10-16", duration: 0 }),
+    task("undated", { parentId: "x", position: "a4", duration: 0 }),
+  ];
+  const lines = () => screen.queryAllByTestId("milestone-line");
+  const flags = () => screen.queryAllByTestId("milestone-flag").map((flag) => flag.textContent);
+  const bar = (name: string) => screen.getByRole("button", { name: new RegExp(`^${name}, `) });
+
+  it("a milestone nobody aims for draws no line", async () => {
+    await chartBoard(AIMED());
+    expect(lines()).toEqual([]);
+    expect(flags()).toEqual([]);
+  });
+
+  it("one being aimed at draws a line and a flag with its title", async () => {
+    await chartBoard(AIMED({ targetId: "cut" }));
+    expect(lines()).toHaveLength(1);
+    expect(flags()).toEqual(["cut"]);
+  });
+
+  it("two tasks aiming at it draw one line", async () => {
+    const rows = AIMED({ targetId: "cut" }).map((row) => (row.id === "free" ? { ...row, targetId: "cut" } : row));
+    await chartBoard(rows);
+    expect(lines()).toHaveLength(1);
+  });
+
+  it("an undated one draws none", async () => {
+    await chartBoard(AIMED({ targetId: "undated" }));
+    expect(lines()).toEqual([]);
+  });
+
+  it("a task past its target is outlined, keeping its colour", async () => {
+    const rows = AIMED({ targetId: "cut", duration: 10, color: "purple" }).map((row) => (row.id === "free" ? { ...row, color: "purple" as const } : row));
+    await chartBoard(rows); // finishes the 16th, milestone the 14th
+    const late = bar("ui");
+    expect(late).toHaveAttribute("data-slack", "late");
+    expect(late.className).toContain("outline");
+    expect(late.style.background).toBe(bar("free").style.background);
+    expect(bar("free")).not.toHaveAttribute("data-slack");
+  });
+
+  it("a task feeding one that's late is too", async () => {
+    await chartBoard(
+      [
+        section("x", { position: "a0" }),
+        task("feeder", { parentId: "x", position: "a0", userStart: "2026-10-05", duration: 1 }),
+        task("ui", { parentId: "x", position: "a1", userStart: "2026-10-05", duration: 10, targetId: "cut" }),
+        task("cut", { parentId: "x", position: "a2", userStart: "2026-10-14", duration: 0 }),
+      ],
+      ADMIN,
+      [{ predecessorId: "feeder", followerId: "ui", kind: "FS", lag: 0 }],
+    );
+    expect(bar("feeder")).toHaveAttribute("data-slack", "late");
+  });
+
+  it("keeps the line when the milestone's section is collapsed", async () => {
+    const rows = [
+      section("work", { position: "a0" }),
+      task("ui", { parentId: "work", position: "a0", userStart: "2026-10-12", duration: 1, targetId: "cut" }),
+      section("dates", { position: "a1" }),
+      task("cut", { parentId: "dates", position: "a0", userStart: "2026-10-14", duration: 0 }),
+    ];
+    const { user } = await chartBoard(rows);
+    await user.click(screen.getByRole("button", { name: "Collapse all" }));
+    expect(screen.queryByRole("button", { name: /^cut, / })).not.toBeInTheDocument();
+    expect(lines()).toHaveLength(1);
+    expect(flags()).toEqual(["cut"]);
+  });
+
+  it("a hidden milestone far beyond the visible rows keeps its true date", async () => {
+    const rows = [
+      section("work", { position: "a0" }),
+      task("ui", { parentId: "work", position: "a0", userStart: "2026-10-12", duration: 1, targetId: "cut" }),
+      section("dates", { position: "a1" }),
+      task("cut", { parentId: "dates", position: "a0", userStart: "2027-06-14", duration: 0 }),
+    ];
+    const { unmount } = await chartBoard(rows);
+    const shown = lines()[0]!.style.left;
+    unmount();
+    await chartBoard(rows, ADMIN, [], `?q=${encodeURIComponent("ui")}`);
+    expect(screen.queryByRole("button", { name: /^cut, / })).not.toBeInTheDocument();
+    expect(lines()[0]!.style.left).toBe(shown);
+  });
+
+  it("works out no dates for lines on a board nobody aims on", () => {
+    const schedule = vi.fn(() => null);
+    expect(aimedMilestones({ rows: { t: task("t") }, links: {} }, schedule, [])).toEqual([]);
+    expect(schedule).not.toHaveBeenCalled();
+  });
+
+  it("a miss is outlined even when a locked follower is the tighter limit", async () => {
+    const rows = [
+      section("x", { position: "a0" }),
+      task("ui", { parentId: "x", position: "a0", userStart: "2026-10-12", duration: 3, targetId: "cut" }),
+      task("cut", { parentId: "x", position: "a1", userStart: "2026-10-13", duration: 0 }),
+      task("held", { parentId: "x", position: "a2", userStart: "2026-10-13", duration: 1, locked: true }),
+    ];
+    await chartBoard(rows, ADMIN, [{ predecessorId: "ui", followerId: "held", kind: "FS", lag: 0 }]);
+    expect(bar("ui")).toHaveAttribute("data-slack", "late");
+  });
+
+  it("a board with no targets has no outlines", async () => {
+    await chartBoard(AIMED());
+    expect(document.querySelector("[data-slack]")).toBeNull();
+  });
+});
+
+describe("dragging between a task and a milestone", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 8, 29, 12));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const PLAN = (fields: Partial<TaskRow> = {}) => [
+    section("x", { position: "a0" }),
+    task("build", { parentId: "x", position: "a0", userStart: "2026-10-12", duration: 1, ...fields }),
+    task("next", { parentId: "x", position: "a1", userStart: "2026-10-12", duration: 1 }),
+    task("8.10", { parentId: "x", position: "a2", userStart: "2026-10-20", duration: 0 }),
+    task("8.11", { parentId: "x", position: "a3", userStart: "2026-10-27", duration: 0 }),
+  ];
+  const handle = (name: string) => within(screen.getByRole("button", { name: new RegExp(`^${name.replace(".", "\\.")}, `) }).parentElement!).getByTitle("Drag onto another task to link them");
+  const dragTo = (name: string, row: number) => drag(handle(name), 500, 900, row * 30 + 15);
+  const choices = () => screen.getAllByRole("menuitem").map((item) => item.textContent);
+  const commands = () => sentCommands().filter((command) => command.type === "addLink" || command.type === "setTarget");
+
+  it("from the task: asks, aiming first, and sends nothing yet", async () => {
+    await chartBoard(PLAN());
+    dragTo("build", 3); // 8.10
+    expect(await screen.findByRole("menu", { name: "Link build and 8.10" })).toBeInTheDocument();
+    expect(choices()).toEqual(["build aims for 8.10Never moves the milestone", "Link: 8.10 waits for buildThe milestone moves if build is late"]);
+    expect(commands()).toEqual([]);
+  });
+
+  it("from the milestone: the same question, the link reading the other way", async () => {
+    await chartBoard(PLAN());
+    dragTo("8.10", 1); // build
+    await screen.findByRole("menu");
+    expect(choices()).toEqual(["build aims for 8.10Never moves the milestone", "Link: build waits for 8.10build starts after the milestone"]);
+  });
+
+  it("Enter takes the first choice: aiming", async () => {
+    const { user } = await chartBoard(PLAN());
+    dragTo("build", 3);
+    await waitFor(() => expect(screen.getAllByRole("menuitem")[0]).toHaveFocus());
+    await user.keyboard("{Enter}");
+    expect(commands()).toEqual([{ type: "setTarget", id: "build", targetId: "8.10" }]);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("aiming works from the milestone's side too", async () => {
+    const { user } = await chartBoard(PLAN());
+    dragTo("8.10", 1);
+    await user.click((await screen.findAllByRole("menuitem"))[0]!);
+    expect(commands()).toEqual([{ type: "setTarget", id: "build", targetId: "8.10" }]);
+  });
+
+  it.each([
+    ["from the task", "build", 3, "build", "8.10"],
+    ["from the milestone", "8.10", 1, "8.10", "build"],
+  ])("the link choice makes the link dragged, %s", async (_name, from, row, predecessorId, followerId) => {
+    const { user } = await chartBoard(PLAN());
+    dragTo(from, row);
+    await user.click((await screen.findAllByRole("menuitem"))[1]!);
+    expect(commands()).toEqual([expect.objectContaining({ type: "addLink", predecessorId, followerId })]);
+  });
+
+  it("describes the link it would make when that isn't a plain finish-to-start", async () => {
+    await chartBoard(PLAN());
+    drag(handle("8.10"), 500, 9000, 1 * 30 + 15); // the right half of build: its end
+    await screen.findByRole("menu");
+    expect(choices()[1]).toBe("Link: build waits for 8.10build ends after 8.10 finished");
+  });
+
+  it("says what it replaces when already aiming elsewhere", async () => {
+    await chartBoard(PLAN({ targetId: "8.11" }));
+    dragTo("build", 3);
+    await screen.findByRole("menu");
+    expect(choices()[0]).toBe("build aims for 8.10Instead of 8.11");
+  });
+
+  it("Escape cancels: nothing is created", async () => {
+    const { user } = await chartBoard(PLAN());
+    dragTo("build", 3);
+    await screen.findByRole("menu");
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+    expect(commands()).toEqual([]);
+  });
+
+  it("two tasks, and two milestones, just link", async () => {
+    await chartBoard(PLAN());
+    dragTo("build", 2); // next
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(commands()).toEqual([expect.objectContaining({ type: "addLink", predecessorId: "build", followerId: "next" })]);
+    dragTo("8.10", 4); // 8.11
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(commands().at(-1)).toEqual(expect.objectContaining({ type: "addLink", predecessorId: "8.10", followerId: "8.11" }));
+  });
+});
+
+describe("the Critical path button", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 8, 29, 12));
+    localStorage.clear();
+    // Most of these start from having turned it off; see "its default" for what happens with no choice made.
+    useCriticalPathView.setState({ on: { [PROJECT_ID]: false }, defaults: {} });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    useCriticalPathView.setState({ on: {}, defaults: {} });
+  });
+
+  const PLAN = [
+    section("x", { position: "a0" }),
+    task("tight", { parentId: "x", position: "a0", userStart: "2026-10-12", duration: 2, targetId: "cut" }),
+    task("loose", { parentId: "x", position: "a1", userStart: "2026-10-12", duration: 1, targetId: "cut" }),
+    task("late", { parentId: "x", position: "a2", userStart: "2026-10-12", duration: 3, targetId: "cut" }),
+    task("after", { parentId: "x", position: "a3", userStart: "2026-10-12", duration: 8 }),
+    task("cut", { parentId: "x", position: "a4", userStart: "2026-10-13", duration: 0 }),
+  ];
+  const FEEDS: Link[] = [{ predecessorId: "first", followerId: "tight2", kind: "FS", lag: 0 }];
+  const button = () => screen.getByRole("button", { name: "Critical path" });
+  const bar = (name: string) => screen.getByRole("button", { name: new RegExp(`^${name}, `) });
+  const canSlip = (name: string) => within(rowNamed(name)).queryByRole("gridcell", { name: /^Can slip/ });
+  const rowNamed = (name: string) => screen.getAllByRole("row").find((row) => within(row).queryByText(name, { exact: true }))!;
+
+  it("off: no column, no zero outlines, no critical links", async () => {
+    await chartBoard(PLAN);
+    expect(button()).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByText("Can slip")).not.toBeInTheDocument();
+    expect(bar("tight")).not.toHaveAttribute("data-slack");
+    expect(document.querySelector("[data-critical]")).toBeNull();
+  });
+
+  it("on: the column follows AWD, naming a milestone limit", async () => {
+    const { user } = await chartBoard(PLAN);
+    await user.click(button());
+    expect(button()).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("AWD").nextElementSibling).toHaveTextContent("Can slip");
+    expect(screen.getByRole("columnheader", { name: "Can slip" })).toBeInTheDocument();
+    expect(canSlip("tight")).toHaveTextContent(/^0 days$/);
+    expect(canSlip("loose")).toHaveTextContent(/^1 day$/);
+    expect(canSlip("late")).toHaveTextContent(/^−1 day$/);
+    expect(canSlip("after")).toHaveTextContent(/^–$/); // connected to nothing
+    expect(canSlip("cut")).toHaveTextContent(/^–$/); // a milestone, even with tasks aiming at it
+    expect(screen.getByRole("button", { name: /^cut, / })).not.toHaveAttribute("data-slack");
+  });
+
+  it("hovering a value highlights its milestone's line and says what limits it", async () => {
+    const { user } = await chartBoard(PLAN);
+    await user.click(button());
+    const line = screen.getByTestId("milestone-line");
+    expect(line).not.toHaveAttribute("data-hovered");
+    await user.hover(canSlip("tight")!.firstElementChild ?? canSlip("tight")!);
+    expect(line).toHaveAttribute("data-hovered", "true");
+    expect(screen.getByTestId("milestone-flag")).toHaveAttribute("data-hovered", "true");
+    expect((await screen.findByRole("tooltip")).textContent).toBe("Limited by cut");
+    await user.unhover(canSlip("tight")!.firstElementChild ?? canSlip("tight")!);
+    expect(line).not.toHaveAttribute("data-hovered");
+  });
+
+  it("sections have an empty cell, and the value names its limit for screen readers", async () => {
+    const { user } = await chartBoard(PLAN);
+    await user.click(button());
+    expect(within(rowNamed("x")).queryByRole("gridcell", { name: /^Can slip/ })).toBeNull();
+    expect(canSlip("tight")).toHaveAccessibleName("Can slip 0 days, limited by cut");
+  });
+
+  it("the highlight goes when the value it came from does", async () => {
+    const { user } = await chartBoard(PLAN);
+    await user.click(button());
+    await user.hover(canSlip("tight")!.firstElementChild!);
+    expect(screen.getByTestId("milestone-line")).toHaveAttribute("data-hovered", "true");
+    fireEvent.click(button()); // the pointer never leaves it: the column just goes
+    expect(screen.getByTestId("milestone-line")).not.toHaveAttribute("data-hovered");
+  });
+
+  it("says when the end of the board is the limit, without highlighting anything", async () => {
+    const rows = [...PLAN, task("linked", { parentId: "x", position: "a5", userStart: "2026-10-12", duration: 1 }), task("onward", { parentId: "x", position: "a6", userStart: "2026-10-12", duration: 1 })];
+    const { user } = await chartBoard(rows, ADMIN, [{ predecessorId: "linked", followerId: "onward", kind: "FS", lag: 0 }]);
+    await user.click(button());
+    await user.hover(canSlip("linked")!.firstElementChild ?? canSlip("linked")!);
+    expect((await screen.findByRole("tooltip")).textContent).toBe("Limited by the end of the board");
+    expect(screen.getByTestId("milestone-line")).not.toHaveAttribute("data-hovered");
+  });
+
+  it("0 days gets the amber outline, below 0 the red, fills unchanged", async () => {
+    const { user } = await chartBoard(PLAN);
+    const fill = bar("tight").style.background;
+    await user.click(button());
+    expect(bar("tight")).toHaveAttribute("data-slack", "zero");
+    expect(bar("late")).toHaveAttribute("data-slack", "late");
+    expect(bar("loose")).not.toHaveAttribute("data-slack");
+    expect(bar("tight").style.background).toBe(fill);
+  });
+
+  it("links with no room are marked; others aren't", async () => {
+    const rows = [
+      section("x", { position: "a0" }),
+      task("first", { parentId: "x", position: "a0", userStart: "2026-10-05", duration: 1 }),
+      task("tight2", { parentId: "x", position: "a1", userStart: "2026-10-05", duration: 1 }),
+      task("spare", { parentId: "x", position: "a2", userStart: "2026-10-05", duration: 1 }),
+      task("end", { parentId: "x", position: "a3", userStart: "2026-10-05", duration: 5 }),
+    ];
+    const links: Link[] = [...FEEDS, { predecessorId: "first", followerId: "end", kind: "SS", lag: 0 }, { predecessorId: "spare", followerId: "end", kind: "FF", lag: 0 }];
+    const { user } = await chartBoard(rows, ADMIN, links);
+    await user.click(button());
+    const marked = [...document.querySelectorAll("[data-testid=dependency]")].filter((path) => path.hasAttribute("data-critical"));
+    expect(marked).toHaveLength(1);
+  });
+
+  it("gives the column its own room, leaving the chosen list width alone", async () => {
+    const { user } = await chartBoard(PLAN);
+    const listWidth = () => screen.getByRole("treegrid", { name: "Tasks" }).closest<HTMLElement>("[style*=width]")!.style.width;
+    expect(listWidth()).toBe(`${LIST_WIDTH.initial}px`);
+    await user.click(button());
+    expect(listWidth()).toBe(`${LIST_WIDTH.initial + SLIP_COLUMN}px`);
+    expect(useBoardView.getState().listWidth).toBe(LIST_WIDTH.initial);
+  });
+
+  it("is remembered per project, and sends no command", async () => {
+    const { user } = await chartBoard(PLAN);
+    const before = sentCommands().length;
+    await user.click(button());
+    expect(sentCommands()).toHaveLength(before);
+    expect(JSON.parse(localStorage.getItem("gp.criticalPath")!)).toEqual({ [PROJECT_ID]: true });
+    expect(isCriticalPathOn(PROJECT_ID)).toBe(true);
+    expect(isCriticalPathOn("another")).toBe(false);
+  });
+
+  it("viewers can use it", async () => {
+    const { user } = await chartBoard(PLAN, VIEWER);
+    await user.click(button());
+    expect(screen.getByRole("columnheader", { name: "Can slip" })).toBeInTheDocument();
+  });
+});
+
+describe("the Critical path button's default", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 8, 29, 12));
+    localStorage.clear();
+    useCriticalPathView.setState({ on: {}, defaults: {} });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    useCriticalPathView.setState({ on: {}, defaults: {} });
+  });
+
+  const rows = (aim: boolean) => [
+    section("x", { position: "a0" }),
+    task("build", { parentId: "x", position: "a0", userStart: "2026-10-12", duration: 1, targetId: aim ? "cut" : null }),
+    task("cut", { parentId: "x", position: "a1", userStart: "2026-10-20", duration: 0 }),
+  ];
+  const button = () => screen.getByRole("button", { name: "Critical path" });
+  const handle = (name: string) => within(screen.getByRole("button", { name: new RegExp(`^${name}, `) }).parentElement!).getByTitle("Drag onto another task to link them");
+
+  it("is on when the board has an aim", async () => {
+    await chartBoard(rows(true));
+    await waitFor(() => expect(button()).toHaveAttribute("aria-pressed", "true"));
+  });
+
+  it("settles as soon as the board shows, before the connection is up", async () => {
+    await chartBoard(rows(true), ADMIN, [], "", false);
+    await waitFor(() => expect(button()).toHaveAttribute("aria-pressed", "true"));
+  });
+
+  it("is off when it has none", async () => {
+    await chartBoard(rows(false));
+    expect(button()).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("a choice made stands, even with aims on the board", async () => {
+    useCriticalPathView.setState({ on: { [PROJECT_ID]: false } });
+    await chartBoard(rows(true));
+    expect(button()).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("turning it off is remembered", async () => {
+    const { user } = await chartBoard(rows(true));
+    await waitFor(() => expect(button()).toHaveAttribute("aria-pressed", "true"));
+    await user.click(button());
+    expect(button()).toHaveAttribute("aria-pressed", "false");
+    expect(JSON.parse(localStorage.getItem("gp.criticalPath")!)).toEqual({ [PROJECT_ID]: false });
+  });
+
+  it("comes back on when you add an aim, even if you'd turned it off", async () => {
+    useCriticalPathView.setState({ on: { [PROJECT_ID]: false } });
+    const { user } = await chartBoard(rows(false));
+    drag(handle("build"), 500, 900, 2 * 30 + 15);
+    await user.click((await screen.findAllByRole("menuitem"))[0]!);
+    expect(button()).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("stays as it is when you add a plain link", async () => {
+    const { user } = await chartBoard(rows(false));
+    drag(handle("build"), 500, 900, 2 * 30 + 15);
+    await user.click((await screen.findAllByRole("menuitem"))[1]!);
+    expect(button()).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("doesn't change when someone else adds an aim", async () => {
+    await chartBoard(rows(false));
+    act(() => {
+      FakeWebSocket.last.deliver({ type: "patch", projectId: PROJECT_ID, version: 6, commandId: "other", actor: { userId: null, label: "Ana" }, changes: [{ rowId: "build", field: "targetId", before: null, after: "cut" }] });
+    });
+    await waitFor(() => expect(screen.getByTestId("milestone-line")).toBeInTheDocument());
+    expect(button()).toHaveAttribute("aria-pressed", "false");
   });
 });
 

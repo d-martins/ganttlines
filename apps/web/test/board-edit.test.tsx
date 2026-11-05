@@ -126,6 +126,15 @@ describe("editing the task list", () => {
     expect(list.getByText("ui", { exact: true })).toBeInTheDocument();
   });
 
+  it("the footer offers Add task, Add milestone, Add section; Add milestone makes one, with its name ready to type", async () => {
+    const { user } = await editableBoard();
+    const add = screen.getAllByRole("button", { name: /^Add (task|milestone|section)$/ }).map((button) => button.textContent?.trim());
+    expect(add).toEqual(["Add task", "Add milestone", "Add section"]);
+    await user.click(screen.getByRole("button", { name: "Add milestone" }));
+    expect(sentCommands().at(-1)).toMatchObject({ type: "createRow", kind: "task", milestone: true, parentId: null, afterId: "design" });
+    expect(screen.getByRole("textbox", { name: "Title" })).toHaveFocus();
+  });
+
   it("drops an untitled new row on Escape", async () => {
     const { user } = await editableBoard();
     await user.click(screen.getByRole("button", { name: "Add task" }));

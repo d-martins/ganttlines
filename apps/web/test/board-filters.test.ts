@@ -274,3 +274,58 @@ describe("filters in the address", () => {
     expect(filtersFromSearch({})).toEqual(NO_FILTERS);
   });
 });
+
+describe("filtering by milestone", () => {
+  const plan: ProjectState = {
+    rows: {
+      p: task("p", { position: "a0", userStart: "2026-10-12", targetId: "m" }),
+      kid: task("kid", { parentId: "p", position: "a0", userStart: "2026-10-12", resourceId: "ana" }),
+      other: task("other", { parentId: "p", position: "a1", userStart: "2026-10-12", targetId: "n" }),
+      own: task("own", { position: "a1", userStart: "2026-10-12", targetId: "m", resourceId: "rui" }),
+      feeder: task("feeder", { position: "a2", userStart: "2026-10-12" }),
+      far: task("far", { position: "a3", userStart: "2026-10-12" }),
+      feedsParent: task("feedsParent", { position: "a4", userStart: "2026-10-12" }),
+      group: task("group", { position: "a5", userStart: "2026-10-12" }),
+      inGroup: task("inGroup", { parentId: "group", position: "a0", userStart: "2026-10-12" }),
+      unrelated: task("unrelated", { position: "a6", userStart: "2026-10-12" }),
+      m: task("m", { position: "a7", userStart: "2026-10-20", duration: 0 }),
+      n: task("n", { position: "a8", userStart: "2026-10-21", duration: 0 }),
+      plain: task("plain", { position: "a9", userStart: "2026-10-21" }),
+    },
+    links: {
+      "own|feeder|FS": { predecessorId: "feeder", followerId: "own", kind: "FS", lag: 0 },
+      "feeder|far|FS": { predecessorId: "far", followerId: "feeder", kind: "FS", lag: 0 },
+      "p|feedsParent|FS": { predecessorId: "feedsParent", followerId: "p", kind: "FS", lag: 0 },
+      "feedsParent|group|FS": { predecessorId: "group", followerId: "feedsParent", kind: "FS", lag: 0 },
+    },
+  };
+  const matched = (milestones: string[], extra: Partial<BoardFilters> = {}) => [...(filterRows(plan, { ...NO_FILTERS, milestones, ...extra }, new Set(["ana", "rui"]))?.matches ?? [])].sort();
+
+  it("matches what aims for it, directly and by inheritance, what feeds it, and the milestone itself", () => {
+    expect(matched(["m"])).toEqual(["far", "feeder", "feedsParent", "group", "inGroup", "kid", "m", "own", "p"].sort());
+  });
+
+  it("leaves out a subtask with a different target", () => {
+    expect(matched(["m"])).not.toContain("other");
+    // A link into a parent holds back everything under it, so what feeds `p` feeds `other` too.
+    expect(matched(["n"])).toEqual(["feedsParent", "group", "inGroup", "n", "other"]);
+  });
+
+  it("is OR within the filter, and AND with the others", () => {
+    expect(matched(["n", "m"])).toEqual(expect.arrayContaining(["n", "other", "m", "own"]));
+    expect(matched(["m"], { people: ["rui"] })).toEqual(["own"]);
+  });
+
+  it("an id that's gone or no longer a milestone drops out, and the board isn't emptied", () => {
+    expect(knownFilters(plan, { ...NO_FILTERS, milestones: ["gone", "plain", "p", "m"] }).milestones).toEqual(["m"]);
+    expect(filterRows(plan, { ...NO_FILTERS, milestones: ["gone", "plain"] })).toBeNull();
+    expect(isFiltering({ ...NO_FILTERS, milestones: ["m"] })).toBe(true);
+  });
+
+  it("survives the address, and a malformed value is dropped", () => {
+    const search = validateBoardSearch(defaultParseSearch(defaultStringifySearch(searchFromFilters({ ...NO_FILTERS, milestones: ["m", "n"] }))));
+    expect(search.milestones).toEqual(["m", "n"]);
+    expect(filtersFromSearch(search).milestones).toEqual(["m", "n"]);
+    expect(validateBoardSearch({ milestones: [{}, null] }).milestones).toBeUndefined();
+  });
+});

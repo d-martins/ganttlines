@@ -1,9 +1,10 @@
+import { useCriticalPathView } from "./critical-path-view";
 import { Calendar } from "@ganttlines/engine";
 import type { CalendarDto } from "@ganttlines/protocol";
 import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import type { BoardSearch } from "../router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { useStore } from "zustand";
 import { ApiError, errorMessage } from "../api/client";
 import { baselineSnapshot, calendar, currentUser, highlightList, keys, resourceList, upsertComment } from "../api/queries";
@@ -157,6 +158,11 @@ function LiveBoard({ sync, share }: { sync: BoardSync; share: ShareAccess | null
     useActiveBoard.setState({ canEdit, canManage });
   }, [canEdit, canManage]);
   useEffect(resetSelection, [projectId]);
+  // Before painting, so the Can slip column doesn't appear a moment after the board.
+  const opened = state.project !== null;
+  useLayoutEffect(() => {
+    if (opened) useCriticalPathView.getState().settleDefault(projectId, Object.values(rendered.rows).some((row) => row.kind === "task" && row.targetId));
+  }, [opened, projectId]);
   // Every change to the board adds history: refresh the history lists on screen (details panel).
   useEffect(() => {
     void client.invalidateQueries({ queryKey: keys.allActivity(projectId) });

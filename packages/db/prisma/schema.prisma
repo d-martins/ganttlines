@@ -138,6 +138,8 @@ model Row {
   description   String  @default("")
   /// the task's tags, in order (always empty for sections)
   tags          String[] @default([])
+  /// the milestone this task aims for; the engine clears it when that stops being a milestone
+  targetId      String? @db.Uuid
   linksIn       Link[]  @relation("LinkFollower")
   linksOut      Link[]  @relation("LinkPredecessor")
 

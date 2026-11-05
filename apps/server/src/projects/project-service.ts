@@ -24,6 +24,8 @@ import {
   type Row,
   type Span,
   violatedLinks,
+  computeSlack,
+  type Slack,
 } from "@ganttlines/engine";
 import type { BaselineTaskDto, ChangesDto, CommandResultDto, ProjectDto, ProjectStateDto } from "@ganttlines/protocol";
 import { createHash } from "node:crypto";
@@ -83,6 +85,8 @@ export interface OutlineRow {
   links: { into: Link[]; outOf: Link[] };
   /** the keys of the links it waits on that it starts too early for */
   violatedLinks: LinkKey[];
+  /** how far it can slip and what limits it; null for sections and unscheduled tasks */
+  slack: Slack | null;
 }
 
 export class ProjectService {
@@ -199,6 +203,7 @@ export class ProjectService {
       const { calendar } = await this.instance.current();
       const schedule = computeSchedule(state, calendar);
       const violated = violatedLinks(state, calendar, schedule);
+      const slack = computeSlack(state, calendar, schedule);
       const tree = buildTree(state);
       const into = new Map<string, Link[]>();
       const outOf = new Map<string, Link[]>();
@@ -223,6 +228,7 @@ export class ProjectService {
             violation: computed?.violation ?? false,
             links,
             violatedLinks: links.into.map(linkKey).filter((key) => violated.has(key)),
+            slack: slack.get(row.id) ?? null,
           });
           visit(row.id, depth + 1);
         }

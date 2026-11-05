@@ -1,3 +1,4 @@
+import { useCriticalPathView } from "./critical-path-view";
 import { applyCommand, type Calendar, type Command, type ProjectState } from "@ganttlines/engine";
 import type { ResourceDto } from "@ganttlines/protocol";
 import { createContext, useContext } from "react";
@@ -44,6 +45,10 @@ export function runCommand(board: Pick<BoardContextValue, "sync" | "calendar" | 
     return null;
   }
   board.sync.submit(command);
+  // Your own new aim is what you'd want to see the effect of; someone else's doesn't change your view.
+  if (command.type === "createTargetMilestone" || (command.type === "setTarget" && command.targetId !== null)) {
+    useCriticalPathView.getState().set(board.sync.projectId, true);
+  }
   return result.state;
 }
 

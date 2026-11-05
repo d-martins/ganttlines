@@ -1,16 +1,14 @@
 import { canonicalTags, MAX_TAG_LENGTH, MAX_TAGS_PER_TASK, rankTags, tagKey, type TaskRow } from "@ganttlines/engine";
 import { useQuery } from "@tanstack/react-query";
 import { GripVertical, X } from "lucide-react";
-import { useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useId, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { workspaceTags } from "../../api/queries";
 import { toast } from "../../ui/toast";
 import { useBoard, useRun } from "../board-context";
+import { useFloatingList } from "./suggestion-list";
 
 /** how many known tags the dropdown offers at most */
 const MAX_SUGGESTIONS = 8;
-const MAX_LIST_HEIGHT = 288;
-const LIST_GAP = 4;
-const LIST_MARGIN = 8;
 
 const CHIP = "flex max-w-full items-center gap-0.5 rounded-full border border-border-strong bg-surface-2 py-0.5 text-xs text-text";
 
@@ -27,25 +25,6 @@ function moveTag(tags: readonly string[], from: number, to: number): string[] {
   const next = tags.filter((_, index) => index !== from);
   next.splice(to > from ? to - 1 : to, 0, tags[from]!);
   return next;
-}
-
-/** Floats the list by the box without leaving the window: under it, or above it if there's more room. */
-export function placeSuggestions(box: HTMLElement, list: HTMLElement) {
-  const scrolled = list.scrollTop;
-  // `fixed` is relative to the window, unless something holding the list has a transform, as a menu
-  // does: placed at 0,0 it shows where that frame starts.
-  Object.assign(list.style, { left: "0px", top: "0px", maxHeight: "none" });
-  const frame = list.getBoundingClientRect();
-  const anchor = box.getBoundingClientRect();
-  const below = window.innerHeight - anchor.bottom - LIST_GAP - LIST_MARGIN;
-  const above = anchor.top - LIST_GAP - LIST_MARGIN;
-  const height = Math.min(frame.height, MAX_LIST_HEIGHT);
-  const under = height <= below || below >= above;
-  const shown = Math.min(height, under ? below : above);
-  const left = Math.min(anchor.left, window.innerWidth - frame.width - LIST_MARGIN);
-  const top = under ? anchor.bottom + LIST_GAP : anchor.top - LIST_GAP - shown;
-  Object.assign(list.style, { left: `${left - frame.left}px`, top: `${top - frame.top}px`, maxHeight: `${Math.min(MAX_LIST_HEIGHT, under ? below : above)}px` });
-  list.scrollTop = scrolled;
 }
 
 /**
@@ -96,18 +75,7 @@ export function TagsSection({ task, inMenu = false }: { task: TaskRow; inMenu?: 
   const showList = open && choices.length > 0;
   const active = Math.min(highlight ?? (needle ? 0 : -1), choices.length - 1);
 
-  // After every render, as chips wrapping can move the box and typing changes the list's height.
-  useLayoutEffect(() => {
-    if (!showList) return;
-    const place = () => box.current && suggestions.current && placeSuggestions(box.current, suggestions.current);
-    place();
-    window.addEventListener("scroll", place, true);
-    window.addEventListener("resize", place);
-    return () => {
-      window.removeEventListener("scroll", place, true);
-      window.removeEventListener("resize", place);
-    };
-  });
+  useFloatingList(showList, box, suggestions);
 
   const send = (tags: string[]) => run({ type: "setTags", id: task.id, tags });
   const add = (choice: Choice) => {

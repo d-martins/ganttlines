@@ -1,5 +1,5 @@
 import { Calendar, findLinkProblem, findTreeProblem, hasCycle, linkKey, toDay, type ProjectState, type Row } from "@ganttlines/engine";
-import type { WorkspaceFile, WorkspaceFileV1, WorkspaceFileV2 } from "@ganttlines/protocol";
+import type { WorkspaceFile, WorkspaceFileV1, WorkspaceFileV2, WorkspaceFileV3 } from "@ganttlines/protocol";
 import { ApiError } from "../api";
 import { checkFormat, toCalendarDto, WORKSPACE_FORMAT, WORKSPACE_VERSION } from "./records";
 import { upgradeProjectRecord } from "./upgrade";
@@ -17,7 +17,7 @@ const invalid = (message: string) => new ApiError(400, "invalid_file", message);
 
 /**
  * Reads a workspace file and checks everything — shape, references, outlines, links, dependency
- * loops — before anything is changed. An older file (version 1 or 2) is upgraded. Throws `ApiError` 400 with the reason.
+ * loops — before anything is changed. An older file (version 1 to 3) is upgraded. Throws `ApiError` 400 with the reason.
  */
 export async function readWorkspaceFile(text: string): Promise<WorkspaceFile> {
   if (text.length > MAX_FILE_BYTES) throw invalid("This file is too big (over 50 MB)");
@@ -31,7 +31,7 @@ export async function readWorkspaceFile(text: string): Promise<WorkspaceFile> {
   checkFormat(json as { format?: unknown; version?: unknown });
   const { protocol, explain } = await validation();
   const version = (json as { version: number }).version;
-  const schema = version === 1 ? protocol.WorkspaceFileV1 : version === 2 ? protocol.WorkspaceFileV2 : protocol.WorkspaceFile;
+  const schema = version === 1 ? protocol.WorkspaceFileV1 : version === 2 ? protocol.WorkspaceFileV2 : version === 3 ? protocol.WorkspaceFileV3 : protocol.WorkspaceFile;
   const parsed = schema.safeParse(json);
   if (!parsed.success) throw invalid(`This file can't be opened: ${explain(parsed.error)}`);
   const file = parsed.data.version === WORKSPACE_VERSION ? parsed.data : upgradeFile(parsed.data);
@@ -40,7 +40,7 @@ export async function readWorkspaceFile(text: string): Promise<WorkspaceFile> {
   return file;
 }
 
-function upgradeFile(file: WorkspaceFileV1 | WorkspaceFileV2): WorkspaceFile {
+function upgradeFile(file: WorkspaceFileV1 | WorkspaceFileV2 | WorkspaceFileV3): WorkspaceFile {
   return { ...file, version: WORKSPACE_VERSION, projects: file.projects.map((project) => upgradeProjectRecord(project) as WorkspaceFile["projects"][number]) };
 }
 
@@ -99,6 +99,13 @@ function referenceProblem(file: WorkspaceFile): string | null {
     if (structure) return `project “${project.name}”: ${structure}`;
     const ghost = rows.find((row) => row.kind === "task" && row.resourceId !== null && !people.has(row.resourceId));
     if (ghost) return `project “${project.name}”: “${ghost.title}” is assigned to a team member who isn't there`;
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    const astray = rows.find((row) => {
+      if (row.kind !== "task" || row.targetId === null) return false;
+      const target = byId.get(row.targetId);
+      return target?.kind !== "task" || target.duration !== 0 || rows.some((other) => other.parentId === target.id);
+    });
+    if (astray) return `project “${project.name}”: “${astray.title}” aims for something that isn't a milestone on this board`;
     const state: ProjectState = { rows: Object.fromEntries(rows.map((row) => [row.id, row])), links: Object.fromEntries(project.links.map((link) => [linkKey(link), link])) };
     if (hasCycle(state, calendar)) return `project “${project.name}” has tasks that depend on each other in a loop`;
   }

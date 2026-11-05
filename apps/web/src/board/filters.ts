@@ -1,4 +1,4 @@
-import { tagKey, type ProjectState, type Row, type RowId } from "@ganttlines/engine";
+import { effectiveTarget, isValidTarget, tagKey, type Link, type ProjectState, type Row, type RowId } from "@ganttlines/engine";
 import type { BoardSearch } from "../router";
 
 /** What the board is narrowed to. OR within one filter, AND across them; an empty one is off. */
@@ -10,13 +10,15 @@ export interface BoardFilters {
   tags: string[];
   /** section ids: each shows with what's anywhere under it */
   sections: RowId[];
+  /** milestone ids: what aims for each, and what feeds that */
+  milestones: RowId[];
 }
 
-export const NO_FILTERS: BoardFilters = { q: "", people: [], tags: [], sections: [] };
+export const NO_FILTERS: BoardFilters = { q: "", people: [], tags: [], sections: [], milestones: [] };
 
 /** Whether these filters narrow anything; for what a board really filters by, pass them through knownFilters. */
 export function isFiltering(f: BoardFilters): boolean {
-  return f.q.trim() !== "" || f.people.length > 0 || f.tags.some((tag) => tagKey(tag) !== "") || f.sections.length > 0;
+  return f.q.trim() !== "" || f.people.length > 0 || f.tags.some((tag) => tagKey(tag) !== "") || f.sections.length > 0 || f.milestones.length > 0;
 }
 
 /**
@@ -31,7 +33,52 @@ export function knownFilters(state: ProjectState, f: BoardFilters, team?: Readon
     people: f.people.filter((id) => id === "none" || knownPeople.has(id)),
     tags: f.tags,
     sections: f.sections.filter((id) => state.rows[id]?.kind === "section"),
+    milestones: f.milestones.filter((id) => isValidTarget(state, id)),
   };
+}
+
+/**
+ * What a milestone filter finds: the milestones, the tasks aiming for them (subtasks inherit a parent's
+ * target unless they have their own), and any task with a chain of links leading to one of those, as
+ * those can make it miss too.
+ */
+function towardsMilestones(state: ProjectState, milestones: ReadonlySet<RowId>): Set<RowId> {
+  const rows = Object.values(state.rows);
+  const heads = new Map<RowId, Link[]>();
+  for (const link of Object.values(state.links)) heads.set(link.followerId, [...(heads.get(link.followerId) ?? []), link]);
+  const kids = new Map<RowId, RowId[]>();
+  for (const row of rows) if (row.parentId !== null) kids.set(row.parentId, [...(kids.get(row.parentId) ?? []), row.id]);
+  const aiming = (row: Readonly<Row>) => {
+    const target = effectiveTarget(state, row as Row);
+    return target !== null && milestones.has(target);
+  };
+  const found = new Set<RowId>();
+  const waiting: RowId[] = [];
+  const add = (id: RowId) => {
+    if (found.has(id)) return;
+    found.add(id);
+    waiting.push(id);
+  };
+  for (const row of rows) if (row.kind === "task" && (milestones.has(row.id) || aiming(row))) add(row.id);
+  // Bounded by `found`: each row is walked once, so a loop can't run forever.
+  while (waiting.length > 0) {
+    const id = waiting.pop()!;
+    // A link into a parent holds back everything under it, too.
+    let steps = rows.length;
+    for (let up: Readonly<Row> | undefined = state.rows[id]; up && steps > 0; up = up.parentId === null ? undefined : state.rows[up.parentId], steps--) {
+      for (const link of heads.get(up.id) ?? []) {
+        const feeders = [link.predecessorId];
+        while (feeders.length > 0) {
+          const feeder = feeders.pop()!;
+          const row = state.rows[feeder];
+          // A subtask with a target of its own answers to that one.
+          if (row?.kind === "task" && (feeder === link.predecessorId || row.targetId === null || milestones.has(row.targetId))) add(feeder);
+          feeders.push(...(kids.get(feeder) ?? []));
+        }
+      }
+    }
+  }
+  return found;
 }
 
 /**
@@ -53,7 +100,9 @@ export function filterRows(
   const people = new Set(known.people);
   const tags = new Set(known.tags.map(tagKey).filter((key) => key !== ""));
   const sections = new Set(known.sections);
-  if (!needle && people.size === 0 && tags.size === 0 && sections.size === 0) return null;
+  const milestones = new Set(known.milestones);
+  if (!needle && people.size === 0 && tags.size === 0 && sections.size === 0 && milestones.size === 0) return null;
+  const towards = milestones.size > 0 ? towardsMilestones(state, milestones) : null;
 
   const limit = rows.length;
   /** ancestors, nearest first (bounded, in case stored rows loop) */
@@ -76,7 +125,8 @@ export function filterRows(
     if (row.kind === "task") {
       if (people.size > 0 && !people.has(row.resourceId ?? "none")) continue;
       if (tags.size > 0 && !row.tags.some((tag) => tags.has(tagKey(tag)))) continue;
-    } else if (!named && (people.size > 0 || tags.size > 0)) continue;
+      if (towards && !towards.has(row.id)) continue;
+    } else if (!named && (people.size > 0 || tags.size > 0 || towards)) continue;
     matches.add(row.id);
   }
   for (const id of keep ?? []) if (state.rows[id]) matches.add(id);
@@ -88,22 +138,23 @@ export function filterRows(
 }
 
 export function filtersFromSearch(search: BoardSearch): BoardFilters {
-  return { q: search.q ?? "", people: search.people ?? [], tags: search.tags ?? [], sections: search.sections ?? [] };
+  return { q: search.q ?? "", people: search.people ?? [], tags: search.tags ?? [], sections: search.sections ?? [], milestones: search.milestones ?? [] };
 }
 
 /** The address's part for these filters: empty ones are left out. */
-export function searchFromFilters(f: BoardFilters): Pick<BoardSearch, "q" | "people" | "tags" | "sections"> {
+export function searchFromFilters(f: BoardFilters): Pick<BoardSearch, "q" | "people" | "tags" | "sections" | "milestones"> {
   return {
     ...(f.q.trim() ? { q: f.q } : {}),
     ...(f.people.length > 0 ? { people: f.people } : {}),
     ...(f.tags.length > 0 ? { tags: f.tags } : {}),
     ...(f.sections.length > 0 ? { sections: f.sections } : {}),
+    ...(f.milestones.length > 0 ? { milestones: f.milestones } : {}),
   };
 }
 
 /** `search` with its filters replaced by `f` (the baseline and the rest are kept). */
 export function withFilters(search: BoardSearch, f: BoardFilters): BoardSearch {
-  const { q: _q, people: _people, tags: _tags, sections: _sections, ...rest } = search;
+  const { q: _q, people: _people, tags: _tags, sections: _sections, milestones: _milestones, ...rest } = search;
   return { ...rest, ...searchFromFilters(f) };
 }
 

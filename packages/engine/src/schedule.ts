@@ -134,7 +134,7 @@ export function floorStart(calendar: Calendar, span: Span, resourceId: ResourceI
  * The earliest last half day an FF or SF follower of `span` may end on, plus the link's lag: FF, the
  * predecessor's last half; SF, the working half just before its first half.
  */
-function finishFloor(calendar: Calendar, link: Link, span: Span, resourceId: ResourceId | null): HalfDay {
+export function finishFloor(calendar: Calendar, link: Link, span: Span, resourceId: ResourceId | null): HalfDay {
   const edge = link.kind === "SF" ? calendar.snapHalfBack(spanStart(span) - 1, resourceId) : calendar.snapHalf(spanEnd(span), resourceId);
   return calendar.addWorkingHalves(edge, link.lag * 2, resourceId);
 }

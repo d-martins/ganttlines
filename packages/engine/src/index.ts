@@ -2,6 +2,7 @@ export { Calendar, type CalendarData, type Holiday, type ResourceId, type TimeOf
 export { applyChanges, changedRowIds, diffState, isLinkChange, type Change, type LinkChange, type RowChange } from "./changes";
 export {
   applyCommand,
+  isValidTarget,
   MAX_DATE,
   MAX_DURATION,
   MIN_DATE,
@@ -44,4 +45,5 @@ export { buildTree, childrenOf, findTreeProblem, isAncestor, isParentTask, type 
 export { revertChanges, type Reverted } from "./undo";
 export { baselineTasks, type BaselineTask } from "./baseline";
 export { workedDays, workedDaysOfAll } from "./worked";
+export { analyseSlack, computeSlack, effectiveTarget, type Slack, type SlackAnalysis, type SlackLimit, type SlackMap } from "./slack";
 export { canonicalTags, MAX_TAG_LENGTH, MAX_TAGS_PER_TASK, normalizeTags, rankTags, tagKey, type TagUse } from "./tags";

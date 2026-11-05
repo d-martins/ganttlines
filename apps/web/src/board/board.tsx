@@ -9,6 +9,7 @@ import { DayMenu } from "./chart/day-menu";
 import { useChartDrag } from "./chart/drag";
 import { ChartHeader } from "./chart/chart-header";
 import { Dependencies } from "./chart/dependencies";
+import { aimedMilestones, MilestoneLines } from "./chart/milestone-lines";
 import { Shading } from "./chart/shading";
 import { chartRange, scaleOf, Timeline, zoomStep } from "./chart/timeline";
 import { today } from "./format";
@@ -21,7 +22,9 @@ import { useLinger } from "./linger";
 import { ListColumnHeaders, ListHeader, ListRows, useListKeys } from "./list/task-list";
 import { useSelection } from "./selection";
 import { boardModel, type CompareMode } from "./model";
-import { useBoardView } from "./view-store";
+import { LIST_WIDTH, SLIP_COLUMN, useBoardView } from "./view-store";
+import { useCriticalPath } from "./critical-path-view";
+import { boardSchedule } from "./slack";
 
 type DetailsPanelType = typeof import("./panel/details-panel").DetailsPanel;
 /** The details panel brings the rich-text editor along: a separate download, fetched once a board is shown. */
@@ -88,8 +91,12 @@ export function Board({
   highlights: readonly HighlightDto[];
   baseline: { mode: CompareMode; tasks: readonly BaselineTaskDto[] } | null;
 }) {
-  const { dayWidth, barStyle, showWeekends, listWidth, todayRequest, setListWidth } = useBoardView();
+  const { dayWidth, barStyle, showWeekends, listWidth: chosenWidth, todayRequest, setListWidth } = useBoardView();
   const { canEdit, canEditCalendar, sync } = useBoard();
+  // The "Can slip" column gets its room without touching the width chosen for the list.
+  const critical = useCriticalPath(sync.projectId);
+  const slipRoom = critical ? SLIP_COLUMN : 0;
+  const listWidth = Math.min(chosenWidth + slipRoom, LIST_WIDTH.max + slipRoom);
   const collapsed = useCollapsed(sync.projectId);
   // Collapsed rows deleted since are forgotten (once the board has rows to compare with).
   useEffect(() => {
@@ -123,6 +130,7 @@ export function Board({
     () => boardModel(displayed, calendar, baseline, filters, collapsed, team, shownMatches),
     [displayed, calendar, baseline, filters, collapsed, team, shownMatches],
   );
+  const milestones = useMemo(() => aimedMilestones(displayed, () => boardSchedule(displayed, calendar), model.rows), [displayed, calendar, model.rows]);
   const known = useMemo(() => knownFilters(state, filters, team), [state, filters, team]);
   const DetailsPanel = useDetailsPanel();
   const onListKey = useListKeys(model.rows, model.filtering);
@@ -139,13 +147,14 @@ export function Board({
   }, [calendarDto.holidays]);
 
   const { first, last } = useMemo(() => {
-    const days: DayNum[] = highlightDays.map(({ day }) => day);
+    // Milestones too: a line for one whose row is hidden still has to land on its date.
+    const days: DayNum[] = [...highlightDays.map(({ day }) => day), ...milestones.map(({ day }) => day)];
     for (const { span, ghost } of model.rows) {
       if (span) days.push(span.start, span.end);
       if (ghost) days.push(ghost.span.start, ghost.span.end);
     }
     return chartRange(days, todayDay);
-  }, [model, highlightDays, todayDay]);
+  }, [model, milestones, highlightDays, todayDay]);
   const timeline = useMemo(() => {
     const working = new Set(calendarDto.workingWeekdays);
     const hidden = showWeekends ? undefined : (day: DayNum) => !working.has(weekday(day));
@@ -280,7 +289,7 @@ export function Board({
   const startResize = (event: ReactPointerEvent) => {
     event.preventDefault();
     const startX = event.clientX;
-    const startWidth = listWidth;
+    const startWidth = chosenWidth;
     const move = (moveEvent: PointerEvent) => setListWidth(startWidth + moveEvent.clientX - startX);
     const up = () => {
       window.removeEventListener("pointermove", move);
@@ -314,7 +323,7 @@ export function Board({
               <ListHeader filtering={model.filtering} />
               {divider}
             </div>
-            <ChartHeader timeline={timeline} zoom={scaleOf(dayWidth)} stickyLeft={listWidth} days={days} highlights={highlightDays} holidays={holidayNames} todayDay={todayDay} />
+            <ChartHeader timeline={timeline} zoom={scaleOf(dayWidth)} stickyLeft={listWidth} days={days} highlights={highlightDays} holidays={holidayNames} todayDay={todayDay} milestones={milestones} />
           </div>
           <div className="flex" style={{ height: bodyHeight }}>
             <div
@@ -375,6 +384,7 @@ export function Board({
                 <div aria-hidden className="absolute right-0 left-0 bg-accent-soft opacity-60" style={{ top: selectedIndex * rowHeight, height: rowHeight }} />
               ) : null}
               <div aria-hidden className="absolute top-0 w-0.5 bg-[var(--today)]" style={{ left: timeline.x(todayDay) + timeline.dayWidth / 2 - 1, height: bodyHeight }} />
+              <MilestoneLines milestones={milestones} timeline={timeline} height={bodyHeight} />
               <Dependencies rows={model.rows} links={model.links} firstRow={firstRow} lastRow={lastRow} timeline={timeline} style={barStyle} />
               <ChartRows rows={shown} allRows={model.rows} firstRow={firstRow} timeline={timeline} style={barStyle} visibleLeft={viewport.left} tagFilter={tagFilter} filtering={model.filtering} />
             </div>

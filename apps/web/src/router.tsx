@@ -61,7 +61,7 @@ const setUpTwoFactorRoute = createRoute({ ...needsServer, getParentRoute: () => 
 const appRoute = createRoute({ getParentRoute: () => rootRoute, id: "app", component: AppLayout });
 const homeRoute = createRoute({ getParentRoute: () => appRoute, path: "/", component: HomeRedirect });
 /**
- * `?baseline=<id>&compare=switch` and the filters `q`, `people`, `tags`, `sections`: only well-formed
+ * `?baseline=<id>&compare=switch` and the filters `q`, `people`, `tags`, `sections`, `milestones`: only well-formed
  * values are kept. Lists are JSON arrays in the address, so any character in a tag survives.
  */
 export function validateBoardSearch(search: Record<string, unknown>): BoardSearch {
@@ -75,7 +75,7 @@ export function validateBoardSearch(search: Record<string, unknown>): BoardSearc
   const text = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? String(value) : value);
   const q = text(search["q"]);
   if (typeof q === "string" && q.trim() !== "") result.q = q;
-  for (const key of ["people", "tags", "sections"] as const) {
+  for (const key of ["people", "tags", "sections", "milestones"] as const) {
     const value = search[key];
     // A single hand-typed value (`?tags=ui`) counts as a list of one.
     const list = (Array.isArray(value) ? value : [value]).map(text).filter((entry): entry is string => typeof entry === "string" && entry !== "");
@@ -94,6 +94,8 @@ export interface BoardSearch {
   tags?: string[];
   /** section ids */
   sections?: string[];
+  /** milestone ids */
+  milestones?: string[];
 }
 const boardRoute = createRoute({
   getParentRoute: () => appRoute,

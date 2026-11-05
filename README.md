@@ -61,6 +61,18 @@ Download that authority's certificate from the provider and put it in `DATABASE_
 text): connections, backups and upgrades then verify the database against it. On DigitalOcean App
 Platform, bind it with `DATABASE_CA_CERT=${db.CA_CERT}`.
 
+## Critical path and milestones
+
+In a task's details, **+ Add link → aims for** picks the milestone it has to make, or names a new one on the
+spot. From the milestone, **+ Add link → aimed by** does the same for any task. Dragging a link between a task
+and a milestone asks whether to aim or to link.
+A parent's choice covers its subtasks. Aiming moves nothing: the milestone stays on its date and shows as
+a dashed line down the chart, and a task that would miss it gets a red outline, as do the tasks feeding it.
+
+The **Critical path** button in the top bar shows how many working days each task can slip before it hits
+its tightest limit, whether that's a milestone it's heading for or the end of the board, and highlights the
+tasks and links with no room left. **+ Filter → Milestone** narrows the board to what a milestone depends on.
+
 ## Locations and public holidays
 
 Under Team & calendar → **Locations**, add the offices or countries people work in and put each

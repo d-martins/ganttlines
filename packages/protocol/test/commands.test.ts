@@ -39,6 +39,10 @@ describe("CommandSchema", () => {
       { type: "duplicateTask", id: A, newId: B },
       { type: "setTags", id: A, tags: ["UI", "Back end"] },
       { type: "setTags", id: A, tags: [] },
+      { type: "setTarget", id: A, targetId: B },
+      { type: "setTarget", id: A, targetId: null },
+      { type: "createTargetMilestone", id: A, newId: B, title: "8.12", parentId: null, afterId: null, start: "2026-11-17" },
+      { type: "createRow", id: A, kind: "task", parentId: null, afterId: null, title: "m", milestone: true },
     ];
     for (const command of commands) expect(toEngineCommand(CommandSchema.parse(command))).toEqual(command);
   });
@@ -65,6 +69,10 @@ describe("CommandSchema", () => {
       { type: "deleteRows", ids: [] },
       { type: "explode", id: A },
       { type: "setTags", id: A, tags: "UI" },
+      { type: "setTarget", id: A },
+      { type: "setTarget", id: A, targetId: "nope" },
+      { type: "createTargetMilestone", id: A, newId: B, title: "8.12", parentId: null, afterId: null },
+      { type: "createRow", id: A, kind: "task", parentId: null, afterId: null, title: "m", milestone: "yes" },
       { type: "setTags", id: A, tags: ["x".repeat(101)] },
       { type: "setTags", id: A, tags: Array.from({ length: 51 }, (_, i) => `t${i}`) },
     ];

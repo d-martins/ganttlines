@@ -1,4 +1,4 @@
-import type { ShareInfoDto } from "@ganttlines/protocol";
+import type { ProjectStateDto, ShareInfoDto } from "@ganttlines/protocol";
 import { waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ANA, BASELINE_ID, CALENDAR, FakeWebSocket, PROJECT_ID, projectState, section, task } from "./board-fixtures";
@@ -14,8 +14,8 @@ const ROWS = [
   task("api", { title: "API", parentId: "build", position: "a0", userStart: "2026-10-01", duration: 2, tags: ["Backend"] }),
 ];
 
-function endpoints(api: FakeApi) {
-  api.on(`GET /api/projects/${PROJECT_ID}/state`, () => ({ body: projectState(ROWS) }));
+function endpoints(api: FakeApi, rows: ProjectStateDto["rows"] = ROWS) {
+  api.on(`GET /api/projects/${PROJECT_ID}/state`, () => ({ body: projectState(rows) }));
   api.on("GET /api/calendar", () => ({ body: CALENDAR }));
   api.on("GET /api/resources", () => ({ body: { resources: [ANA, RUI, BEA] } }));
   api.on(`GET /api/projects/${PROJECT_ID}/highlights`, () => ({ body: { highlights: [] } }));
@@ -23,11 +23,11 @@ function endpoints(api: FakeApi) {
   api.on(`GET /api/baselines/${BASELINE_ID}`, () => ({ body: { baseline: { id: BASELINE_ID, name: "Kick-off", createdAt: "", createdBy: "Ada" }, tasks: [] } }));
 }
 
-async function board(search = "") {
+async function board(search = "", rows = ROWS as ProjectStateDto["rows"]) {
   FakeWebSocket.instances = [];
   vi.stubGlobal("WebSocket", FakeWebSocket);
   const api = signedIn(ADMIN, [project(PROJECT_ID, "Launch")]);
-  endpoints(api);
+  endpoints(api, rows);
   const app = renderApp(`/p/${PROJECT_ID}${search}`);
   await screen.findByRole("treegrid", { name: "Tasks" });
   await waitFor(() => expect(FakeWebSocket.last.sent).toHaveLength(1));
@@ -72,6 +72,26 @@ describe("the filter bar", () => {
     expect(titles()).toEqual(["Design", "Screens", "Hooks"]);
   });
 
+  it("lists milestones soonest first, with a Milestone chip, narrowing the board", async () => {
+    const rows = [
+      section("x", { title: "Plan", position: "a0" }),
+      task("aiming", { parentId: "x", title: "Aiming", position: "a0", userStart: "2026-10-12", targetId: "soon" }),
+      task("elsewhere", { parentId: "x", title: "Elsewhere", position: "a1", userStart: "2026-10-12" }),
+      task("later", { parentId: "x", title: "8.11", position: "a2", userStart: "2026-11-23", duration: 0 }),
+      task("soon", { parentId: "x", title: "8.10", position: "a3", userStart: "2026-11-11", duration: 0 }),
+    ];
+    const { user } = await board("", rows);
+    await user.click(within(bar()).getByRole("button", { name: "+ Filter" }));
+    expect((await screen.findAllByRole("menuitem")).map((item) => item.textContent)).toEqual(["People", "Tags", "Milestone", "Section"]);
+    await user.click(screen.getByRole("menuitem", { name: "Milestone" }));
+    expect((await screen.findAllByRole("menuitemcheckbox")).map((item) => item.textContent)).toEqual(["8.10", "8.11"]);
+    await user.click(screen.getByRole("menuitemcheckbox", { name: "8.10" }));
+    await user.keyboard("{Escape}");
+    expect(within(bar()).getByRole("button", { name: /^Milestone: 8\.10/ })).toBeInTheDocument();
+    expect(titles()).toContain("Aiming");
+    expect(titles()).not.toContain("Elsewhere");
+  });
+
   it("lists tags used on this board and sections, with chips for each", async () => {
     const { user, router } = await board();
     await user.click(within(bar()).getByRole("button", { name: "+ Filter" }));
@@ -89,7 +109,7 @@ describe("the filter bar", () => {
     expect(within(bar()).getByRole("button", { name: "Section: Design" })).toBeInTheDocument();
   });
 
-  it("+ Filter's title goes back to the three choices, menu still open", async () => {
+  it("+ Filter's title goes back to the choices, menu still open", async () => {
     const { user } = await board();
     const choices = () => screen.getAllByRole("menuitem").map((item) => item.textContent);
     await user.click(within(bar()).getByRole("button", { name: "+ Filter" }));
@@ -100,17 +120,17 @@ describe("the filter bar", () => {
     expect(screen.getAllByText("People", { selector: '[role="menu"] *' })).toHaveLength(1);
     expect(within(screen.getByRole("menu")).queryByText(/Back/)).not.toBeInTheDocument();
     await user.click(screen.getByRole("menuitem", { name: "Back from People" }));
-    expect(choices()).toEqual(["People", "Tags", "Section"]);
+    expect(choices()).toEqual(["People", "Tags", "Milestone", "Section"]);
     expect(screen.queryByRole("menuitemcheckbox")).not.toBeInTheDocument();
     // Backspace and ArrowLeft do the same
     await user.click(screen.getByRole("menuitem", { name: "Tags" }));
     expect(await screen.findByRole("menuitemcheckbox", { name: "UI" })).toBeInTheDocument();
     await user.keyboard("{Backspace}");
-    expect(choices()).toEqual(["People", "Tags", "Section"]);
+    expect(choices()).toEqual(["People", "Tags", "Milestone", "Section"]);
     await user.click(screen.getByRole("menuitem", { name: "Section" }));
     expect(await screen.findByRole("menuitemcheckbox", { name: "Design" })).toBeInTheDocument();
     await user.keyboard("{ArrowLeft}");
-    expect(choices()).toEqual(["People", "Tags", "Section"]);
+    expect(choices()).toEqual(["People", "Tags", "Milestone", "Section"]);
     expect(screen.getByRole("menu")).toBeInTheDocument();
   });
 

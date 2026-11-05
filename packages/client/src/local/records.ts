@@ -4,7 +4,7 @@ import { ApiError } from "../api";
 
 /** The workspace file's — and the stored records' — format. */
 export const WORKSPACE_FORMAT = "ganttlines-workspace";
-export const WORKSPACE_VERSION = 3;
+export const WORKSPACE_VERSION = 4;
 
 export interface StoredResource {
   id: string;
@@ -71,7 +71,7 @@ export const emptyWorkspace = (): WorkspaceRecord => ({
 
 /**
  * Checks a stored or imported workspace's format and version: older versions (1: a task's single
- * predecessor kept on its row; 2: no tags or section descriptions) are upgraded by the caller;
+ * predecessor kept on its row; 2: no tags or section descriptions; 3: no targets) are upgraded by the caller;
  * newer ones are refused — never half-read.
  */
 export function checkFormat(value: { format?: unknown; version?: unknown }): void {

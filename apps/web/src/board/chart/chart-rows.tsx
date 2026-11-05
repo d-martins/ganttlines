@@ -1,8 +1,12 @@
+import type { SlackAnalysis } from "@ganttlines/engine";
 import { fromDay, LINK_KIND_WORDS, spanEnd, spanStart, type Command, type DayNum, type LinkKind, type RowId } from "@ganttlines/engine";
 import { UserRound } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { AssigneePicker } from "../assignee-picker";
 import { runCommand, useBoard } from "../board-context";
+import { useCriticalPath } from "../critical-path-view";
+import { useSlackAnalysis } from "../slack";
+import { LinkChoiceMenu, linkChoiceFor, type LinkChoice } from "./link-choice";
 import { addAtEnd, deleteRow } from "../list/list-actions";
 import type { BoardRow } from "../model";
 import { useSelection } from "../selection";
@@ -45,6 +49,16 @@ function LinkDot({ left, top, title, onPointerDown }: { left: number; top: numbe
  * through the engine; the command is sent on drop), focused bars respond to the keyboard, hover
  * shows each bar's controls, and empty tracks show a ghost where a click would schedule the task.
  */
+/** What a bar's outline says; none for dates drawn from a baseline. */
+function slackMark(entry: BoardRow, { slack, pastTarget }: SlackAnalysis, critical: boolean): "late" | "zero" | null {
+  if (entry.fromBaseline) return null;
+  const mine = slack.get(entry.row.id);
+  if (!mine) return null;
+  // A missed milestone always shows; the rest only when asked for.
+  if (pastTarget.has(entry.row.id) || (mine.halves < 0 && (critical || mine.limit.kind === "milestone"))) return "late";
+  return critical && mine.halves === 0 ? "zero" : null;
+}
+
 export function ChartRows({
   rows,
   allRows,
@@ -71,6 +85,9 @@ export function ChartRows({
 }) {
   const board = useBoard();
   const { state, resources, resourceMap, canEdit, canCreateResources } = board;
+  const slack = useSlackAnalysis();
+  const [linkChoice, setLinkChoice] = useState<LinkChoice | null>(null);
+  const critical = useCriticalPath(board.sync.projectId);
   const select = useSelection((selection) => selection.select);
   const drag = useChartDrag((store) => store.drag);
   const [hover, setHover] = useState<{ index: number; day: DayNum } | null>(null);
@@ -170,7 +187,12 @@ export function ChartRows({
         if (kind === "move") pressed.focus({ preventScroll: true });
         return;
       }
-      if (commit && current?.command) run(current.command);
+      if (commit && current?.command) {
+        // Between a task and a milestone it could mean aiming, too: ask, whichever way it was dragged.
+        const choice = current.command.type === "addLink" ? linkChoiceFor(board.state, current.command) : null;
+        if (choice) setLinkChoice({ ...choice, x: last?.clientX ?? startX, y: last?.clientY ?? startY });
+        else run(current.command);
+      }
     };
     const up = (upEvent: PointerEvent) => {
       move(upEvent); // the drop lands where the pointer is, even if no move event came since
@@ -268,6 +290,7 @@ export function ChartRows({
                 resources={resourceMap}
                 titleGap={editable ? 18 : 6}
                 visibleLeft={visibleLeft}
+                slack={slackMark(entry, slack, critical)}
                 tags={task && task.tags.length > 0 ? <TagChips title={row.title} tags={task.tags} filter={tagFilter} /> : null}
                 shape={
                   editable
@@ -372,6 +395,7 @@ export function ChartRows({
         </div>
       ) : null}
       {drag?.line ? <LinkDragPreview drag={drag} allRows={allRows} timeline={timeline} style={style} /> : null}
+      {linkChoice ? <LinkChoiceMenu choice={linkChoice} state={state} run={run} onClose={() => setLinkChoice(null)} /> : null}
     </>
   );
 }

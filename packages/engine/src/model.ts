@@ -38,6 +38,8 @@ export interface TaskRow extends RowBase {
   locked: boolean;
   /** Workspace-wide labels, one per case-insensitive spelling; see `normalizeTags`. */
   tags: string[];
+  /** The milestone this task aims for: never moves anything, only measured against; see `isValidTarget`. */
+  targetId: RowId | null;
 }
 
 export type Row = SectionRow | TaskRow;
@@ -56,5 +58,6 @@ export const TASK_DEFAULTS = {
   locked: false,
   description: "",
   tags: [],
+  targetId: null,
   actualDuration: null,
 } as const satisfies Partial<TaskRow>;

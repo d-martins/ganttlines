@@ -120,7 +120,7 @@ describe("the workspace in IndexedDB", () => {
     (await versionOneDatabase(factory, "old", ["p1", "p2"])).close();
     await new IndexedDbStore("old", factory).load();
     // Written back in the upgrade itself, not on the next save: the stored records are the current version.
-    const db = await openRaw(factory, "old", 3);
+    const db = await openRaw(factory, "old", 4);
     const { workspace, projects } = await readAll(db);
     db.close();
     expect(workspace).toMatchObject({ version: WORKSPACE_VERSION });
@@ -136,15 +136,37 @@ describe("the workspace in IndexedDB", () => {
     const factory = new IDBFactory();
     (await versionTwoDatabase(factory, "v2", ["p1", "p2", "p3"])).close();
     await new IndexedDbStore("v2", factory).load();
-    // Written back in the upgrade itself, not on the next save: the stored records are version 3.
-    const db = await openRaw(factory, "v2", 3);
+    // Written back in the upgrade itself, not on the next save: the stored records are current.
+    const db = await openRaw(factory, "v2", 4);
     const { workspace, projects } = await readAll(db);
     db.close();
-    expect(workspace).toMatchObject({ version: 3 });
+    expect(workspace).toMatchObject({ version: 4 });
     expect(projects).toHaveLength(3);
     for (const project of projects as client.ProjectRecord[]) {
-      expect(project.rows).toEqual([expect.objectContaining({ id: A, kind: "task", tags: [] }), { id: B, kind: "section", title: "S", parentId: null, position: "a1", description: "" }]);
+      expect(project.rows).toEqual([expect.objectContaining({ id: A, kind: "task", tags: [], targetId: null }), { id: B, kind: "section", title: "S", parentId: null, position: "a1", description: "" }]);
     }
+  });
+
+  it("opening a version-3 database gives every task no target, written back in the upgrade", async () => {
+    const factory = new IDBFactory();
+    const old = await openRaw(factory, "v3", 3, (created) => {
+      created.createObjectStore("workspace");
+      created.createObjectStore("projects", { keyPath: "id" });
+    });
+    await new Promise<void>((resolve, reject) => {
+      const tx = old.transaction(["workspace", "projects"], "readwrite");
+      tx.objectStore("workspace").put({ ...emptyWorkspace(), version: 3 }, "workspace");
+      tx.objectStore("projects").put({ ...v1Project("p1"), links: [], rows: [{ id: A, kind: "task", title: "A", parentId: null, position: "a0", userStart: null, startsAfternoon: false, duration: 1, actualDuration: null, resourceId: null, color: "blue", locked: false, description: "", tags: ["UI"] }] });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    old.close();
+    await new IndexedDbStore("v3", factory).load();
+    const db = await openRaw(factory, "v3", 4);
+    const { workspace, projects } = await readAll(db);
+    db.close();
+    expect(workspace).toMatchObject({ version: 4 });
+    expect((projects as client.ProjectRecord[])[0]!.rows).toEqual([expect.objectContaining({ id: A, tags: ["UI"], targetId: null })]);
   });
 
   it("a failed version-2 upgrade leaves the version-2 data", async () => {

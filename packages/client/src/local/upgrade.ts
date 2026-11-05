@@ -11,7 +11,7 @@ type RowV1 = Row & { predecessorId?: string | null; offset?: number };
  */
 export function upgradeProjectRecord(record: unknown): ProjectRecord {
   if (!isRecordShaped(record)) return record as ProjectRecord;
-  return withTagsAndDescriptions(withLinks(record as Omit<ProjectRecord, "rows" | "links"> & { rows: RowV1[]; links?: Link[] }));
+  return withTargets(withTagsAndDescriptions(withLinks(record as Omit<ProjectRecord, "rows" | "links"> & { rows: RowV1[]; links?: Link[] })));
 }
 
 /**
@@ -42,6 +42,13 @@ function withTagsAndDescriptions(project: ProjectRecord): ProjectRecord {
     return row.kind === "task" ? { ...row, tags: [] } : { ...row, description: "" };
   });
   return { ...project, rows };
+}
+
+/** Version 3 → 4: tasks aim for nothing yet. */
+function withTargets(project: ProjectRecord): ProjectRecord {
+  const outdated = (row: Row) => row.kind === "task" && row.targetId === undefined;
+  if (!project.rows.some(outdated)) return project;
+  return { ...project, rows: project.rows.map((row): Row => (row.kind === "task" && outdated(row) ? { ...row, targetId: null } : row)) };
 }
 
 function isRecordShaped(record: unknown): boolean {

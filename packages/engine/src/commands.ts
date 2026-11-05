@@ -22,15 +22,19 @@ import {
   type Schedule,
   type Span,
 } from "./schedule";
-import { buildTree, childrenOf, descendantLeafTasks, isAncestor, isParentTask, subtreeIds, type Tree } from "./tree";
+import { buildTree, childrenOf, clearLostTargets, descendantLeafTasks, isAncestor, isParentTask, subtreeIds, type Tree } from "./tree";
 
 export type DayHalf = "morning" | "afternoon";
 
 export type Command =
-  | { type: "createRow"; id: RowId; kind: "task" | "section"; parentId: RowId | null; afterId: RowId | null; title: string; start?: IsoDate }
+  | { type: "createRow"; id: RowId; kind: "task" | "section"; parentId: RowId | null; afterId: RowId | null; title: string; start?: IsoDate; milestone?: boolean }
   | { type: "updateTitle"; id: RowId; title: string }
   | { type: "setDescription"; id: RowId; description: string }
   | { type: "setTags"; id: RowId; tags: string[] }
+  /** Aims a task at a milestone on its board (null: stops aiming). */
+  | { type: "setTarget"; id: RowId; targetId: RowId | null }
+  /** Creates a milestone and aims `id` at it, as one step. */
+  | { type: "createTargetMilestone"; id: RowId; newId: RowId; title: string; parentId: RowId | null; afterId: RowId | null; start: IsoDate }
   | { type: "setColor"; id: RowId; color: TaskColor }
   | { type: "setAssignee"; id: RowId; resourceId: ResourceId | null }
   /** `half`: the half of `start` the task starts in (default the morning). */
@@ -80,6 +84,12 @@ class Rejection extends Error {
   }
 }
 
+/** Whether tasks can aim for this row: a milestone, so no subtasks. */
+export function isValidTarget(state: ProjectState, id: RowId): boolean {
+  const row = state.rows[id];
+  return row?.kind === "task" && row.duration === 0 && !isParentTask(buildTree(state), row);
+}
+
 /** Applies one command. Deterministic: same state + calendar + command → same result. */
 export function applyCommand(state: ProjectState, calendar: Calendar, command: Command): CommandResult {
   try {
@@ -114,6 +124,7 @@ class Execution {
   run(command: Command): ProjectState {
     this.apply(command);
     this.settleFormerParents();
+    clearLostTargets(this.rows);
     return this.result();
   }
 
@@ -127,6 +138,10 @@ class Execution {
         return this.patch(this.row(command.id), { description: command.description });
       case "setTags":
         return this.patch(this.task(command.id, "Sections have no tags"), { tags: normalizeTags(command.tags) });
+      case "setTarget":
+        return this.setTarget(command.id, command.targetId);
+      case "createTargetMilestone":
+        return this.createTargetMilestone(command);
       case "setColor":
         if (!TASK_COLORS.includes(command.color)) throw new Rejection("invalid", `Unknown color ${command.color}`);
         return this.patch(this.task(command.id), { color: command.color });
@@ -175,12 +190,32 @@ class Execution {
     const base = { id: command.id, title: command.title, parentId: command.parentId, position };
     if (command.kind === "section") {
       if (command.start !== undefined) throw new Rejection("invalid", "Sections have no dates");
+      if (command.milestone) throw new Rejection("invalid", "Sections can't be milestones");
       this.rows[command.id] = { ...base, kind: "section", description: "" };
     } else {
       const userStart = command.start === undefined ? null : fromDay(this.calendar.snap(this.day(command.start), null));
-      this.rows[command.id] = { ...TASK_DEFAULTS, ...base, kind: "task", userStart };
+      this.rows[command.id] = { ...TASK_DEFAULTS, ...base, kind: "task", userStart, ...(command.milestone ? { duration: 0 } : {}) };
     }
     return this.result();
+  }
+
+  private assertCanAim(id: RowId): TaskRow {
+    const task = this.task(id, "Sections can't aim for a milestone");
+    if (task.duration === 0 && !isParentTask(this.tree, task)) throw new Rejection("invalid", "Milestones can't aim for a milestone");
+    return task;
+  }
+
+  private setTarget(id: RowId, targetId: RowId | null): ProjectState {
+    const task = this.assertCanAim(id);
+    if (targetId !== null && !isValidTarget(this.result(), targetId)) throw new Rejection("invalid", "Tasks can only aim for a milestone on this board");
+    return this.patch(task, { targetId });
+  }
+
+  private createTargetMilestone(command: Extract<Command, { type: "createTargetMilestone" }>): ProjectState {
+    const task = this.assertCanAim(command.id);
+    const { newId: id, title, parentId, afterId, start } = command;
+    this.createRow({ type: "createRow", id, kind: "task", parentId, afterId, title, start, milestone: true });
+    return this.patch(task, { targetId: id });
   }
 
   private indent(id: RowId): ProjectState {
