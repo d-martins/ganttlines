@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { restoredRow } from "../src/changes";
 import { applyCommand, MAX_BREAKS_PER_TASK, MAX_DURATION, type Command } from "../src/commands";
 import { MAX_LINKS_PER_TASK } from "../src/links";
 import { fromDay } from "../src/date";
 import type { ProjectState, RowId, TaskRow } from "../src/model";
 import { partsOf } from "../src/parts";
-import { computeSchedule } from "../src/schedule";
+import { computeSchedule, spanEnd, spanStart } from "../src/schedule";
 import { revertChanges } from "../src/undo";
 import { calendar, link, project, task } from "./fixtures";
 import { run } from "./helpers";
@@ -50,9 +51,9 @@ describe("addBreak", () => {
     expect(refused(split(), { type: "addBreak", id: "t", from: WED, resume: THU }).reason).toBe("invalid");
   });
 
-  it("resume at or before from changes nothing", () => {
-    const result = applyCommand(twoDays(), cal, { type: "addBreak", id: "t", from: TUE, resume: TUE });
-    expect(result).toMatchObject({ ok: true, changes: [] });
+  it("resume at or before from refuses, and a change of dates keeps the old one", () => {
+    expect(refused(twoDays(), { type: "addBreak", id: "t", from: TUE, resume: TUE }).message).toBe("An interruption has to end after it starts");
+    expect(refused(split(), { type: "relink", steps: [{ type: "removeBreak", id: "t", after: 2 }, { type: "addBreak", id: "t", from: TUE, resume: MON }] }).message).toBe("An interruption has to end after it starts");
   });
 
   it("a task can have several, kept in order", () => {
@@ -145,6 +146,63 @@ describe("resizeBreak", () => {
     const after = resized(state, "start", "2026-11-03", "morning"); // Monday plus Tuesday morning
     expect(taskIn(after, "t").breaks).toEqual([{ after: 3, length: 1 }, { after: 5, length: 2 }]);
     expect(dates(after, "t").at(-1)).toEqual([FRI, FRI]);
+  });
+});
+
+describe("resizeBreak where another task runs in the gap", () => {
+  // A runs Wed and Thu; T does Monday, pauses for Tuesday, waits for A, then Friday and Monday.
+  const crowded = () => project(task("a", { userStart: "2026-11-04", duration: 2 }), task("t", { userStart: MON, duration: 3, breaks: [{ after: 2, length: 2 }], interruptedBy: ["a"] }));
+  const resize = (edge: "start" | "end", date: string) => {
+    const state = expectUndoes(crowded(), { type: "resizeBreak", id: "t", after: 2, edge, date });
+    const row = taskIn(state, "t");
+    expect(row.breaks.every((pause) => pause.length >= 1 && pause.after >= 1)).toBe(true);
+    return row;
+  };
+
+  it("the edge stops where the task's own pause ends", () => {
+    expect(resize("end", WED)).toMatchObject({ breaks: [], duration: 4 });
+    expect(resize("end", THU)).toMatchObject({ breaks: [], duration: 4 });
+    expect(resize("start", WED)).toMatchObject({ breaks: [], duration: 4 });
+  });
+
+  it("parts never overlap afterwards", () => {
+    const state = run(crowded(), cal, { type: "resizeBreak", id: "t", after: 2, edge: "end", date: WED });
+    const parts = partsOf(computeSchedule(state, cal).get("t"));
+    parts.slice(1).forEach((part, i) => expect(spanStart(part)).toBeGreaterThan(spanEnd(parts[i]!)));
+  });
+});
+
+describe("a split task with a finish link", () => {
+  it("moving it earlier stays on the link, as without a break", () => {
+    const state = project(task("p", { userStart: MON, duration: 10 }), task("t", { userStart: "2026-11-10", duration: 2, breaks: [{ after: 2, length: 4 }] }), link("p", "t", 0, "FF"));
+    expect(dates(state, "t")).toEqual([["2026-11-10", "2026-11-10"], ["2026-11-13", "2026-11-13"]]);
+    const moved = run(state, cal, { type: "moveTask", id: "t", start: "2026-11-09" });
+    expect(dates(moved, "t")).toEqual([["2026-11-10", "2026-11-10"], ["2026-11-13", "2026-11-13"]]);
+  });
+});
+
+describe("what gets logged", () => {
+  it("only the field that changed", () => {
+    const shrunk = applyCommand(twoDays({ duration: 3, breaks: [{ after: 4, length: 2 }] }), cal, { type: "setDuration", id: "t", duration: 1 });
+    if (!shrunk.ok) throw new Error(shrunk.message);
+    expect(shrunk.changes.flatMap((change) => ("field" in change && "rowId" in change ? [change.field] : [])).sort()).toEqual(["breaks", "duration"]);
+    const interrupted = project(task("a", { userStart: TUE }), task("b", { userStart: MON, duration: 2, interruptedBy: ["a"] }));
+    const deleted = applyCommand(interrupted, cal, { type: "deleteRows", ids: ["a"] });
+    if (!deleted.ok) throw new Error(deleted.message);
+    expect(deleted.changes.filter((change) => "field" in change && change.field === "breaks")).toEqual([]);
+  });
+
+  it("dragging a split task's start edge to where it changes nothing logs nothing", () => {
+    const result = applyCommand(split(), cal, { type: "resizeTask", id: "t", edge: "start", date: "2026-11-01" });
+    expect(result).toMatchObject({ ok: true, changes: [] });
+  });
+});
+
+describe("rows logged before interruptions existed", () => {
+  it("come back with none", () => {
+    const { breaks: _b, interruptedBy: _i, ...old } = task("t", { userStart: MON });
+    expect(restoredRow(old)).toMatchObject({ breaks: [], interruptedBy: [] });
+    expect(restoredRow({ id: "s", kind: "section", title: "s", parentId: null, position: "a", description: "" })).not.toHaveProperty("breaks");
   });
 });
 

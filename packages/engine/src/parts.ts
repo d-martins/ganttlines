@@ -118,7 +118,7 @@ export function clearLostInterruptions(rows: Record<RowId, Row>): number {
     const keptBreaks = canTakePart(row) ? breaks.filter((pause) => pause.after >= 1 && pause.after < row.duration * 2) : [];
     const keptBy = canTakePart(row) ? interruptedBy.filter((id) => id !== row.id && canTakePart(rows[id])) : [];
     if (keptBreaks.length === breaks.length && keptBy.length === interruptedBy.length) continue;
-    rows[row.id] = { ...row, breaks: keptBreaks, interruptedBy: keptBy };
+    rows[row.id] = { ...row, ...(keptBreaks.length !== breaks.length ? { breaks: keptBreaks } : {}), ...(keptBy.length !== interruptedBy.length ? { interruptedBy: keptBy } : {}) };
     cleared++;
   }
   return cleared;

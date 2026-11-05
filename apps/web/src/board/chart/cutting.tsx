@@ -42,6 +42,7 @@ export function Cutting({ rows, timeline, style, run }: { rows: readonly BoardRo
 
   useEffect(() => {
     if (rowId === null) return;
+    let endedByPress = false;
     const stop = () => {
       useChartDrag.setState({ drag: null });
       useCutting.setState({ rowId: null, line: null, cut: null });
@@ -71,6 +72,7 @@ export function Cutting({ rows, timeline, style, run }: { rows: readonly BoardRo
         return;
       }
       const command = commandAt(event, cutAt);
+      endedByPress = true;
       stop();
       if (command) run(command);
     };
@@ -88,8 +90,11 @@ export function Cutting({ rows, timeline, style, run }: { rows: readonly BoardRo
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerdown", press, true);
       window.removeEventListener("keydown", key, true);
-      // The click that ends this press is still to come.
-      setTimeout(() => window.removeEventListener("click", swallow, true), 0);
+      const release = () => window.removeEventListener("click", swallow, true);
+      if (!endedByPress) return release();
+      // The click that ends this press comes after the button is let go: it isn't for the board either.
+      window.addEventListener("click", release, { capture: true, once: true });
+      window.addEventListener("pointerup", () => setTimeout(release, 100), { capture: true, once: true });
     };
   }, [rowId !== null]);
 

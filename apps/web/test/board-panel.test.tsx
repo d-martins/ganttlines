@@ -529,6 +529,16 @@ describe("details panel", () => {
       expect(from()).toHaveValue("2026-11-20");
     });
 
+    it("an end before the start is refused: a new one's draft stays, a stored one stays as it was", async () => {
+      const { user } = await interruptionsBoard();
+      await user.click(within(section()).getByRole("button", { name: "Add interruption" }));
+      setDate(from(), "2026-10-13");
+      setDate(to(), "2026-10-12");
+      await user.click(within(section()).getByRole("button", { name: "Save" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent(/end after it starts/);
+      expect(from()).toHaveValue("2026-10-13");
+    });
+
     it("a stored one reads back its dates and what it does", async () => {
       await interruptionsBoard({ breaks: [{ after: 2, length: 6 }] });
       expect(from()).toHaveValue("2026-10-13");

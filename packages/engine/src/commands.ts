@@ -376,6 +376,7 @@ class Execution {
     const first = parts[0]!;
     const placement = this.placeLeaf(task, Math.min(at, spanEnd(first)), { keepFinish: true });
     const grown = this.calendar.workingHalvesBetween(halfDay(toDay(placement.userStart), placement.startsAfternoon), spanStart(first), resource);
+    if (grown === 0) return this.result();
     return this.patch(task, {
       ...placement,
       duration: this.validDuration(task.duration + grown / 2),
@@ -404,7 +405,7 @@ class Execution {
     if (parts.length === 0) throw new Rejection("unscheduled", "This task has no dates");
     const resource = task.resourceId;
     const [start, end] = [this.calendar.snapHalf(from, resource), this.calendar.snapHalf(resume, resource)];
-    if (end <= start) return this.result();
+    if (end <= start) throw new Rejection("invalid", "An interruption has to end after it starts");
     const inPart = parts.some((part) => spanStart(part) <= start && start <= spanEnd(part));
     const after = workBefore(parts, start, this.calendar, resource);
     if (!inPart || after < 1 || after >= task.duration * 2) throw new Rejection("invalid", "An interruption has to start inside the task, with work on both sides");
@@ -446,9 +447,11 @@ class Execution {
       grown = start <= this.calendar.nextHalfAfter(lastWorked, resource) ? gap : this.calendar.workingHalvesBetween(start, firstAfter, resource);
     }
     if (grown === 0) return this.result();
+    // The gap can hold more than this pause: another task's run. The edge stops where the pause ends.
+    grown = Math.min(grown, pause.length);
     const later = (task.breaks ?? []).filter((candidate) => candidate.after > after).map((candidate) => ({ ...candidate, after: candidate.after + grown }));
     const earlier = (task.breaks ?? []).filter((candidate) => candidate.after < after);
-    const kept = grown >= gap ? [] : [{ after: edge === "start" ? after + grown : after, length: pause.length - grown }];
+    const kept = grown >= pause.length ? [] : [{ after: edge === "start" ? after + grown : after, length: pause.length - grown }];
     return this.patch(task, { duration: this.validDuration(task.duration + grown / 2), breaks: [...earlier, ...kept, ...later] });
   }
 
@@ -649,7 +652,7 @@ class Execution {
     keepFinish = false,
   ): HalfDay {
     const skipFinish = keepFinish || isParentTask(this.tree, task);
-    const follower = { resourceId: resource, duration: task.duration };
+    const follower = { resourceId: resource, duration: task.duration, breaks: task.breaks ?? [] };
     const anchored: { link: Link; span: Span }[] = [];
     for (const link of this.linksInto(task.id)) {
       if (skipFinish && isFinishLink(link.kind)) continue;

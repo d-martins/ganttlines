@@ -95,7 +95,6 @@ export function LinkChoiceMenu({ choice, state, calendar, run, onClose }: { choi
         <DropdownMenu.Content
           align="start"
           sideOffset={4}
-          avoidCollisions={false}
           onPointerMoveCapture={() => (moved.current = true)}
           onKeyDownCapture={(event) => {
             if (event.key === "ArrowDown" || event.key === "ArrowUp") moved.current = true;

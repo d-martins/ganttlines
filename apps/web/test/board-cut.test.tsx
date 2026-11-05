@@ -3,6 +3,7 @@ import { fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clampCut, resumeAt, useCutting } from "../src/board/chart/cutting";
 import { useChartDrag } from "../src/board/chart/drag";
+import { useSelection } from "../src/board/selection";
 import { useBoardView } from "../src/board/view-store";
 import { DAY_WIDTH } from "../src/board/chart/timeline";
 import { task } from "./board-fixtures";
@@ -145,6 +146,33 @@ describe("cutting a bar", () => {
     fireEvent.pointerUp(window, { button: 0, clientX: chartX("2026-10-13"), clientY: 0 });
     expect(useCutting.getState().cut).toBe(pm(MON) + 1);
     expect(sentCommands().filter((command) => command.type === "moveTask")).toEqual([]);
+  });
+
+  it("the click that ends a cut doesn't reach the board, however long the button is held", async () => {
+    await board([task("t", { userStart: MON, duration: 2 }), task("other", { userStart: MON })]);
+    const row = document.querySelector('[data-row="1"]')!;
+    const before = useSelection.getState();
+    fireEvent.click(icon());
+    at(chartX("2026-10-13"));
+    press(chartX("2026-10-13"));
+    at(chartX("2026-10-16"));
+    fireEvent.pointerDown(window, { button: 0, clientX: chartX("2026-10-16"), clientY: 0 });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    fireEvent.pointerUp(window, { button: 0, clientX: chartX("2026-10-16"), clientY: 0 });
+    fireEvent.click(row);
+    expect(useSelection.getState()).toEqual(before);
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    fireEvent.click(row);
+    expect(useSelection.getState()).not.toEqual(before); // clicks work again
+  });
+
+  it("after Esc the next click works", async () => {
+    await board([task("t", { userStart: MON, duration: 2 }), task("other", { userStart: MON })]);
+    const before = useSelection.getState();
+    fireEvent.click(icon());
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.click(document.querySelector('[data-row="1"]')!);
+    expect(useSelection.getState()).not.toEqual(before);
   });
 
   it("at a wider zoom it cuts in whole days", async () => {

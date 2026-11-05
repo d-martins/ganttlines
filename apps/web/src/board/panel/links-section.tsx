@@ -18,7 +18,7 @@ import {
   type TaskRow,
 } from "@ganttlines/engine";
 import { ChevronDown, Plus, X } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { IconButton } from "../../ui/button";
 import { END_WORDS, lineOf, linkOf, WHEN_WORDS, type LinkLine, type LinkShape } from "../link-phrases";
 import { useSelection } from "../selection";
@@ -155,7 +155,8 @@ export function LinksSection({
 
   const numberOf = (id: RowId) => numbers.get(id) ?? 0;
   // A milestone has nothing to aim with.
-  const canAim = task.duration !== 0 || isParentTask(buildTree(state), task);
+  const tree = useMemo(() => buildTree(state), [state]);
+  const canAim = task.duration !== 0 || isParentTask(tree, task);
   const aimProps = { task, state, calendar, schedule, numbers, run };
   const aiming = canAim && effectiveTarget(state, task) !== null;
   // From a milestone's side: the tasks that chose it, not subtasks that only inherit.
@@ -239,7 +240,7 @@ export function LinksSection({
   };
 
   // Tasks with work of their own and no subtasks can interrupt or be interrupted.
-  const hasWork = (row: Row | undefined): row is TaskRow => row?.kind === "task" && row.duration !== 0 && !isParentTask(buildTree(state), row);
+  const hasWork = (row: Row | undefined): row is TaskRow => row?.kind === "task" && row.duration !== 0 && !isParentTask(tree, row);
   const canInterrupt = hasWork(task);
   const interruptedBy = canInterrupt ? [...(task.interruptedBy ?? [])].filter((id) => state.rows[id]).sort((a, b) => numberOf(a) - numberOf(b)) : [];
   const interrupting = canInterrupt

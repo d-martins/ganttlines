@@ -83,6 +83,26 @@ test("A interrupts B from the menu, and moving A moves the gap", async ({ page }
   await expect(panel.getByRole("combobox", { name: /^Interrupts .*: this task$/ })).toHaveValue("interrupts");
 });
 
+test("the menu stays on screen when dropped low in the window", async ({ page }) => {
+  const projectId = await createProject(page.request, "Launch");
+  // New tasks go on top, so Build ends up on the lowest row.
+  await addTask(page.request, projectId, "Build", "2026-10-12", 2);
+  for (const title of ["One", "Two", "Three", "Four", "Five"]) await addTask(page.request, projectId, title, "2026-10-12", 1);
+  await addTask(page.request, projectId, "Hotfix", "2026-10-13", 3);
+  await page.setViewportSize({ width: 1440, height: 400 });
+  await page.goto(`/p/${projectId}`);
+  await expect(listRow(page, "Build")).toBeVisible();
+  await bringIntoView(page, "Build");
+  await barOf(page, "Hotfix").hover();
+  const from = (await barOf(page, "Hotfix").locator("..").getByTitle("Drag onto another task to link them").boundingBox())!;
+  const to = (await barOf(page, "Build").boundingBox())!;
+  await page.mouse.move(from.x + 3, from.y + 3);
+  await page.mouse.down();
+  await page.mouse.move(to.x + 10, to.y + 5, { steps: 4 });
+  await page.mouse.up();
+  await expect(page.getByRole("menuitem", { name: /Hotfix interrupts Build/ })).toBeInViewport({ ratio: 1 });
+});
+
 test("an interruption from the panel", async ({ page }) => {
   const projectId = await createProject(page.request, "Launch");
   await addTask(page.request, projectId, "Build", "2026-10-12", 2);
