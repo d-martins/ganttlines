@@ -28,6 +28,10 @@ const cmd = <T extends string, S extends z.ZodRawShape>(type: T, shape: S) => z.
 const setTarget = cmd("setTarget", { id, targetId: id.nullable() });
 const addLink = cmd("addLink", { predecessorId: id, followerId: id, kind: linkKind, lag: lag.optional() });
 const removeLink = cmd("removeLink", { predecessorId: id, followerId: id, kind: linkKind, keepPlace: z.boolean().optional() });
+const addBreak = cmd("addBreak", { id, from: date, fromHalf: half, resume: date, resumeHalf: half });
+const removeBreak = cmd("removeBreak", { id, after: z.int().min(1).max(MAX_DURATION * 2) });
+const addInterruption = cmd("addInterruption", { id, byId: id });
+const removeInterruption = cmd("removeInterruption", { id, byId: id });
 
 /** Wire schema for every engine row command, bounding what the engine does not. */
 export const CommandSchema = z.discriminatedUnion("type", [
@@ -57,7 +61,12 @@ export const CommandSchema = z.discriminatedUnion("type", [
   addLink,
   cmd("updateLink", { predecessorId: id, followerId: id, kind: linkKind, lag: lag.optional(), newKind: linkKind.optional(), reverse: z.boolean().optional() }),
   removeLink,
-  cmd("relink", { steps: z.array(z.discriminatedUnion("type", [setTarget, addLink, removeLink])).length(2) }),
+  cmd("relink", { steps: z.array(z.discriminatedUnion("type", [setTarget, addLink, removeLink, addBreak, removeBreak, addInterruption, removeInterruption])).length(2) }),
+  addBreak,
+  removeBreak,
+  cmd("resizeBreak", { id, after: z.int().min(1).max(MAX_DURATION * 2), edge: z.enum(["start", "end"]), date, half }),
+  addInterruption,
+  removeInterruption,
   cmd("indent", { id }),
   cmd("outdent", { id }),
   cmd("moveRow", { id, parentId: id.nullable(), afterId: id.nullable() }),

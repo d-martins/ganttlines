@@ -6,6 +6,18 @@ import { spanEnd, spanOfHalves, spanStart, type Computed, type Span } from "./sc
 /** The stretches a scheduled row is worked: its parts when split, otherwise its whole span. */
 export const partsOf = (computed: Computed | undefined): readonly Span[] => computed?.parts ?? (computed?.span ? [computed.span] : []);
 
+/** Working half days of `parts` before half day `half`. */
+export function workBefore(parts: readonly Span[], half: HalfDay, calendar: Calendar, resourceId: ResourceId | null): number {
+  let work = 0;
+  for (const part of parts) {
+    const from = spanStart(part);
+    if (half <= from) break;
+    const last = Math.min(spanEnd(part), half - 1);
+    work += calendar.workingHalvesBetween(from, calendar.snapHalfBack(last, resourceId), resourceId) + 1;
+  }
+  return work;
+}
+
 /** Half days ranges merged and sorted, so a walk can pass them with a moving cursor. */
 function mergedRanges(spans: readonly Span[]): { from: HalfDay; to: HalfDay }[] {
   const merged: { from: HalfDay; to: HalfDay }[] = [];

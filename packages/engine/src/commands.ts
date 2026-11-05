@@ -18,11 +18,12 @@ import {
   requiredStart,
   spanEnd,
   spanStart,
+  type Computed,
   type FollowerIndex,
   type Schedule,
   type Span,
 } from "./schedule";
-import { clearLostInterruptions } from "./parts";
+import { clearLostInterruptions, partsOf, workBefore } from "./parts";
 import { buildTree, childrenOf, clearLostTargets, descendantLeafTasks, isAncestor, isParentTask, subtreeIds, type Tree } from "./tree";
 
 export type DayHalf = "morning" | "afternoon";
@@ -60,17 +61,28 @@ export type Command =
    */
   | { type: "removeLink"; predecessorId: RowId; followerId: RowId; kind: LinkKind; keepPlace?: boolean }
   /**
-   * Turns one link or aim into another as a single change, undone in one step: each step runs on
+   * Turns one link, aim or interruption into another as a single change, undone in one step: each step runs on
    * what the one before left, and if any is refused nothing happens.
    */
   | { type: "relink"; steps: RelinkStep[] }
+  /** Pauses a task from half day `from` until work picks up at `resume`; `resume` may be past its current end. */
+  | { type: "addBreak"; id: RowId; from: IsoDate; fromHalf?: DayHalf; resume: IsoDate; resumeHalf?: DayHalf }
+  | { type: "removeBreak"; id: RowId; after: number }
+  /**
+   * Moves one edge of a pause: `start` is the last half worked before it, `end` the first half after. The
+   * neighbouring part changes with it, so WD does too. An edge reaching the other side closes the pause.
+   */
+  | { type: "resizeBreak"; id: RowId; after: number; edge: "start" | "end"; date: IsoDate; half?: DayHalf }
+  /** `byId` interrupts `id`: `id` stops wherever `byId` runs. */
+  | { type: "addInterruption"; id: RowId; byId: RowId }
+  | { type: "removeInterruption"; id: RowId; byId: RowId }
   | { type: "indent"; id: RowId }
   | { type: "outdent"; id: RowId }
   | { type: "moveRow"; id: RowId; parentId: RowId | null; afterId: RowId | null }
   | { type: "deleteRows"; ids: RowId[] }
   | { type: "duplicateTask"; id: RowId; newId: RowId };
 
-export type RelinkStep = Extract<Command, { type: "setTarget" | "addLink" | "removeLink" }>;
+export type RelinkStep = Extract<Command, { type: "setTarget" | "addLink" | "removeLink" | "addBreak" | "removeBreak" | "addInterruption" | "removeInterruption" }>;
 
 /** Input limits: keep every calendar walk bounded, so no command can hang the server. */
 export const MAX_DURATION = 3660;
@@ -177,6 +189,16 @@ class Execution {
         if (command.keepPlace === false) this.deleteLink(this.existingLink(command));
         else this.detachLink(this.existingLink(command));
         return this.result();
+      case "addBreak":
+        return this.addBreak(command.id, halfDay(this.day(command.from), command.fromHalf === "afternoon"), halfDay(this.day(command.resume), command.resumeHalf === "afternoon"));
+      case "removeBreak":
+        return this.removeBreak(command.id, command.after);
+      case "resizeBreak":
+        return this.resizeBreak(command.id, command.after, command.edge, halfDay(this.day(command.date), (command.half ?? (command.edge === "start" ? "afternoon" : "morning")) === "afternoon"));
+      case "addInterruption":
+        return this.addInterruption(command.id, command.byId);
+      case "removeInterruption":
+        return this.removeInterruption(command.id, command.byId);
       case "indent":
         return this.indent(command.id);
       case "outdent":
@@ -330,6 +352,8 @@ class Execution {
     const span = this.spanOf(id);
     if (!span) throw new Rejection("unscheduled", "This task has no dates");
     const resource = task.resourceId;
+    const parts = partsOf(this.computed(id));
+    if (parts.length > 1) return this.resizeParts(task, parts, edge, at);
     if (edge === "end") {
       const end = this.calendar.snapHalfBack(at, resource);
       return this.patch(task, { duration: this.validDuration(this.durationBetween(spanStart(span), end, resource)) });
@@ -338,6 +362,24 @@ class Execution {
     const placement = this.placeLeaf(task, Math.min(at, spanEnd(span)), { keepFinish: true });
     const start = halfDay(toDay(placement.userStart), placement.startsAfternoon);
     return this.patch(task, { ...placement, duration: this.validDuration(this.durationBetween(start, spanEnd(span), resource)) });
+  }
+
+  /** The end edge changes the last part, the start edge the first, down to half a day; gaps and other parts stay. */
+  private resizeParts(task: TaskRow, parts: readonly Span[], edge: "start" | "end", at: HalfDay): ProjectState {
+    const resource = task.resourceId;
+    if (edge === "end") {
+      const last = parts.at(-1)!;
+      const end = Math.max(this.calendar.snapHalfBack(at, resource), spanStart(last));
+      return this.patch(task, { duration: this.validDuration(task.duration + this.calendar.workingHalvesBetween(spanEnd(last), end, resource) / 2) });
+    }
+    const first = parts[0]!;
+    const placement = this.placeLeaf(task, Math.min(at, spanEnd(first)), { keepFinish: true });
+    const grown = this.calendar.workingHalvesBetween(halfDay(toDay(placement.userStart), placement.startsAfternoon), spanStart(first), resource);
+    return this.patch(task, {
+      ...placement,
+      duration: this.validDuration(task.duration + grown / 2),
+      breaks: (task.breaks ?? []).map((pause) => ({ ...pause, after: pause.after + grown })),
+    });
   }
 
   private setDuration(id: RowId, duration: number): ProjectState {
@@ -352,6 +394,76 @@ class Execution {
     return this.patch(task, { actualDuration: days === null ? null : this.validDuration(days, "Actual work days") });
   }
 
+  // ── interruptions ───────────────────────────────────────────────────────
+
+  private addBreak(id: RowId, from: HalfDay, resume: HalfDay): ProjectState {
+    const task = this.editableLeaf(id);
+    if (task.duration === 0) throw new Rejection("invalid", "A milestone can't be interrupted");
+    const parts = partsOf(this.computed(id));
+    if (parts.length === 0) throw new Rejection("unscheduled", "This task has no dates");
+    const resource = task.resourceId;
+    const [start, end] = [this.calendar.snapHalf(from, resource), this.calendar.snapHalf(resume, resource)];
+    if (end <= start) return this.result();
+    const inPart = parts.some((part) => spanStart(part) <= start && start <= spanEnd(part));
+    const after = workBefore(parts, start, this.calendar, resource);
+    if (!inPart || after < 1 || after >= task.duration * 2) throw new Rejection("invalid", "An interruption has to start inside the task, with work on both sides");
+    const length = this.calendar.workingHalvesBetween(start, end, resource);
+    const breaks = task.breaks ?? [];
+    const merged = breaks.some((pause) => pause.after === after) ? breaks.map((pause) => (pause.after === after ? { after, length: pause.length + length } : pause)) : [...breaks, { after, length }];
+    return this.patch(task, { breaks: merged.sort((a, b) => a.after - b.after) });
+  }
+
+  private removeBreak(id: RowId, after: number): ProjectState {
+    const task = this.editableLeaf(id);
+    if (!(task.breaks ?? []).some((pause) => pause.after === after)) throw new Rejection("not_found", "That interruption isn't there");
+    return this.patch(task, { breaks: task.breaks.filter((pause) => pause.after !== after) });
+  }
+
+  private resizeBreak(id: RowId, after: number, edge: "start" | "end", at: HalfDay): ProjectState {
+    const task = this.editableLeaf(id);
+    const pause = (task.breaks ?? []).find((candidate) => candidate.after === after);
+    if (!pause) throw new Rejection("not_found", "That interruption isn't there");
+    const parts = partsOf(this.computed(id));
+    const resource = task.resourceId;
+    const index = parts.findIndex((_, i) => workBefore(parts.slice(0, i + 1), Infinity, this.calendar, resource) === after);
+    const [before, next] = [parts[index], parts[index + 1]];
+    if (!before || !next) throw new Rejection("invalid", "That interruption has nothing after it");
+    const [lastWorked, firstAfter] = [spanEnd(before), spanStart(next)];
+    const gap = this.calendar.workingHalvesBetween(lastWorked, firstAfter, resource) - 1;
+    /** Work added beside the gap (negative: taken away). */
+    let grown: number;
+    if (edge === "start") {
+      const end = Math.max(this.calendar.snapHalfBack(at, resource), spanStart(before));
+      grown = end >= this.calendar.snapHalfBack(firstAfter - 1, resource) ? gap : this.calendar.workingHalvesBetween(lastWorked, end, resource);
+    } else {
+      const start = Math.min(this.calendar.snapHalf(at, resource), spanEnd(next));
+      grown = start <= this.calendar.nextHalfAfter(lastWorked, resource) ? gap : this.calendar.workingHalvesBetween(start, firstAfter, resource);
+    }
+    if (grown === 0) return this.result();
+    const later = (task.breaks ?? []).filter((candidate) => candidate.after > after).map((candidate) => ({ ...candidate, after: candidate.after + grown }));
+    const earlier = (task.breaks ?? []).filter((candidate) => candidate.after < after);
+    const kept = grown >= gap ? [] : [{ after: edge === "start" ? after + grown : after, length: pause.length - grown }];
+    return this.patch(task, { duration: this.validDuration(task.duration + grown / 2), breaks: [...earlier, ...kept, ...later] });
+  }
+
+  private addInterruption(id: RowId, byId: RowId): ProjectState {
+    const [task, by] = [this.task(id), this.task(byId)];
+    if (id === byId) throw new Rejection("invalid", "A task can't interrupt itself");
+    if (task.duration === 0 && !isParentTask(this.tree, task)) throw new Rejection("invalid", "A milestone can't interrupt or be interrupted");
+    if (by.duration === 0 && !isParentTask(this.tree, by)) throw new Rejection("invalid", "A milestone can't interrupt or be interrupted");
+    if (isParentTask(this.tree, task) || isParentTask(this.tree, by)) throw new Rejection("invalid", "Parent tasks can't interrupt or be interrupted");
+    if (task.locked) throw new Rejection("locked", "This task's dates are locked");
+    if ((task.interruptedBy ?? []).includes(byId)) throw new Rejection("invalid", "That task already interrupts this one");
+    if (!this.spanOf(id) || !this.spanOf(byId)) throw new Rejection("unscheduled", "Both tasks need dates first");
+    return this.patch(task, { interruptedBy: [...(task.interruptedBy ?? []), byId].sort() });
+  }
+
+  private removeInterruption(id: RowId, byId: RowId): ProjectState {
+    const task = this.task(id);
+    if (!(task.interruptedBy ?? []).includes(byId)) throw new Rejection("not_found", "That task doesn't interrupt this one");
+    return this.patch(task, { interruptedBy: task.interruptedBy.filter((other) => other !== byId) });
+  }
+
   private convertMilestone(id: RowId, milestone: boolean): ProjectState {
     const task = this.editableLeaf(id);
     // A milestone is a point on its day: it's placed on the morning.
@@ -363,6 +475,7 @@ class Execution {
     // Unlocking is allowed on any task (a locked leaf may since have become a parent).
     if (!locked) return this.patch(this.task(id), { locked });
     const task = this.leaf(id);
+    if ((task.interruptedBy ?? []).length > 0) throw new Rejection("invalid", "Remove what interrupts it first");
     const span = this.spanOf(id);
     return this.patch(task, locked && span ? { locked, ...startAt(spanStart(span)) } : { locked });
   }
@@ -657,9 +770,13 @@ class Execution {
     return children[children.length - 1]?.id ?? null;
   }
 
-  private spanOf(id: RowId): Span | null {
+  private computed(id: RowId): Computed | undefined {
     this.cachedSchedule ??= computeSchedule(this.state, this.calendar);
-    return this.cachedSchedule.get(id)?.span ?? null;
+    return this.cachedSchedule.get(id);
+  }
+
+  private spanOf(id: RowId): Span | null {
+    return this.computed(id)?.span ?? null;
   }
 
   private row(id: RowId): Row {
