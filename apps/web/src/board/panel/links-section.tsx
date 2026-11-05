@@ -1,5 +1,4 @@
 import {
-  applyCommand,
   buildTree,
   effectiveTarget,
   isAncestor,
@@ -21,7 +20,6 @@ import {
 import { ChevronDown, Plus, X } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { IconButton } from "../../ui/button";
-import { toast } from "../../ui/toast";
 import { END_WORDS, lineOf, linkOf, WHEN_WORDS, type LinkLine, type LinkShape } from "../link-phrases";
 import { useSelection } from "../selection";
 import { TaskPicker } from "../task-picker";
@@ -122,7 +120,7 @@ export function LinksSection({
   numbers: ReadonlyMap<RowId, number>;
   canEdit: boolean;
   run: (command: Command) => unknown;
-  /** checks a change of task (a remove and an add) before sending either */
+  /** for how an aiming task stands against its milestone */
   calendar: Calendar;
   /** dates shown next to the tasks offered */
   schedule?: Schedule | null;
@@ -189,72 +187,39 @@ export function LinksSection({
     if (run(command) !== null) setFocus({ key: linkKey(now), control });
   };
 
-  /**
-   * Another task on a line: this link removed (its follower left to its own date and other links)
-   * and the new one added, both or neither.
-   */
+  /** Another task on a line: this link removed (its follower left to its own date and other links) and the new one added. */
   const changeTask = (link: Link, otherId: RowId) => {
-    const remove: Command = { type: "removeLink", predecessorId: link.predecessorId, followerId: link.followerId, kind: link.kind, keepPlace: false };
+    const remove = { type: "removeLink" as const, predecessorId: link.predecessorId, followerId: link.followerId, kind: link.kind, keepPlace: false };
     // The delay carries over (an overlap only where the kind allows one).
     const lag = link.kind === "FS" ? link.lag : Math.max(0, link.lag);
     const add = { type: "addLink" as const, ...between(otherId, link.followerId === task.id), kind: link.kind, ...(lag !== 0 ? { lag } : {}) };
-    const removed = applyCommand(state, calendar, remove);
-    const checked = removed.ok ? applyCommand(removed.state, calendar, add) : removed;
-    if (!checked.ok) {
-      toast(checked.message, { tone: "error" });
-      return;
-    }
-    if (run(remove) !== null && run(add) !== null) setFocus({ key: linkKey(add), control: "task" });
+    if (run({ type: "relink", steps: [remove, add] }) !== null) setFocus({ key: linkKey(add), control: "task" });
   };
 
-  /** An aim turned into a link with its milestone, both or neither. */
-  const aimToLink = (when: LinkLine["when"]) => {
-    if (task.targetId === null) return;
-    const line = { when, end: "finished" as const };
-    const { kind, thisWaits } = linkOf(line);
-    const stop: Command = { type: "setTarget", id: task.id, targetId: null };
-    const add = { type: "addLink" as const, ...between(task.targetId, thisWaits), kind };
-    const stopped = applyCommand(state, calendar, stop);
-    const checked = stopped.ok ? applyCommand(stopped.state, calendar, add) : stopped;
-    if (!checked.ok) {
-      toast(checked.message, { tone: "error" });
-      return;
-    }
-    if (run(stop) !== null && run(add) !== null) setFocus({ key: linkKey(add), control: "when" });
-  };
-
-  /** From the milestone: a task's aim here turned into a link with it, both or neither. */
-  const aimedToLink = (aimer: TaskRow, when: LinkLine["when"]) => {
+  /** A task's aim turned into a link with `otherId` (the milestone, or the task from the milestone's side). */
+  const aimAsLink = (aimerId: RowId, otherId: RowId, when: LinkLine["when"]) => {
     const { kind, thisWaits } = linkOf({ when, end: "finished" });
-    const stop: Command = { type: "setTarget", id: aimer.id, targetId: null };
-    const add = { type: "addLink" as const, ...between(aimer.id, thisWaits), kind };
-    const stopped = applyCommand(state, calendar, stop);
-    const checked = stopped.ok ? applyCommand(stopped.state, calendar, add) : stopped;
-    if (!checked.ok) {
-      toast(checked.message, { tone: "error" });
-      return;
-    }
-    if (run(stop) !== null && run(add) !== null) setFocus({ key: linkKey(add), control: "when" });
+    const add = { type: "addLink" as const, ...between(otherId, thisWaits), kind };
+    if (run({ type: "relink", steps: [{ type: "setTarget", id: aimerId, targetId: null }, add] }) !== null) setFocus({ key: linkKey(add), control: "when" });
   };
 
   /** From the milestone: the aim here moved to another task. */
   const changeAimer = (aimer: TaskRow, otherId: RowId) => {
-    // The new aim first: if it's refused, the old one is still there.
-    if (run({ type: "setTarget", id: otherId, targetId: task.id }) !== null) run({ type: "setTarget", id: aimer.id, targetId: null });
+    run({
+      type: "relink",
+      steps: [
+        { type: "setTarget", id: otherId, targetId: task.id },
+        { type: "setTarget", id: aimer.id, targetId: null },
+      ],
+    });
   };
 
-  /** A link between a task and a milestone turned into an aim, both or neither. */
+  /** A link between a task and a milestone turned into an aim. */
   const linkToAim = (link: Link) => {
     // Aiming moves nothing: whatever the link was holding stays where it's shown.
-    const remove: Command = { type: "removeLink", predecessorId: link.predecessorId, followerId: link.followerId, kind: link.kind };
-    const aim: Command = isTarget ? { type: "setTarget", id: otherOf(link), targetId: task.id } : { type: "setTarget", id: task.id, targetId: otherOf(link) };
-    const removed = applyCommand(state, calendar, remove);
-    const checked = removed.ok ? applyCommand(removed.state, calendar, aim) : removed;
-    if (!checked.ok) {
-      toast(checked.message, { tone: "error" });
-      return;
-    }
-    if (run(remove) !== null) run(aim);
+    const remove = { type: "removeLink" as const, predecessorId: link.predecessorId, followerId: link.followerId, kind: link.kind };
+    const aim = isTarget ? { type: "setTarget" as const, id: otherOf(link), targetId: task.id } : { type: "setTarget" as const, id: task.id, targetId: otherOf(link) };
+    run({ type: "relink", steps: [remove, aim] });
   };
 
   const pickForDraft = (line: LinkLine, otherId: RowId) => {
@@ -279,7 +244,7 @@ export function LinksSection({
           words={WHEN_OR_AIM}
           label={`Aims for ${nameOf(effectiveTarget(state, task)!)}: this task`}
           selectRef={aimWhen}
-          onChange={(when) => when !== AIMS_FOR && when !== AIMED_BY && aimToLink(when)}
+          onChange={(when) => when !== AIMS_FOR && when !== AIMED_BY && task.targetId !== null && aimAsLink(task.id, task.targetId, when)}
         />
       }
     />
@@ -337,7 +302,7 @@ export function LinksSection({
               schedule={schedule}
               numbers={numbers}
               exclude={(row) => !canAimHere(row)}
-              onWhen={(when) => aimedToLink(aimer, when)}
+              onWhen={(when) => aimAsLink(aimer.id, aimer.id, when)}
               onTask={(otherId) => changeAimer(aimer, otherId)}
               onGo={() => select(aimer.id)}
               onRemove={() => run({ type: "setTarget", id: aimer.id, targetId: null })}

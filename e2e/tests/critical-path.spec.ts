@@ -54,3 +54,30 @@ test("creates a milestone from Add link, sees a miss, turns on Critical path, an
   await expect(eve.page.getByRole("columnheader", { name: "Can slip" })).toHaveCount(0);
   await expect(eve.page.locator('[data-slack="late"]')).toHaveCount(1);
 });
+
+test("switching between an aim and a link is one Undo", async ({ page }) => {
+  await resetDatabase();
+  await setupAdmin(page.request);
+  const projectId = await createProject(page.request, "Launch");
+  await addTask(page.request, projectId, "Build", "2026-10-12", 5);
+
+  await page.goto(`/p/${projectId}`);
+  await page.getByRole("button", { name: "Open details of “Build”" }).click();
+  const panel = page.getByRole("complementary", { name: "Details of “Build”" });
+  await panel.getByRole("button", { name: "Add link" }).click();
+  await panel.getByRole("combobox", { name: "New link: this task" }).selectOption("aims for");
+  await page.keyboard.type("Code freeze");
+  await page.keyboard.press("Enter");
+  const aim = panel.getByRole("combobox", { name: /^Aims for/ });
+  await expect(aim).toBeVisible();
+
+  await aim.selectOption("starts after");
+  const link = panel.getByRole("combobox", { name: /^Link with .*: this task$/ });
+  await expect(link).toHaveValue("starts after");
+  await expect(aim).toHaveCount(0);
+
+  await page.locator("body").click({ position: { x: 1, y: 1 } });
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(aim).toBeVisible();
+  await expect(link).toHaveCount(0);
+});

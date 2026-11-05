@@ -365,6 +365,28 @@ describe("tags", () => {
     expect(await rowOf(id)).toMatchObject({ targetId: null });
   });
 
+  it("turns an aim into a link as one entry, and one undo restores the aim", async () => {
+    const { editor, projectId } = await editorWithProject();
+    const id = randomUUID();
+    const milestone = randomUUID();
+    await send(editor, projectId, createTask(id, "Task", "2026-11-02"));
+    await send(editor, projectId, { type: "createTargetMilestone", id, newId: milestone, title: "8.12", parentId: null, afterId: null, start: "2026-11-17" });
+    const relinked = await send(editor, projectId, {
+      type: "relink",
+      steps: [
+        { type: "setTarget", id, targetId: null },
+        { type: "addLink", predecessorId: id, followerId: milestone, kind: "FS" },
+      ],
+    });
+    expect(relinked.statusCode).toBe(200);
+    expect(await reload(editor, projectId)).toMatchObject({ links: [{ predecessorId: id, followerId: milestone, kind: "FS" }] });
+    const undo = await t.app.inject({ method: "POST", url: `/api/projects/${projectId}/undo`, headers: { cookie: editor }, payload: { commandId: randomUUID() } });
+    expect(undo.json()).toMatchObject({ skipped: 0 });
+    const after = await reload(editor, projectId);
+    expect(after.links).toEqual([]);
+    expect(after.rows.find((r: { id: string }) => r.id === id)).toMatchObject({ targetId: milestone });
+  });
+
   it("matches spellings only within the board for share-link editors, so other projects' tags stay hidden", async () => {
     const { admin, editor, projectId } = await editorWithProject();
     const secret = (await t.app.inject({ method: "POST", url: "/api/projects", headers: { cookie: editor }, payload: { name: "Secret" } })).json().project.id as string;

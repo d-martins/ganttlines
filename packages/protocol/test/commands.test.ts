@@ -43,6 +43,8 @@ describe("CommandSchema", () => {
       { type: "setTarget", id: A, targetId: null },
       { type: "createTargetMilestone", id: A, newId: B, title: "8.12", parentId: null, afterId: null, start: "2026-11-17" },
       { type: "createRow", id: A, kind: "task", parentId: null, afterId: null, title: "m", milestone: true },
+      { type: "relink", steps: [{ type: "setTarget", id: A, targetId: null }, { type: "addLink", predecessorId: B, followerId: A, kind: "FS" }] },
+      { type: "relink", steps: [{ type: "removeLink", predecessorId: A, followerId: B, kind: "SS", keepPlace: false }, { type: "addLink", predecessorId: A, followerId: B, kind: "FF", lag: 1.5 }] },
     ];
     for (const command of commands) expect(toEngineCommand(CommandSchema.parse(command))).toEqual(command);
   });
@@ -73,6 +75,10 @@ describe("CommandSchema", () => {
       { type: "setTarget", id: A, targetId: "nope" },
       { type: "createTargetMilestone", id: A, newId: B, title: "8.12", parentId: null, afterId: null },
       { type: "createRow", id: A, kind: "task", parentId: null, afterId: null, title: "m", milestone: "yes" },
+      { type: "relink", steps: [] },
+      { type: "relink", steps: [{ type: "setTarget", id: A, targetId: null }] },
+      { type: "relink", steps: [{ type: "setTarget", id: A, targetId: null }, { type: "setTarget", id: B, targetId: null }, { type: "setTarget", id: A, targetId: B }] },
+      { type: "relink", steps: [{ type: "deleteRows", ids: [A] }, { type: "setTarget", id: A, targetId: null }] },
       { type: "setTags", id: A, tags: ["x".repeat(101)] },
       { type: "setTags", id: A, tags: Array.from({ length: 51 }, (_, i) => `t${i}`) },
     ];

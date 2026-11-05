@@ -46,10 +46,15 @@ export function runCommand(board: Pick<BoardContextValue, "sync" | "calendar" | 
   }
   board.sync.submit(command);
   // Your own new aim is what you'd want to see the effect of; someone else's doesn't change your view.
-  if (command.type === "createTargetMilestone" || (command.type === "setTarget" && command.targetId !== null)) {
+  if (startsAnAim(command)) {
     useCriticalPathView.getState().set(board.sync.projectId, true);
   }
   return result.state;
+}
+
+function startsAnAim(command: Command): boolean {
+  if (command.type === "relink") return command.steps.some(startsAnAim);
+  return command.type === "createTargetMilestone" || (command.type === "setTarget" && command.targetId !== null);
 }
 
 export function useRun(): (command: Command) => ProjectState | null {

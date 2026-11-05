@@ -9,6 +9,7 @@ import { ANA, CALENDAR, FakeWebSocket, PROJECT_ID, projectState, section, task }
 import { ADMIN, project, renderApp, screen, signedIn, VIEWER } from "./utils";
 import { placeSuggestions } from "../src/board/panel/suggestion-list";
 import { newMilestonePlace } from "../src/board/slack";
+import { isCriticalPathOn, useCriticalPathView } from "../src/board/critical-path-view";
 import { formatDay } from "../src/board/format";
 
 const ROWS = [
@@ -354,8 +355,13 @@ describe("details panel", () => {
     await user.click(within(panel()).getByRole("button", { name: "Link with #2 ui: change the task" }));
     await user.type(screen.getByRole("combobox", { name: "Find a task to link" }), "docs{Enter}");
     expect(sentCommands().slice(before)).toEqual([
-      { type: "removeLink", predecessorId: "ui", followerId: "hooks", kind: "FS", keepPlace: false },
-      { type: "addLink", predecessorId: "docs", followerId: "hooks", kind: "FS", lag: 2 }, // the delay carries over
+      {
+        type: "relink",
+        steps: [
+          { type: "removeLink", predecessorId: "ui", followerId: "hooks", kind: "FS", keepPlace: false },
+          { type: "addLink", predecessorId: "docs", followerId: "hooks", kind: "FS", lag: 2 }, // the delay carries over
+        ],
+      },
     ]);
     await waitFor(() => expect(within(panel()).getByRole("button", { name: "Link with #5 docs: change the task" })).toHaveFocus());
     expect(within(panel()).queryByRole("button", { name: /^Link with #2 ui/ })).not.toBeInTheDocument();
@@ -367,14 +373,23 @@ describe("details panel", () => {
     await selectRow(user, "hooks");
     await user.click(within(panel()).getByRole("button", { name: "Link with #4 qa: change the task" }));
     await user.type(screen.getByRole("combobox", { name: "Find a task to link" }), "docs{Enter}");
-    expect(sentCommands().slice(-2)).toEqual([
-      { type: "removeLink", predecessorId: "hooks", followerId: "qa", kind: "SS", keepPlace: false },
-      { type: "addLink", predecessorId: "hooks", followerId: "docs", kind: "SS", lag: 1.5 },
-    ]);
+    expect(sentCommands().at(-1)).toEqual({
+      type: "relink",
+      steps: [
+        { type: "removeLink", predecessorId: "hooks", followerId: "qa", kind: "SS", keepPlace: false },
+        { type: "addLink", predecessorId: "hooks", followerId: "docs", kind: "SS", lag: 1.5 },
+      ],
+    });
     // An overlap (FS only) carries over too.
     await user.click(within(panel()).getByRole("button", { name: "Link with #2 ui: change the task" }));
     await user.type(screen.getByRole("combobox", { name: "Find a task to link" }), "qa{Enter}");
-    expect(sentCommands().at(-1)).toEqual({ type: "addLink", predecessorId: "qa", followerId: "hooks", kind: "FS", lag: -1 });
+    expect(sentCommands().at(-1)).toEqual({
+      type: "relink",
+      steps: [
+        { type: "removeLink", predecessorId: "ui", followerId: "hooks", kind: "FS", keepPlace: false },
+        { type: "addLink", predecessorId: "qa", followerId: "hooks", kind: "FS", lag: -1 },
+      ],
+    });
   });
 
   it("goes to the linked task from its picker", async () => {
@@ -568,10 +583,13 @@ describe("details panel", () => {
         await selectRow(user, "soon");
         await user.click(within(aimSection()).getByRole("button", { name: /hooks: change the task/ }));
         await user.type(await screen.findByRole("combobox", { name: "Find a task to aim here" }), "free{Enter}");
-        expect(sentCommands().slice(-2)).toEqual([
-          { type: "setTarget", id: "free", targetId: "soon" }, // the new one first, so a refusal loses nothing
-          { type: "setTarget", id: "hooks", targetId: null },
-        ]);
+        expect(sentCommands().at(-1)).toEqual({
+          type: "relink",
+          steps: [
+            { type: "setTarget", id: "free", targetId: "soon" },
+            { type: "setTarget", id: "hooks", targetId: null },
+          ],
+        });
       });
 
       it("the first dropdown turns it into a link, and a link with a task into aimed by", async () => {
@@ -579,20 +597,42 @@ describe("details panel", () => {
         await selectRow(user, "soon");
         const linkLine = linkLines().find((line) => within(line).queryByRole("button", { name: /ui: change the task/ }))!;
         await user.selectOptions(whenOf(linkLine), "aimed by");
-        expect(sentCommands().slice(-2)).toEqual([
-          { type: "removeLink", predecessorId: "ui", followerId: "soon", kind: "FS" }, // nothing moves
-          { type: "setTarget", id: "ui", targetId: "soon" },
-        ]);
+        expect(sentCommands().at(-1)).toEqual({
+          type: "relink",
+          steps: [
+            { type: "removeLink", predecessorId: "ui", followerId: "soon", kind: "FS" }, // nothing moves
+            { type: "setTarget", id: "ui", targetId: "soon" },
+          ],
+        });
+      });
+
+      it("turning a link into an aim turns Critical path on; turning an aim into a link doesn't", async () => {
+        useCriticalPathView.setState({ on: { [PROJECT_ID]: false }, defaults: {} });
+        try {
+          const { user } = await aimBoard({ targetId: "soon" });
+          await selectRow(user, "soon");
+          await user.selectOptions(whenOf(linkLines()[0]!), "starts after");
+          await waitFor(() => expect(sentCommands().at(-1)).toMatchObject({ type: "relink" }));
+          expect(isCriticalPathOn(PROJECT_ID)).toBe(false);
+          await user.selectOptions(whenOf(linkLines()[0]!), "aimed by");
+          await waitFor(() => expect(sentCommands().at(-1)).toMatchObject({ steps: [{ type: "removeLink" }, { type: "setTarget" }] }));
+          expect(isCriticalPathOn(PROJECT_ID)).toBe(true);
+        } finally {
+          useCriticalPathView.setState({ on: {}, defaults: {} });
+        }
       });
 
       it("the aimed-by line turns into a link", async () => {
         const { user } = await aimBoard({ targetId: "soon" });
         await selectRow(user, "soon");
         await user.selectOptions(whenOf(linkLines()[0]!), "starts after");
-        expect(sentCommands().slice(-2)).toEqual([
-          { type: "setTarget", id: "hooks", targetId: null },
-          { type: "addLink", predecessorId: "hooks", followerId: "soon", kind: "FS" },
-        ]);
+        expect(sentCommands().at(-1)).toEqual({
+          type: "relink",
+          steps: [
+            { type: "setTarget", id: "hooks", targetId: null },
+            { type: "addLink", predecessorId: "hooks", followerId: "soon", kind: "FS" },
+          ],
+        });
       });
 
       it("viewers read the lines", async () => {
@@ -621,10 +661,13 @@ describe("details panel", () => {
     it("the first dropdown turns an aim into a link", async () => {
       const { user } = await aimBoard({ targetId: "later" });
       await user.selectOptions(within(aimSection()).getByRole("combobox", { name: /^Aims for/ }), "starts after");
-      expect(sentCommands().slice(-2)).toEqual([
-        { type: "setTarget", id: "hooks", targetId: null },
-        { type: "addLink", predecessorId: "later", followerId: "hooks", kind: "FS" },
-      ]);
+      expect(sentCommands().at(-1)).toEqual({
+        type: "relink",
+        steps: [
+          { type: "setTarget", id: "hooks", targetId: null },
+          { type: "addLink", predecessorId: "later", followerId: "hooks", kind: "FS" },
+        ],
+      });
     });
 
     it("clicking offers the board's milestones soonest first with dates, undated last, none highlighted", async () => {

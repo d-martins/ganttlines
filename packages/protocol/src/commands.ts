@@ -25,6 +25,10 @@ const lag = z
 const half = z.enum(["morning", "afternoon"]).optional();
 const cmd = <T extends string, S extends z.ZodRawShape>(type: T, shape: S) => z.strictObject({ type: z.literal(type), ...shape });
 
+const setTarget = cmd("setTarget", { id, targetId: id.nullable() });
+const addLink = cmd("addLink", { predecessorId: id, followerId: id, kind: linkKind, lag: lag.optional() });
+const removeLink = cmd("removeLink", { predecessorId: id, followerId: id, kind: linkKind, keepPlace: z.boolean().optional() });
+
 /** Wire schema for every engine row command, bounding what the engine does not. */
 export const CommandSchema = z.discriminatedUnion("type", [
   cmd("createRow", {
@@ -41,7 +45,7 @@ export const CommandSchema = z.discriminatedUnion("type", [
   cmd("setColor", { id, color: z.enum(TASK_COLORS) }),
   /** The task's whole tag list, in order; the engine drops empty and repeated tags. */
   cmd("setTags", { id, tags: z.array(z.string().trim().max(MAX_TAG_LENGTH)).max(MAX_TAGS_PER_TASK) }),
-  cmd("setTarget", { id, targetId: id.nullable() }),
+  setTarget,
   cmd("createTargetMilestone", { id, newId: id, title, parentId: id.nullable(), afterId: id.nullable(), start: date }),
   cmd("setAssignee", { id, resourceId: id.nullable() }),
   cmd("moveTask", { id, start: date, half }),
@@ -50,9 +54,10 @@ export const CommandSchema = z.discriminatedUnion("type", [
   cmd("setActualDuration", { id, days: halfDays.nullable() }),
   cmd("convertMilestone", { id, milestone: z.boolean() }),
   cmd("setLocked", { id, locked: z.boolean() }),
-  cmd("addLink", { predecessorId: id, followerId: id, kind: linkKind, lag: lag.optional() }),
+  addLink,
   cmd("updateLink", { predecessorId: id, followerId: id, kind: linkKind, lag: lag.optional(), newKind: linkKind.optional(), reverse: z.boolean().optional() }),
-  cmd("removeLink", { predecessorId: id, followerId: id, kind: linkKind, keepPlace: z.boolean().optional() }),
+  removeLink,
+  cmd("relink", { steps: z.array(z.discriminatedUnion("type", [setTarget, addLink, removeLink])).length(2) }),
   cmd("indent", { id }),
   cmd("outdent", { id }),
   cmd("moveRow", { id, parentId: id.nullable(), afterId: id.nullable() }),
