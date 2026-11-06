@@ -86,12 +86,23 @@ describe("details panel", () => {
   });
   afterEach(() => vi.useRealTimers());
 
-  it("opens when a row is selected, edits fields, closes with Escape and gives focus back to the row", async () => {
+  it("opens when a row is selected, closes with Escape and gives focus back to the row", async () => {
     const { user } = await panelBoard();
     expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
     await selectRow(user, "hooks");
     expect(panel()).toHaveAccessibleName("Details of “hooks”");
     expect(panel()).not.toHaveFocus(); // the list keeps the keyboard
+    within(panel()).getByRole("button", { name: "Close details (Esc)" }).focus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument(); // closed: hidden and inert while it slides out
+    expect(screen.getByRole("button", { name: "Title “hooks”" })).toHaveFocus();
+    await selectRow(user, "ui");
+    expect(panel()).toHaveAccessibleName("Details of “ui”"); // selecting again reopens it
+  });
+
+  it("edits the title and the working days", async () => {
+    const { user } = await panelBoard();
+    await selectRow(user, "hooks");
     const title = within(panel()).getByRole("textbox", { name: "Task title" });
     await user.clear(title);
     await user.type(title, "Hooks v2{Enter}");
@@ -100,18 +111,22 @@ describe("details panel", () => {
     await user.clear(days);
     await user.type(days, "4{Enter}");
     expect(sentCommands().at(-1)).toEqual({ type: "setDuration", id: "hooks", duration: 4 });
+  });
+
+  it("adds a link", async () => {
+    const { user } = await panelBoard();
+    await selectRow(user, "hooks");
     await user.click(within(panel()).getByRole("button", { name: "Add link" }));
     await user.type(screen.getByRole("combobox", { name: "Find a task to link" }), "ui{Enter}");
     expect(sentCommands().at(-1)).toEqual({ type: "addLink", predecessorId: "ui", followerId: "hooks", kind: "FS" });
+  });
+
+  it("saves the description on leaving it", async () => {
+    const { user } = await panelBoard();
+    await selectRow(user, "hooks");
     await user.type(within(panel()).getByRole("textbox", { name: "Description" }), "Billing events");
-    await user.click(title); // leaving the description saves it
+    await user.click(within(panel()).getByRole("textbox", { name: "Task title" }));
     expect(sentCommands().at(-1)).toEqual({ type: "setDescription", id: "hooks", description: "Billing events" });
-    within(panel()).getByRole("button", { name: "Close details (Esc)" }).focus();
-    await user.keyboard("{Escape}");
-    expect(screen.queryByRole("complementary")).not.toBeInTheDocument(); // closed: hidden and inert while it slides out
-    expect(screen.getByRole("button", { name: "Title “Hooks v2”" })).toHaveFocus();
-    await selectRow(user, "ui");
-    expect(panel()).toHaveAccessibleName("Details of “ui”"); // selecting again reopens it
   });
 
   it("puts the description first and edits it as formatted text, saved as Markdown", async () => {

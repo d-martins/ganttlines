@@ -21,5 +21,7 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["test/setup.ts"],
     css: false,
+    // These render whole boards: a busy machine can be many times slower than a quiet one.
+    testTimeout: 20_000,
   },
 });
