@@ -22,7 +22,10 @@ export function TaskPicker({
   open,
   onOpenChange,
   footer,
+  noteOf,
 }: {
+  /** said next to a task, such as what choosing it would replace */
+  noteOf?: (row: TaskRow) => string | undefined;
   exclude: (row: Row) => boolean;
   onPick: (id: RowId) => void;
   state: ProjectState;
@@ -46,7 +49,7 @@ export function TaskPicker({
       .map((row) => ({
         key: row.id,
         label: `#${numberOf(row.id)} ${row.title || "Untitled"}`,
-        ...(datesOf(schedule, row.id) ? { detail: datesOf(schedule, row.id)! } : {}),
+        ...(datesOf(schedule, row.id) || noteOf?.(row) ? { detail: [noteOf?.(row), datesOf(schedule, row.id)].filter(Boolean).join(" · ") } : {}),
         onChoose: () => onPick(row.id),
       }));
   };

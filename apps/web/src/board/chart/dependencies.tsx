@@ -1,4 +1,4 @@
-import { useCriticalLinks } from "../slack";
+import { useCriticalInterruptions, useCriticalLinks } from "../slack";
 import { linkKey, type LinkKind } from "@ganttlines/engine";
 import type { BoardModel, BoardRow } from "../model";
 import type { BarStyle } from "../view-store";
@@ -76,7 +76,8 @@ export function Dependencies({
   const critical = rows.some((entry) => entry.fromBaseline) ? NOT_CRITICAL : liveCritical;
   const index = new Map(rows.map((entry, i) => [entry.row.id, i]));
   const hovered = useHoveredRow((store) => store.id);
-  const interruptions: { key: string; d: string }[] = [];
+  const tightInterruptions = useCriticalInterruptions();
+  const interruptions: { key: string; d: string; critical: boolean }[] = [];
   if (hovered !== null) {
     rows.forEach((entry, to) => {
       if (entry.row.kind !== "task" || !entry.span) return;
@@ -89,7 +90,9 @@ export function Dependencies({
         const direction = to >= from ? 1 : -1;
         const top = y(from) + direction * halfHeight(shapeOf(by), style);
         const bottom = y(to) - direction * halfHeight(shapeOf(entry), style);
-        const line = (x: number, end: string) => interruptions.push({ key: `${byId}-${entry.row.id}-${x}-${end}`, d: `M${x},${top} V${bottom}` });
+        const critical = !entry.fromBaseline && tightInterruptions.has(`${byId}|${entry.row.id}`);
+        const before = interruptions.length;
+        const line = (x: number, end: string) => interruptions.push({ key: `${byId}-${entry.row.id}-${x}-${end}`, d: `M${x},${top} V${bottom}`, critical });
         const boxes = entry.parts.map((part) => extent(entry.kind, part, timeline, style));
         // Down each edge of a gap to what's running in it: a pair for each part of the interrupting task.
         boxes.slice(1).forEach((after, i) => {
@@ -101,6 +104,11 @@ export function Dependencies({
             line(Math.min(box.right, gap.right), "end");
           }
         });
+        // Not in a gap yet, but one slip from pushing this task past its limit: that's worth seeing.
+        if (critical && interruptions.length === before) {
+          const [ending, starting] = [extent(by.kind, by.span, timeline, style).right, boxes[0]!.left];
+          interruptions.push({ key: `${byId}-${entry.row.id}-tight`, d: `M${ending},${y(from)} L${starting},${y(to)}`, critical });
+        }
       }
     });
   }
@@ -132,7 +140,16 @@ export function Dependencies({
         </marker>
       </defs>
       {interruptions.map((path) => (
-        <path key={path.key} data-testid="interruption" d={path.d} fill="none" stroke="var(--dependency)" strokeWidth={1.25} strokeDasharray="4 3" />
+        <path
+          key={path.key}
+          data-testid="interruption"
+          data-critical={path.critical || undefined}
+          d={path.d}
+          fill="none"
+          stroke={dependencyColor({ violation: false, critical: path.critical, fromBaseline: false })}
+          strokeWidth={1.25}
+          strokeDasharray="4 3"
+        />
       ))}
       {paths.map((path) => (
         <path

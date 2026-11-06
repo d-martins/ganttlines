@@ -8,7 +8,7 @@ export function formatSlack(halves: number): string {
   return `${halves < 0 ? "\u2212" : ""}${days} ${days === 1 ? "day" : "days"}`;
 }
 
-const NOTHING: SlackAnalysis = { slack: new Map(), critical: new Set(), pastTarget: new Set() };
+const NOTHING: SlackAnalysis = { slack: new Map(), critical: new Set(), pastTarget: new Set(), criticalInterruptions: new Set() };
 
 /** Worked out once per version of the board, however many parts of the page ask. */
 const analyses = new WeakMap<ProjectState, { calendar: Calendar; schedule: Schedule | null; analysis?: SlackAnalysis }>();
@@ -54,6 +54,13 @@ export function useCriticalLinks(): ReadonlySet<LinkKey> {
   const { state, calendar, sync } = useBoard();
   const on = useCriticalPath(sync.projectId);
   return on ? slackAnalysis(state, calendar).critical : NOTHING.critical;
+}
+
+/** With Critical path on: the interruptions with no room, as `interrupter|interrupted`. */
+export function useCriticalInterruptions(): ReadonlySet<string> {
+  const { state, calendar, sync } = useBoard();
+  const on = useCriticalPath(sync.projectId);
+  return on ? slackAnalysis(state, calendar).criticalInterruptions : NOTHING.criticalInterruptions;
 }
 
 /** Where a milestone made on the go lands: right after the last one being aimed at, else at the end of the board. */

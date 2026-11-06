@@ -56,6 +56,12 @@ export class Calendar {
     for (const [resourceId, off] of this.resourceOff) dropLongRuns(off, (day) => !this.isWorkingDay(day, resourceId));
   }
 
+  /** The holidays and time off of this resource that fall on working weekdays, in order. */
+  offDays(resourceId: ResourceId | null): readonly DayNum[] {
+    const own = resourceId === null ? undefined : this.resourceOff.get(resourceId);
+    return [...new Set([...this.teamOff, ...(own ?? [])])].filter((day) => !this.isRestDay(day)).sort((a, b) => a - b);
+  }
+
   /** A day of the week nobody works: a weekend, not a holiday or time off. */
   isRestDay(day: DayNum): boolean {
     return !this.weekdays.has(weekday(day));

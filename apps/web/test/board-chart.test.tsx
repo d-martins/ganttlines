@@ -924,16 +924,31 @@ describe("tags in the bar's menu", () => {
     expect(swatches.at(-1)).toHaveFocus(); // the arrows pass over the tag box
   });
 
+  it("Tab reaches each tag's × after the box, then goes back to the menu", async () => {
+    const { user, menu } = await chartBoard(TAGGED).then(async (app) => {
+      screen.getByRole("button", { name: "Options for “ui”" }).focus();
+      await app.user.keyboard("{Enter}");
+      return { ...app, menu: await screen.findByRole("menu") };
+    });
+    const removes = within(menu).queryAllByRole("button", { name: /^Remove the tag/ });
+    expect(removes.length).toBeGreaterThan(0);
+    await waitFor(() => expect(within(menu).getAllByRole("menuitemradio")[0]).toHaveFocus());
+    await user.keyboard("{Tab}{Tab}");
+    expect(removes[0]).toHaveFocus();
+    for (let step = 0; step < removes.length; step++) await user.keyboard("{Tab}");
+    expect(document.activeElement).toHaveAttribute("role", "menuitemradio");
+  });
+
   it("Tab goes from the menu's items to the box and back", async () => {
     const { user, menu, input } = await openMenu();
     await user.keyboard("{Tab}");
     expect(input).toHaveFocus();
-    await user.keyboard("{Tab}");
+    for (let step = 0; step <= within(menu).queryAllByRole("button", { name: /^Remove the tag/ }).length; step++) await user.keyboard("{Tab}");
     expect(input).not.toHaveFocus();
     expect(menu.contains(document.activeElement)).toBe(true);
     expect(document.activeElement).toHaveAttribute("role", "menuitemradio");
     await user.keyboard("{Shift>}{Tab}{/Shift}");
-    expect(input).toHaveFocus();
+    expect(within(menu).queryAllByRole("button", { name: /^Remove the tag/ }).at(-1) ?? input).toHaveFocus();
     expect(screen.getByRole("menu")).toBe(menu);
   });
 

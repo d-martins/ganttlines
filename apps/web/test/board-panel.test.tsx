@@ -756,6 +756,14 @@ describe("details panel", () => {
         expect(lastCommand()).toEqual({ type: "setTarget", id: "hooks", targetId: null });
       });
 
+      it("the picker says when a task would stop aiming elsewhere", async () => {
+        const { user } = await aimBoard({ targetId: "soon" }, ADMIN, [task("free", { parentId: "x", position: "a5", userStart: "2026-10-12", targetId: "later" })]);
+        await selectRow(user, "soon");
+        await user.click(within(aimSection()).getByRole("button", { name: /hooks: change the task/ }));
+        await screen.findByRole("combobox", { name: "Find a task to aim here" });
+        expect(screen.getByRole("option", { name: /free/ })).toHaveTextContent("Instead of later");
+      });
+
       it("changing the task moves the aim to the new one", async () => {
         const { user } = await aimBoard({ targetId: "soon" }, ADMIN, [task("free", { parentId: "x", position: "a5", userStart: "2026-10-12" })]);
         await selectRow(user, "soon");
@@ -862,6 +870,12 @@ describe("details panel", () => {
       );
       await selectRow(user, "feature");
       expect(within(aimSection()).getByText("4 days to spare")).toBeInTheDocument();
+    });
+
+    it("the milestone picker says what it would replace", async () => {
+      const { user } = await aimBoard({ targetId: "later" });
+      await user.click(within(aimSection()).getByRole("button", { name: /change the milestone/ }));
+      expect(within(aimSection()).getByRole("combobox", { name: "Aims for: choose a milestone" })).toHaveAttribute("placeholder", "Instead of later");
     });
 
     it("keeps the keyboard's place: after picking on the line, and after ×", async () => {
@@ -1043,6 +1057,27 @@ describe("details panel", () => {
     const tagInput = () => within(tagSection()).getByRole("combobox", { name: "Add tag" });
     const chips = () => within(tagSection()).queryAllByRole("listitem").map((item) => item.querySelector("[data-tag]")!.textContent);
     const lastSetTags = () => sentCommands().filter((command) => command.type === "setTags").at(-1);
+
+    it("offers what you last used first", async () => {
+      localStorage.setItem("gp.recentTags", JSON.stringify(["Zebra"]));
+      try {
+        const { user } = await tagsBoard([], ADMIN, ["Apple", "Zebra"]);
+        await user.click(tagInput());
+        const options = await within(await screen.findByRole("listbox", { name: "Tags to add" })).findAllByRole("option");
+        await waitFor(() => expect(options.map((option) => option.textContent)).toContain("Zebra"));
+        expect(within(screen.getByRole("listbox", { name: "Tags to add" })).getAllByRole("option")[0]).toHaveTextContent("Zebra");
+      } finally {
+        localStorage.removeItem("gp.recentTags");
+      }
+    });
+
+    it("adding one remembers it", async () => {
+      localStorage.removeItem("gp.recentTags");
+      const { user } = await tagsBoard();
+      await user.type(tagInput(), "Fresh{Enter}");
+      expect(JSON.parse(localStorage.getItem("gp.recentTags")!)).toEqual(["Fresh"]);
+      localStorage.removeItem("gp.recentTags");
+    });
 
     it("sits above Links and Interruptions: a borderless Add tag until focused", async () => {
       const { user } = await tagsBoard();

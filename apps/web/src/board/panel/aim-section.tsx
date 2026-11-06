@@ -133,7 +133,7 @@ export function AimPicker({ task, state, schedule, numbers, run, onDone, onCreat
         aria-expanded={showList}
         aria-controls={listId}
         aria-activedescendant={showList && active >= 0 ? `${listId}-${active}` : undefined}
-        placeholder="Pick or name a milestone"
+        placeholder={task.targetId !== null && state.rows[task.targetId] ? `Instead of ${state.rows[task.targetId]!.title || "Untitled"}` : "Pick or name a milestone"}
         value={text}
         onChange={(event) => {
           setText(event.target.value);

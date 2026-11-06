@@ -1,5 +1,5 @@
 import type { Calendar, ResourceId } from "./calendar";
-import { dayOf, halfDay, toDay, type HalfDay } from "./date";
+import { dayOf, halfDay, isAfternoon, toDay, type DayNum, type HalfDay } from "./date";
 import { isFinishLink, linkKey, type Link, type LinkKey } from "./links";
 import type { ProjectState, Row, RowId, TaskRow } from "./model";
 import { layOutWork, partsOf, visibleParts } from "./parts";
@@ -33,44 +33,59 @@ function targetOf(state: ProjectState, row: Row, rowCount: number): RowId | null
 }
 
 /** Working half days on one calendar, counted up front: slack asks for them thousands of times. */
-class Clock {
-  private readonly counts: Int32Array;
-  private readonly working: HalfDay[] = [];
+export class Clock {
+  /** working days in a week, and in it before each day of it */
+  private readonly perWeek: number;
+  private readonly upTo: number[] = [0];
+  private readonly off: readonly DayNum[];
 
   constructor(
     private readonly calendar: Calendar,
     private readonly resource: ResourceId | null,
-    private readonly from: HalfDay,
-    to: HalfDay,
   ) {
-    this.counts = new Int32Array(to - from + 1);
-    for (let half = from; half <= to; half++) {
-      if (calendar.isWorkingDay(dayOf(half), resource)) this.working.push(half);
-      this.counts[half - from] = this.working.length;
+    for (let day = 0; day < 7; day++) this.upTo.push(this.upTo[day]! + (calendar.isRestDay(day) ? 0 : 1));
+    this.perWeek = this.upTo[7]!;
+    this.off = calendar.offDays(resource);
+  }
+
+  /** Working days before `day`, counted from anywhere fixed: only differences mean anything. */
+  private daysBefore(day: DayNum): number {
+    const week = Math.floor(day / 7);
+    let [low, high] = [0, this.off.length];
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (this.off[middle]! < day) low = middle + 1;
+      else high = middle;
     }
+    return week * this.perWeek + this.upTo[day - week * 7]! - low;
   }
 
-  private covers(half: HalfDay): boolean {
-    return half - 1 >= this.from && half - this.from < this.counts.length;
-  }
-
+  /** Working half days up to and including `half`. */
   private countTo(half: HalfDay): number {
-    return this.counts[half - this.from]!;
+    const day = dayOf(half);
+    return this.daysBefore(day) * 2 + (this.calendar.isWorkingDay(day, this.resource) ? (isAfternoon(half) ? 2 : 1) : 0);
   }
 
   /** As `Calendar.workingHalvesBetween`. */
   between(from: HalfDay, to: HalfDay): number {
-    if (!this.covers(from) || !this.covers(to)) return this.calendar.workingHalvesBetween(from, to, this.resource);
     return to >= from ? this.countTo(to) - this.countTo(from) : this.countTo(to - 1) - this.countTo(from - 1);
   }
 
-  /** As `Calendar.addWorkingHalves`, from a working half day. */
+  /** As `Calendar.addWorkingHalves`, from where `half` snaps to. */
   add(half: HalfDay, n: number): HalfDay {
-    if (this.covers(half) && this.calendar.isWorkingDay(dayOf(half), this.resource)) {
-      const moved = this.working[this.countTo(half) - 1 + n];
-      if (moved !== undefined) return moved;
+    const target = this.countTo(this.calendar.snapHalf(half, this.resource)) + n;
+    // The first day whose work reaches the target.
+    let step = Math.max(Math.abs(n), 14);
+    let low = dayOf(half) - step;
+    let high = dayOf(half) + step;
+    while (this.daysBefore(low + 1) * 2 >= target) low -= (step *= 2);
+    while (this.daysBefore(high + 1) * 2 < target) high += (step *= 2);
+    while (high - low > 1) {
+      const middle = Math.floor((low + high) / 2);
+      if (this.daysBefore(middle + 1) * 2 >= target) high = middle;
+      else low = middle;
     }
-    return this.calendar.addWorkingHalves(this.calendar.snapHalf(half, this.resource), n, this.resource);
+    return halfDay(high, target - this.daysBefore(high) * 2 === 2);
   }
 }
 
@@ -85,6 +100,8 @@ export interface SlackAnalysis {
   critical: ReadonlySet<LinkKey>;
   /** tasks past their own target, directly or by inheritance, and the parents of those */
   pastTarget: ReadonlySet<RowId>;
+  /** interruptions with no room, as `interrupter|interrupted`: its slipping would push that task past its limit */
+  criticalInterruptions: ReadonlySet<string>;
 }
 
 /** The earliest and latest subtask edges under a parent, with the runners-up for when the first moves. */
@@ -109,7 +126,8 @@ export function analyseSlack(state: ProjectState, calendar: Calendar, schedule: 
   const slack = new Map<RowId, Slack>();
   const linkRoom = new Map<LinkKey, number>();
   const pastTarget = new Set<RowId>();
-  if (spans.length === 0) return { slack, critical: new Set(), pastTarget };
+  const criticalInterruptions = new Set<string>();
+  if (spans.length === 0) return { slack, critical: new Set(), pastTarget, criticalInterruptions };
 
   const earliest = Math.min(...spans.map(spanStart));
   const boardEnd = Math.max(...spans.map(spanEnd));
@@ -117,7 +135,7 @@ export function analyseSlack(state: ProjectState, calendar: Calendar, schedule: 
   const clocks = new Map<ResourceId | null, Clock>();
   const clockOf = (resource: ResourceId | null): Clock => {
     let clock = clocks.get(resource);
-    if (!clock) clocks.set(resource, (clock = new Clock(calendar, resource, earliest - reach - 400, boardEnd + reach + 400)));
+    if (!clock) clocks.set(resource, (clock = new Clock(calendar, resource)));
     return clock;
   };
 
@@ -266,7 +284,9 @@ export function analyseSlack(state: ProjectState, calendar: Calendar, schedule: 
       for (let k = first; k <= last && layouts < MAX_SCAN_LAYOUTS; k += stride) {
         layouts++;
         if (endWith(other, row.id, k) <= latest) continue;
-        offer({ halves: Math.max(k === first ? k - 1 : k - stride, Math.min(0, own?.halves ?? 0)), limit });
+        const room = Math.max(k === first ? k - 1 : k - stride, Math.min(0, own?.halves ?? 0));
+        if (room <= 0) criticalInterruptions.add(`${row.id}|${other.id}`);
+        offer({ halves: room, limit });
         break;
       }
     }
@@ -325,7 +345,7 @@ export function analyseSlack(state: ProjectState, calendar: Calendar, schedule: 
     }
     if (tightest) slack.set(parent.id, tightest);
   }
-  return { slack, critical: new Set([...linkRoom].filter(([, room]) => room <= 0).map(([key]) => key)), pastTarget };
+  return { slack, critical: new Set([...linkRoom].filter(([, room]) => room <= 0).map(([key]) => key)), pastTarget, criticalInterruptions };
 }
 
 /**

@@ -118,6 +118,8 @@ export function ChartRows({
     if (!canEdit || event.button !== 0 || !entry.span) return;
     event.preventDefault();
     event.stopPropagation();
+    // Stopping the press here keeps it from an open menu, which would have closed on it.
+    setLinkChoice(null);
     const pressed = event.currentTarget as HTMLElement;
     const body = pressed.closest("[data-chart-body]") as HTMLElement;
     const span = entry.span;

@@ -170,6 +170,8 @@ export function LinksSection({
     : [];
   const canAimHere = (row: Row) => row.kind === "task" && row.id !== task.id && row.targetId !== task.id && !isValidTarget(state, row.id);
   const aimWords = isTarget ? WHEN_OR_AIMED : WHEN_OR_AIM;
+  /** Aiming this task here would end its aim for something else. */
+  const replacedAim = (row: TaskRow) => (row.targetId !== null && state.rows[row.targetId] ? `Instead of ${state.rows[row.targetId]!.title || "Untitled"}` : undefined);
   const otherOf = (link: Link) => (link.followerId === task.id ? link.predecessorId : link.followerId);
   const links = [...linksInto(state, task.id), ...linksOutOf(state, task.id)]
     .map((link) => ({ link, key: linkKey(link) }))
@@ -389,6 +391,7 @@ export function LinksSection({
               schedule={schedule}
               numbers={numbers}
               exclude={(row) => !canAimHere(row)}
+              noteOf={replacedAim}
               onWhen={(when) => aimAsLink(aimer.id, aimer.id, when)}
               onTask={(otherId) => changeAimer(aimer, otherId)}
               onGo={() => select(aimer.id)}
@@ -467,6 +470,7 @@ export function LinksSection({
               />
               <TaskPicker
                 exclude={(row) => !canAimHere(row)}
+                noteOf={replacedAim}
                 onPick={(otherId) => {
                   if (run({ type: "setTarget", id: otherId, targetId: task.id }) !== null) setDraft(null);
                 }}
@@ -727,11 +731,13 @@ function AimedByLine({
   schedule,
   numbers,
   exclude,
+  noteOf,
   onWhen,
   onTask,
   onGo,
   onRemove,
 }: {
+  noteOf: (row: TaskRow) => string | undefined;
   aimer: TaskRow;
   name: string;
   result: { text: string; late: boolean } | null;
@@ -758,6 +764,7 @@ function AimedByLine({
         />
         <TaskPicker
           exclude={exclude}
+          noteOf={noteOf}
           onPick={onTask}
           state={state}
           schedule={schedule}
