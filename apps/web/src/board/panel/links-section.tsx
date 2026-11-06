@@ -341,7 +341,7 @@ export function LinksSection({
       <ul aria-label="Links" className="flex flex-col gap-1 text-sm">
         {aimLine}
         {aimers.map((aimer) => {
-          const result = standing({ task: aimer, calendar, schedule }, task.id);
+          const result = standing({ task: aimer, state, calendar, schedule }, task.id);
           return (
             <li key={aimer.id} className="flex flex-col gap-0.5">
               <span>
@@ -384,7 +384,7 @@ export function LinksSection({
               key={aimer.id}
               aimer={aimer}
               name={nameOf(aimer.id)}
-              result={standing({ task: aimer, calendar, schedule }, task.id)}
+              result={standing({ task: aimer, state, calendar, schedule }, task.id)}
               state={state}
               schedule={schedule}
               numbers={numbers}

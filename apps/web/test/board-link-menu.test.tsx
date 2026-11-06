@@ -15,26 +15,26 @@ const login = () => task("login", { title: "Fix login", position: "a1", userStar
 const cutoff = () => task("cutoff", { title: "8.10", position: "a2", userStart: "2026-10-23", duration: 0 });
 
 describe("optionsFor", () => {
-  it("offers the four links as sentences, then the interruption", () => {
+  it("reads from the task dragged: the four links as sentences, then the interruption", () => {
     const options = optionsFor(rowsOf(hotfix(), login()), cal, "hotfix", "login");
     expect(options.map((option) => option.label)).toEqual([
-      "Fix login starts after Hotfix finishes",
-      "Fix login starts when Hotfix starts",
-      "Fix login finishes when Hotfix finishes",
-      "Fix login finishes when Hotfix starts",
-      "Hotfix interrupts Fix login",
-    ]);
-    expect(options[4]).toMatchObject({ note: "Fix login stops while Hotfix runs", command: { type: "addInterruption", id: "login", byId: "hotfix" } });
-    expect(options[0]!.command).toEqual({ type: "addLink", predecessorId: "hotfix", followerId: "login", kind: "FS" });
-    expect(options[3]!.command).toEqual({ type: "addLink", predecessorId: "hotfix", followerId: "login", kind: "SF" });
-  });
-
-  it("the other way round rereads every line", () => {
-    expect(optionsFor(rowsOf(hotfix(), login()), cal, "login", "hotfix").map((option) => option.label)).toEqual([
       "Hotfix starts after Fix login finishes",
       "Hotfix starts when Fix login starts",
       "Hotfix finishes when Fix login finishes",
       "Hotfix finishes when Fix login starts",
+      "Hotfix interrupts Fix login",
+    ]);
+    expect(options[4]).toMatchObject({ note: "Fix login stops while Hotfix runs", command: { type: "addInterruption", id: "login", byId: "hotfix" } });
+    expect(options[0]!.command).toEqual({ type: "addLink", predecessorId: "login", followerId: "hotfix", kind: "FS" });
+    expect(options[3]!.command).toEqual({ type: "addLink", predecessorId: "login", followerId: "hotfix", kind: "SF" });
+  });
+
+  it("the other way round rereads every line", () => {
+    expect(optionsFor(rowsOf(hotfix(), login()), cal, "login", "hotfix").map((option) => option.label)).toEqual([
+      "Fix login starts after Hotfix finishes",
+      "Fix login starts when Hotfix starts",
+      "Fix login finishes when Hotfix finishes",
+      "Fix login finishes when Hotfix starts",
       "Fix login interrupts Hotfix",
     ]);
   });
@@ -42,7 +42,9 @@ describe("optionsFor", () => {
   it("a task and a milestone: aiming first, nothing to interrupt", () => {
     const options = optionsFor(rowsOf(login(), cutoff()), cal, "login", "cutoff");
     expect(options[0]).toMatchObject({ label: "Fix login aims for 8.10", note: "Never moves the milestone", command: { type: "setTarget", id: "login", targetId: "cutoff" } });
-    expect(options[1]).toMatchObject({ label: "8.10 starts after Fix login finishes", note: "The milestone moves if Fix login is late" });
+    expect(options[1]).toMatchObject({ label: "Fix login starts after 8.10 finishes" });
+    expect(options[1]).not.toHaveProperty("note");
+    expect(optionsFor(rowsOf(login(), cutoff()), cal, "cutoff", "login")[1]).toMatchObject({ label: "8.10 starts after Fix login finishes", note: "The milestone moves if Fix login is late" });
     expect(options.some((option) => /interrupts/.test(option.label))).toBe(false);
     expect(optionsFor(rowsOf(login(), cutoff()), cal, "cutoff", "login")[0]).toMatchObject({ label: "Fix login aims for 8.10" });
   });
@@ -53,9 +55,11 @@ describe("optionsFor", () => {
   });
 
   it("marks what the board would refuse, with why", () => {
-    const options = optionsFor(rowsOf(hotfix(), task("login", { title: "Fix login", position: "a1", userStart: "2026-10-12", duration: 2, interruptedBy: ["hotfix"] })), cal, "hotfix", "login");
+    const state = rowsOf(hotfix(), task("login", { title: "Fix login", position: "a1", userStart: "2026-10-12", duration: 2, interruptedBy: ["hotfix"] }));
+    const options = optionsFor(state, cal, "hotfix", "login");
     expect(options.at(-1)!.refused).toBe("That task already interrupts this one");
-    expect(options[0]!.refused).toBeUndefined();
+    expect(options[0]!.refused).toBe("That would create a dependency cycle"); // Fix login already stops for Hotfix
+    expect(optionsFor(state, cal, "login", "hotfix")[0]!.refused).toBeUndefined();
   });
 
   it("stays quick on a large board", () => {
@@ -101,7 +105,7 @@ describe("the one handle and the menu", () => {
     await board([hotfix(), login()]);
     dropOn("Hotfix", 1);
     expect(await screen.findByRole("menu", { name: "Link Hotfix and Fix login" })).toBeInTheDocument();
-    expect(items()[1]).toHaveTextContent("Fix login starts after Hotfix finishes"); // after Swap
+    expect(items()[1]).toHaveTextContent("Hotfix starts after Fix login finishes"); // after Swap
     expect(sentCommands()).toEqual([]);
   });
 
@@ -118,7 +122,7 @@ describe("the one handle and the menu", () => {
     await screen.findByRole("menu");
     await waitFor(() => expect(items()[1]).toHaveFocus());
     await user.keyboard("{Enter}");
-    await waitFor(() => expect(sentCommands().at(-1)).toEqual({ type: "addLink", predecessorId: "hotfix", followerId: "login", kind: "FS" }));
+    await waitFor(() => expect(sentCommands().at(-1)).toEqual({ type: "addLink", predecessorId: "login", followerId: "hotfix", kind: "FS" }));
   });
 
   it("Swap flips the direction", async () => {
@@ -126,9 +130,9 @@ describe("the one handle and the menu", () => {
     await board([hotfix(), login()]);
     dropOn("Hotfix", 1);
     await user.click(await screen.findByRole("menuitem", { name: /Swap/ }));
-    expect(items()[1]).toHaveTextContent("Hotfix starts after Fix login finishes");
+    expect(items()[1]).toHaveTextContent("Fix login starts after Hotfix finishes");
     await user.click(items()[1]!);
-    await waitFor(() => expect(sentCommands().at(-1)).toEqual({ type: "addLink", predecessorId: "login", followerId: "hotfix", kind: "FS" }));
+    await waitFor(() => expect(sentCommands().at(-1)).toEqual({ type: "addLink", predecessorId: "hotfix", followerId: "login", kind: "FS" }));
   });
 
   it("a refused option is disabled and says why", async () => {
@@ -152,7 +156,7 @@ describe("the one handle and the menu", () => {
     // Radix focuses an item as the pointer moves over it, before the move reaches the menu.
     const first = items()[1]!;
     fireEvent.pointerMove(first);
-    expect(useChartDrag.getState().drag?.command).toEqual({ type: "addLink", predecessorId: "hotfix", followerId: "login", kind: "FS" });
+    expect(useChartDrag.getState().drag?.command).toEqual({ type: "addLink", predecessorId: "login", followerId: "hotfix", kind: "FS" });
     fireEvent.pointerMove(option);
     expect(useChartDrag.getState().drag?.command).toEqual({ type: "addInterruption", id: "login", byId: "hotfix" });
     expect([trigger.style.left, trigger.style.top]).toEqual(position);
@@ -182,6 +186,6 @@ describe("the one handle and the menu", () => {
     await screen.findByRole("menu");
     await waitFor(() => expect(items()[1]).toHaveFocus());
     await user.keyboard("{ArrowDown}");
-    await waitFor(() => expect(useChartDrag.getState().drag?.command).toEqual({ type: "addLink", predecessorId: "hotfix", followerId: "login", kind: "SS" }));
+    await waitFor(() => expect(useChartDrag.getState().drag?.command).toEqual({ type: "addLink", predecessorId: "login", followerId: "hotfix", kind: "SS" }));
   });
 });

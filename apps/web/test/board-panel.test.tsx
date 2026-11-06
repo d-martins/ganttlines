@@ -829,6 +829,41 @@ describe("details panel", () => {
       expect(within(lines[0]!).getByText(/2 days late/)).toBeInTheDocument();
     });
 
+    it("a parent reads by its work, not a milestone inside it", async () => {
+      const { user } = await panelBoard(
+        [
+          ROWS[0]!,
+          task("feature", { parentId: "x", position: "a1", userStart: "2026-11-09", targetId: "cutoff" }),
+          task("work", { parentId: "feature", position: "a0", userStart: "2026-11-09", duration: 3 }),
+          task("yo", { parentId: "feature", position: "a1", userStart: "2026-11-17", startsAfternoon: true, duration: 1 }),
+          task("demo", { parentId: "feature", position: "a2", userStart: "2026-11-20", duration: 0 }),
+          task("cutoff", { parentId: "x", position: "a3", userStart: "2026-11-17", duration: 0 }),
+        ],
+        ADMIN,
+        [],
+        [],
+      );
+      await selectRow(user, "feature");
+      expect(within(aimSection()).getByText(new RegExp(`^0\\.5 days late: finishes ${formatDay(toDay("2026-11-18"))}, milestone is ${formatDay(toDay("2026-11-17"))}$`))).toBeInTheDocument();
+    });
+
+    it("a parent whose work is in time has days to spare, whatever a milestone inside it says", async () => {
+      const { user } = await panelBoard(
+        [
+          ROWS[0]!,
+          task("feature", { parentId: "x", position: "a1", userStart: "2026-11-09", targetId: "cutoff" }),
+          task("work", { parentId: "feature", position: "a0", userStart: "2026-11-09", duration: 3 }),
+          task("demo", { parentId: "feature", position: "a2", userStart: "2026-11-20", duration: 0 }),
+          task("cutoff", { parentId: "x", position: "a3", userStart: "2026-11-17", duration: 0 }),
+        ],
+        ADMIN,
+        [],
+        [],
+      );
+      await selectRow(user, "feature");
+      expect(within(aimSection()).getByText("4 days to spare")).toBeInTheDocument();
+    });
+
     it("keeps the keyboard's place: after picking on the line, and after ×", async () => {
       const { user } = await aimBoard({ targetId: "later" });
       await user.click(within(aimSection()).getByRole("button", { name: /change the milestone/ }));

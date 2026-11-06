@@ -26,7 +26,7 @@ const LINK_WORDS: readonly { kind: LinkKind; sentence: (follower: string, predec
   { kind: "SF", sentence: (follower, predecessor) => `${follower} finishes when ${predecessor} starts` },
 ];
 
-/** What dropping `fromId` on `toId` could mean, in that direction; the first is what Enter takes. */
+/** What dropping `fromId` on `toId` could mean, read from the task dragged; the first is what Enter takes. */
 export function optionsFor(state: ProjectState, calendar: Calendar, fromId: RowId, toId: RowId): LinkOption[] {
   const [from, to] = [state.rows[fromId], state.rows[toId]];
   if (from?.kind !== "task" || to?.kind !== "task") return [];
@@ -44,9 +44,9 @@ export function optionsFor(state: ProjectState, calendar: Calendar, fromId: RowI
   }
   for (const { kind, sentence } of LINK_WORDS) {
     options.push({
-      label: sentence(toName, fromName),
-      ...(kind === "FS" && toMilestone && !fromMilestone ? { note: `The milestone moves if ${fromName} is late` } : {}),
-      command: { type: "addLink", predecessorId: fromId, followerId: toId, kind },
+      label: sentence(fromName, toName),
+      ...(kind === "FS" && fromMilestone && !toMilestone ? { note: `The milestone moves if ${toName} is late` } : {}),
+      command: { type: "addLink", predecessorId: toId, followerId: fromId, kind },
     });
   }
   const tree = buildTree(state);

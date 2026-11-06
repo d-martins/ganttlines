@@ -460,14 +460,14 @@ describe("dragging between a task and a milestone", () => {
   const options = () => screen.getAllByRole("menuitem").slice(1);
   const choices = () => options().map((item) => item.textContent);
   const commands = () => sentCommands().filter((command) => command.type === "addLink" || command.type === "setTarget");
-  const LINKS_FROM_BUILD = ["8.10 starts when build starts", "8.10 finishes when build finishes", "8.10 finishes when build starts"];
-  const LINKS_INTO_BUILD = ["build starts when 8.10 starts", "build finishes when 8.10 finishes", "build finishes when 8.10 starts"];
+  const FROM_BUILD = ["build starts when 8.10 starts", "build finishes when 8.10 finishes", "build finishes when 8.10 starts"];
+  const FROM_MILESTONE = ["8.10 starts when build starts", "8.10 finishes when build finishes", "8.10 finishes when build starts"];
 
   it("from the task: asks, aiming first, and sends nothing yet", async () => {
     await chartBoard(PLAN());
     dragTo("build", 3); // 8.10
     expect(await screen.findByRole("menu", { name: "Link build and 8.10" })).toBeInTheDocument();
-    expect(choices()).toEqual(["build aims for 8.10Never moves the milestone", "8.10 starts after build finishesThe milestone moves if build is late", ...LINKS_FROM_BUILD]);
+    expect(choices()).toEqual(["build aims for 8.10Never moves the milestone", "build starts after 8.10 finishes", ...FROM_BUILD]);
     expect(commands()).toEqual([]);
   });
 
@@ -475,7 +475,7 @@ describe("dragging between a task and a milestone", () => {
     await chartBoard(PLAN());
     dragTo("8.10", 1); // build
     await screen.findByRole("menu");
-    expect(choices()).toEqual(["build aims for 8.10Never moves the milestone", "build starts after 8.10 finishes", ...LINKS_INTO_BUILD]);
+    expect(choices()).toEqual(["build aims for 8.10Never moves the milestone", "8.10 starts after build finishesThe milestone moves if build is late", ...FROM_MILESTONE]);
   });
 
   it("Enter takes the first choice: aiming", async () => {
@@ -496,9 +496,9 @@ describe("dragging between a task and a milestone", () => {
   });
 
   it.each([
-    ["from the task", "build", 3, "build", "8.10"],
-    ["from the milestone", "8.10", 1, "8.10", "build"],
-  ])("the link choice makes the link dragged, %s", async (_name, from, row, predecessorId, followerId) => {
+    ["from the task", "build", 3, "8.10", "build"],
+    ["from the milestone", "8.10", 1, "build", "8.10"],
+  ])("the link choice waits on the task dropped on, %s", async (_name, from, row, predecessorId, followerId) => {
     const { user } = await chartBoard(PLAN());
     dragTo(from, row);
     await screen.findByRole("menu");
@@ -526,7 +526,7 @@ describe("dragging between a task and a milestone", () => {
     await chartBoard(PLAN());
     dragTo("8.10", 4); // 8.11
     await screen.findByRole("menu");
-    expect(choices()).toEqual(["8.11 starts after 8.10 finishes", "8.11 starts when 8.10 starts", "8.11 finishes when 8.10 finishes", "8.11 finishes when 8.10 starts"]);
+    expect(choices()).toEqual(["8.10 starts after 8.11 finishes", "8.10 starts when 8.11 starts", "8.10 finishes when 8.11 finishes", "8.10 finishes when 8.11 starts"]);
   });
 });
 
