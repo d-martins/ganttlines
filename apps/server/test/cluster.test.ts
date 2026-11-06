@@ -150,7 +150,10 @@ describe("several copies: who's viewing", () => {
     await onA.next("joined");
     const onB = await connect(b, ed.cookie);
     onB.send({ type: "join", projectId, version: 0, protocol: 2 });
-    expect((await onB.next("joined")).viewers.map((v) => v.name).sort()).toEqual(["Admin", "Ed"]);
+    // Word of Admin on the other copy may not have got here yet: if not, it follows the join.
+    const joined = await onB.next("joined");
+    const seen = joined.viewers.length === 2 ? joined : await onB.next("presence", (m) => m.viewers.length === 2);
+    expect(seen.viewers.map((v) => v.name).sort()).toEqual(["Admin", "Ed"]);
     expect((await onA.next("presence", (m) => m.viewers.length === 2)).viewers.map((v) => v.name).sort()).toEqual(["Admin", "Ed"]);
     copies.splice(copies.indexOf(a), 1);
     await a.close();
