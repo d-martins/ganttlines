@@ -323,6 +323,7 @@ export const writePlans: ToolGroup = (server, tools) => {
         const problem = shorthandProblem(fields, task.title, edit.row(task.id)?.links.into.length ?? 0);
         if (problem) throw new ToolProblem(problem);
         edit.about = task.title;
+        const alreadyEarly = new Set(edit.rows.filter((entry) => entry.violation).map((entry) => entry.row.id));
         await edit.steps(async () => {
           if (fields.title !== undefined) await edit.run({ type: "updateTitle", id: task.id, title: fields.title });
           await applyTaskFields(edit, task.id, fields, await people(), [], false);
@@ -331,6 +332,9 @@ export const writePlans: ToolGroup = (server, tools) => {
         });
         const [row] = await edit.describe([task.id]);
         const notes = placementNotes([{ title: fields.title ?? task.title, asked: fields, row }]);
+        for (const { row: other, violation } of edit.rows) {
+          if (violation && other.id !== task.id && !alreadyEarly.has(other.id)) notes.push(`“${other.title}” is locked and now starts too early for what it waits on, shown in red on the board: unlock it, or move it later.`);
+        }
         return answer(`Updated “${task.title}”.${notes.length ? ` ${notes.join(" ")}` : ""}`, { task: row, ...(notes.length ? { notes } : {}) });
       }),
   );

@@ -22,4 +22,5 @@ export function writePref(key: string, value: unknown): void {
 }
 
 export const isBoolean = (value: unknown): value is boolean => typeof value === "boolean";
+export const isStringList = (value: unknown): value is string[] => Array.isArray(value) && value.every((item) => typeof item === "string");
 export const isString = (value: unknown): value is string => typeof value === "string";

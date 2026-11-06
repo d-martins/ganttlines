@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useChartDrag, useHoveredRow } from "../src/board/chart/drag";
 import { board, sentCommands } from "./chart-board";
 import { screen, VIEWER } from "./utils";
-import { task } from "./board-fixtures";
+import { PROJECT_ID, task } from "./board-fixtures";
+import { useCriticalPathView } from "../src/board/critical-path-view";
 
 const MON = "2026-10-12";
 
@@ -20,6 +21,7 @@ describe("bars in parts", () => {
   afterEach(() => {
     vi.useRealTimers();
     useChartDrag.setState({ drag: null });
+    useHoveredRow.setState({ id: null });
   });
 
   it("draws one element per part, with a gap between", async () => {
@@ -185,6 +187,32 @@ describe("bars in parts", () => {
     hover(0);
     await waitFor(() => expect(useHoveredRow.getState().id).toBe("a"));
     expect(screen.queryByTestId("interruption")).not.toBeInTheDocument();
+  });
+
+  it("with Critical path on, an interruption with no room shows when hovered, in the critical colour", async () => {
+    useCriticalPathView.setState({ on: { [PROJECT_ID]: true }, defaults: {} });
+    try {
+      await board([task("a", { userStart: MON, duration: 1 }), task("b", { userStart: "2026-10-13", duration: 2, interruptedBy: ["a"], targetId: "m" }), task("m", { userStart: "2026-10-14", duration: 0 })]);
+      expect(screen.queryByTestId("interruption")).not.toBeInTheDocument();
+      hover(0);
+      const line = await screen.findByTestId("interruption");
+      expect(line).toHaveAttribute("stroke", "var(--slack-zero)");
+      expect(line).toHaveAttribute("data-critical");
+    } finally {
+      useCriticalPathView.setState({ on: {}, defaults: {} });
+    }
+  });
+
+  it("with it off, nothing to see", async () => {
+    useCriticalPathView.setState({ on: { [PROJECT_ID]: false }, defaults: {} });
+    try {
+      await board([task("a", { userStart: MON, duration: 1 }), task("b", { userStart: "2026-10-13", duration: 2, interruptedBy: ["a"], targetId: "m" }), task("m", { userStart: "2026-10-14", duration: 0 })]);
+      hover(0);
+      await waitFor(() => expect(useHoveredRow.getState().id).toBe("a"));
+      expect(screen.queryByTestId("interruption")).not.toBeInTheDocument();
+    } finally {
+      useCriticalPathView.setState({ on: {}, defaults: {} });
+    }
   });
 
   it("a baseline's parts draw as parts, and an old snapshot still draws", async () => {

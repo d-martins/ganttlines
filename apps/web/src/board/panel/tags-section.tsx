@@ -1,3 +1,4 @@
+import { isStringList, readPref, writePref } from "../../storage";
 import { canonicalTags, MAX_TAG_LENGTH, MAX_TAGS_PER_TASK, rankTags, tagKey, type TaskRow } from "@ganttlines/engine";
 import { useQuery } from "@tanstack/react-query";
 import { GripVertical, X } from "lucide-react";
@@ -8,6 +9,8 @@ import { useBoard, useRun } from "../board-context";
 import { useFloatingList } from "./suggestion-list";
 
 /** how many known tags the dropdown offers at most */
+const RECENT_TAGS = "recentTags";
+const MAX_RECENT_TAGS = 20;
 const MAX_SUGGESTIONS = 8;
 
 const CHIP = "flex max-w-full items-center gap-0.5 rounded-full border border-border-strong bg-surface-2 py-0.5 text-xs text-text";
@@ -60,7 +63,9 @@ export function TagsSection({ task, inMenu = false }: { task: TaskRow; inMenu?: 
     const boardTags = Object.values(state.rows).flatMap((row) => (row.kind === "task" ? row.tags : []));
     const ranked = rankTags(boardTags.map((tag, first) => ({ tag, uses: 1, first })));
     for (const tag of [...(workspace ?? []), ...ranked]) if (!byKey.has(tagKey(tag))) byKey.set(tagKey(tag), tag);
-    return [...byKey.values()];
+    // What you last used first, per browser, of those still around.
+    const recent = readPref(RECENT_TAGS, [], isStringList).flatMap((tag) => byKey.get(tagKey(tag)) ?? []);
+    return [...new Set([...recent, ...byKey.values()])];
   }, [workspace, state.rows]);
 
   const needle = tagKey(text);
@@ -82,6 +87,8 @@ export function TagsSection({ task, inMenu = false }: { task: TaskRow; inMenu?: 
     // A refused tag stays in the box, so what was typed isn't lost.
     if (task.tags.length >= MAX_TAGS_PER_TASK) return toast(`A task has at most ${MAX_TAGS_PER_TASK} tags`, { tone: "error" });
     if (!send([...task.tags, ...canonicalTags([choice.tag], known)])) return;
+    const used = tagKey(choice.tag);
+    writePref(RECENT_TAGS, [choice.tag, ...readPref(RECENT_TAGS, [], isStringList).filter((tag) => tagKey(tag) !== used)].slice(0, MAX_RECENT_TAGS));
     setText("");
     setHighlight(null);
   };

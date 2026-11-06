@@ -452,6 +452,17 @@ describe("AI access: editing plans", () => {
     await client.close();
   });
 
+  it("says when an edit makes a locked follower start too early", async () => {
+    const { client } = await editorsApp();
+    await call(client, "add_tasks", { project: "Launch", tasks: [{ title: "Build", start: "2026-10-05", durationDays: 1 }, { title: "Ship", start: "2026-10-06", durationDays: 1, predecessor: "Build" }] });
+    await call(client, "update_task", { project: "Launch", task: "Ship", locked: true });
+    const moved = await call(client, "update_task", { project: "Launch", task: "Build", start: "2026-10-12" });
+    expect(moved["notes"]).toEqual([expect.stringContaining("“Ship” is locked and now starts too early")]);
+    const again = await call(client, "update_task", { project: "Launch", task: "Build", title: "Build it" });
+    expect(again["notes"]).toBeUndefined(); // only when this edit caused it
+    await client.close();
+  });
+
   it("reads and writes interruptions", async () => {
     const { client } = await editorsApp();
     await call(client, "add_tasks", { project: "Launch", tasks: [{ title: "Build", start: "2026-11-02", durationDays: 2 }, { title: "Hotfix", start: "2026-11-16", durationDays: 1 }] });

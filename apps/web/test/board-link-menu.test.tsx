@@ -175,6 +175,15 @@ describe("the one handle and the menu", () => {
     expect(FakeWebSocket.last.sent).toHaveLength(sent);
   });
 
+  it("pressing a link handle closes it, and starts the new drag", async () => {
+    await board([hotfix(), login()]);
+    dropOn("Hotfix", 1);
+    await screen.findByRole("menu");
+    fireEvent.pointerDown(handleOf("Fix login"), { button: 0, clientX: 500, clientY: 0 });
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+    fireEvent.pointerUp(window, { clientX: 500, clientY: 0 });
+  });
+
   it("the arrow keys show it too", async () => {
     const user = userEvent.setup();
     await board([hotfix(), login()]);

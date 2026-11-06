@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { linkKey } from "../src/links";
 import type { ProjectState, Row } from "../src/model";
 import { computeSchedule } from "../src/schedule";
-import { analyseSlack, computeSlack, effectiveTarget } from "../src/slack";
+import { toDay } from "../src/date";
+import { analyseSlack, Clock, computeSlack, effectiveTarget } from "../src/slack";
 import { calendar, link, project, section, task } from "./fixtures";
 
 // October 2026: Mon 5 … Fri 9, Mon 12 … Fri 16, Mon 19 … Fri 23, Mon 26 … Fri 30
@@ -298,6 +299,50 @@ describe("analyseSlack", () => {
   });
 });
 
+describe("how long it takes", () => {
+  it("a stray far-off date with many people doesn't slow it down", () => {
+    const people = Array.from({ length: 60 }, (_, i) => `r${i}`);
+    const off = calendar({ timeOff: people.map((id) => ({ id, resourceId: id, startDate: "2026-11-20", endDate: "2026-11-21" })) });
+    const state = project(...people.map((id) => task(id, { userStart: "2026-11-02", duration: 2, resourceId: id, targetId: "m" })), task("m", { userStart: "2026-12-01", duration: 0 }), task("stray", { userStart: "2199-01-01" }));
+    const schedule = computeSchedule(state, off);
+    const before = Date.now();
+    computeSlack(state, off, schedule);
+    expect(Date.now() - before).toBeLessThan(600);
+  });
+
+  it("its clock agrees with walking the calendar", () => {
+    const off = calendar({
+      holidays: [{ id: "h", name: "h", startDate: "2026-10-12", endDate: "2026-10-13", appliesTo: "all" }],
+      timeOff: [{ id: "o", resourceId: "ana", startDate: "2026-10-21", endDate: "2026-10-22" }],
+    });
+    for (const resource of [null, "ana"]) {
+      const clock = new Clock(off, resource);
+      const from = toDay("2026-10-01") * 2;
+      for (let half = from; half < from + 80; half++) {
+        for (const other of [from, from + 37, from + 79]) {
+          const [a, b] = [off.snapHalf(half, resource), off.snapHalf(other, resource)];
+          expect(clock.between(a, b)).toBe(off.workingHalvesBetween(a, b, resource));
+        }
+        for (const n of [-40, -3, -1, 0, 1, 2, 9, 60]) expect(clock.add(half, n)).toBe(off.addWorkingHalves(off.snapHalf(half, resource), n, resource));
+      }
+    }
+  });
+
+  it("gives the same answers as walking the calendar", () => {
+    const off = calendar({ holidays: [{ id: "h", name: "h", startDate: "2026-10-12", endDate: "2026-10-13", appliesTo: "all" }], timeOff: [{ id: "o", resourceId: "ana", startDate: "2026-10-21", endDate: "2026-10-22" }] });
+    const state = project(
+      task("a", { userStart: "2026-10-05", duration: 3, resourceId: "ana", targetId: "m" }),
+      task("b", { userStart: "2026-10-08", duration: 12.5, resourceId: "ana" }),
+      task("m", { userStart: "2026-10-30", duration: 0 }),
+      task("after", { userStart: "2026-10-05", duration: 2 }),
+      link("a", "b"),
+      link("b", "after"),
+    );
+    const slack = slackOf(state, off);
+    expect(slack.get("after")?.limit).toEqual({ kind: "end" });
+  });
+});
+
 describe("across parts and interruptions", () => {
   const MON = "2026-10-05";
 
@@ -336,6 +381,13 @@ describe("across parts and interruptions", () => {
     const before = Date.now();
     computeSlack(state, cal, schedule);
     expect(Date.now() - before).toBeLessThan(5000);
+  });
+
+  it("names the interruptions with no room", () => {
+    const tight = project(task("a", { userStart: MON, duration: 1 }), task("b", { userStart: "2026-10-06", duration: 2, interruptedBy: ["a"], targetId: "m" }), task("m", { userStart: "2026-10-07", duration: 0 }));
+    expect([...analyseSlack(tight, cal, computeSchedule(tight, cal)).criticalInterruptions]).toEqual(["a|b"]);
+    const roomy = project(task("a", { userStart: MON, duration: 1 }), task("b", { userStart: "2026-10-06", duration: 2, interruptedBy: ["a"], targetId: "m" }), task("m", { userStart: "2026-10-20", duration: 0 }));
+    expect([...analyseSlack(roomy, cal, computeSchedule(roomy, cal)).criticalInterruptions]).toEqual([]);
   });
 
   it("an interruption connects a task", () => {

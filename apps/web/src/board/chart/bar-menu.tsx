@@ -27,15 +27,15 @@ export function BarMenu({ task, isParent, open, onOpenChange }: { task: TaskRow;
     onPointerLeave: (event: SyntheticEvent) => inTags(document.activeElement) && event.preventDefault(),
   };
 
-  // The tag box is no menu item, so the arrows can't reach it: Tab goes there and back.
+  // The tag box and each tag's × are no menu items, so the arrows can't reach them: Tab goes through them and back.
   const onTabCapture = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "Tab") return;
     event.preventDefault();
     event.stopPropagation();
-    const target = inTags(event.target)
-      ? event.currentTarget.querySelector<HTMLElement>('[role="menuitemradio"][data-state="checked"]')
-      : tags.current?.querySelector("input");
-    target?.focus();
+    const stops = [...(tags.current?.querySelectorAll<HTMLElement>('input, button[aria-label^="Remove the tag"]') ?? [])].sort((a) => (a.tagName === "INPUT" ? -1 : 1));
+    const at = stops.indexOf(event.target as HTMLElement);
+    const next = at < 0 ? (event.shiftKey ? stops.at(-1) : stops[0]) : stops[at + (event.shiftKey ? -1 : 1)];
+    (next ?? event.currentTarget.querySelector<HTMLElement>('[role="menuitemradio"][data-state="checked"]'))?.focus();
   };
 
   return (

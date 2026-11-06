@@ -1,4 +1,4 @@
-import { effectiveTarget, fromDay, spanEnd, tagKey, type Calendar, type Command, type ProjectState, type RowId, type Schedule, type TaskRow } from "@ganttlines/engine";
+import { buildTree, childrenOf, dayOf, effectiveTarget, fromDay, isParentTask, spanEnd, tagKey, type Calendar, type Command, type HalfDay, type ProjectState, type RowId, type Schedule, type TaskRow } from "@ganttlines/engine";
 import { ChevronDown, X } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { IconButton } from "../../ui/button";
@@ -24,14 +24,41 @@ interface AimProps {
 }
 
 /** How the task stands against the milestone: "2 days late: finishes …", "3 days to spare", "No date yet". */
-export function standing({ task, calendar, schedule }: Pick<AimProps, "task" | "calendar" | "schedule">, targetId: RowId): { text: string; late: boolean } | null {
-  const mine = schedule?.get(task.id)?.span;
+/**
+ * When a task's work is done, measured against `targetId`: for a parent, the last of its subtasks that answer
+ * to that milestone. A milestone inside it is a date, not work, so it doesn't make the parent late.
+ */
+function workFinish(task: TaskRow, state: ProjectState, schedule: Schedule | null, targetId: RowId): HalfDay | null {
+  const tree = buildTree(state);
+  if (!isParentTask(tree, task)) {
+    const span = schedule?.get(task.id)?.span;
+    return span ? spanEnd(span) : null;
+  }
+  const finishes: HalfDay[] = [];
+  const walk = (parent: RowId) => {
+    for (const child of childrenOf(tree, parent)) {
+      if (child.kind !== "task") continue;
+      if (isParentTask(tree, child)) {
+        walk(child.id);
+        continue;
+      }
+      if (child.duration === 0 || effectiveTarget(state, child) !== targetId) continue;
+      const span = schedule?.get(child.id)?.span;
+      if (span) finishes.push(spanEnd(span));
+    }
+  };
+  walk(task.id);
+  return finishes.length > 0 ? Math.max(...finishes) : null;
+}
+
+export function standing({ task, state, calendar, schedule }: Pick<AimProps, "task" | "state" | "calendar" | "schedule">, targetId: RowId): { text: string; late: boolean } | null {
   const theirs = schedule?.get(targetId)?.span;
   if (!theirs) return { text: "No date yet", late: false };
-  if (!mine) return null;
-  const gap = calendar.workingHalvesBetween(spanEnd(mine), spanEnd(theirs), task.resourceId);
+  const finish = workFinish(task, state, schedule, targetId);
+  if (finish === null) return null;
+  const gap = calendar.workingHalvesBetween(finish, spanEnd(theirs), task.resourceId);
   if (gap >= 0) return { text: `${formatSlack(gap)} to spare`, late: false };
-  return { text: `${formatSlack(-gap)} late: finishes ${formatDay(mine.end)}, milestone is ${formatDay(theirs.end)}`, late: true };
+  return { text: `${formatSlack(-gap)} late: finishes ${formatDay(dayOf(finish))}, milestone is ${formatDay(theirs.end)}`, late: true };
 }
 
 /**
@@ -106,7 +133,7 @@ export function AimPicker({ task, state, schedule, numbers, run, onDone, onCreat
         aria-expanded={showList}
         aria-controls={listId}
         aria-activedescendant={showList && active >= 0 ? `${listId}-${active}` : undefined}
-        placeholder="Pick or name a milestone"
+        placeholder={task.targetId !== null && state.rows[task.targetId] ? `Instead of ${state.rows[task.targetId]!.title || "Untitled"}` : "Pick or name a milestone"}
         value={text}
         onChange={(event) => {
           setText(event.target.value);
