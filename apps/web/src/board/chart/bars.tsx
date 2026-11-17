@@ -153,6 +153,9 @@ export const baselineGhostSegments = (ghost: Ghost): readonly Span[] => ghost.pa
 /** Props for the drawn shape when it can be edited (focus, pointer and key handlers). */
 export type ShapeProps = HTMLAttributes<HTMLDivElement>;
 
+/** Marks what draws a row's dates: double-clicking one opens its details. */
+const BAR = { "data-bar": true } as ShapeProps;
+
 /** One row's bar, bracket, diamond or section span, with its title beside or inside it. */
 export function RowBar({
   entry,
@@ -200,7 +203,7 @@ export function RowBar({
   const { className: givenClass = "", ...shapeRest } = shape ?? {};
   const shapeClass = `${givenClass} ${slack ? `outline-2 outline-offset-1 ${slack === "late" ? "outline-[var(--slack-late)]" : "outline-[var(--slack-zero)]"}` : ""}`;
   const marked = slack ? ({ "data-slack": slack } as ShapeProps) : {};
-  const shapeAttrs: ShapeProps = shape ? { role: "button", "aria-label": label, ...marked, ...shapeRest } : { role: "img", "aria-label": label, ...marked };
+  const shapeAttrs: ShapeProps = shape ? { role: "button", "aria-label": label, ...BAR, ...marked, ...shapeRest } : { role: "img", "aria-label": label, ...BAR, ...marked };
   const outsideTitle = (
     <span className="pointer-events-none absolute flex items-center gap-1 whitespace-nowrap text-xs" style={{ left: right + titleGap, top: 0, height: rowHeight }}>
       {kind === "task" ? locked : null}
@@ -269,6 +272,7 @@ export function RowBar({
           key={i}
           aria-hidden
           data-testid="bar-part"
+          data-bar
           title={label}
           {...marked}
           onPointerDown={shape?.onPointerDown}

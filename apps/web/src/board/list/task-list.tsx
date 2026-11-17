@@ -3,16 +3,16 @@ import { useHoveredMilestone } from "../chart/milestone-lines";
 import type { Slack } from "@ganttlines/engine";
 import { useCriticalPath } from "../critical-path-view";
 import { formatSlack, useSlackAnalysis } from "../slack";
-import type { Calendar, RowId } from "@ganttlines/engine";
-import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, GripVertical, LocateFixed, IndentDecrease, IndentIncrease, MessageSquare, PanelRightOpen, Plus, Trash2 } from "lucide-react";
-import { useEffect, useRef, useState, type HTMLAttributes, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type Ref } from "react";
+import { buildTree, childrenOf, type Calendar, type RowId, type Tree } from "@ganttlines/engine";
+import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, GripVertical, LocateFixed, IndentDecrease, IndentIncrease, MessageSquare, Plus, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type HTMLAttributes, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type Ref } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { commentCounts } from "../../api/queries";
 import { Avatar } from "../../ui/avatar";
 import { IconButton } from "../../ui/button";
 import { AssigneePicker } from "../assignee-picker";
 import { useBoard, useRun } from "../board-context";
-import { setCollapsed } from "../collapse";
+import { setCollapsed, useCollapsed } from "../collapse";
 import { formatDays } from "../chart/bars";
 import type { BoardRow } from "../model";
 import { useSelection } from "../selection";
@@ -23,12 +23,19 @@ import { useCapabilities } from "../../workspace";
 /**
  * Column template shared by the header and the rows: # · title · assignee · WD · AWD · row actions (show the bar, open details, delete).
  * (Predecessors are set in the details panel, or by linking bars on the chart.)
- * Fixed columns + the title's minimum + padding = LIST_WIDTH.min, so no column is ever cut off.
+ * Fixed columns + the title's minimum + padding = listContentWidth in view-store.ts: a narrower list scrolls sideways.
  */
-const COLUMNS = "grid grid-cols-[40px_minmax(96px,1fr)_120px_40px_40px_76px] items-center";
+const COLUMNS = "grid grid-cols-[40px_minmax(200px,1fr)_120px_40px_40px_76px] items-center";
 /** The same, with "Can slip" after AWD; SLIP_COLUMN in view-store.ts is its 72 px. */
-const COLUMNS_WITH_SLIP = "grid grid-cols-[40px_minmax(96px,1fr)_120px_40px_40px_72px_76px] items-center";
+const COLUMNS_WITH_SLIP = "grid grid-cols-[40px_minmax(200px,1fr)_120px_40px_40px_72px_76px] items-center";
 const INDENT = 16;
+
+/**
+ * Narrower than its columns, the list scrolls sideways: rows and headings move by `--list-x`, set on the list, and
+ * the row actions stay at its right edge (`--list-over` is how much wider the columns are than the list).
+ */
+const LIST_SHIFT = { width: "max(100%, var(--list-content, 0px))", transform: "translateX(calc(-1 * var(--list-x, 0px)))" };
+const PINNED = { transform: "translateX(calc(var(--list-x, 0px) - var(--list-over, 0px)))" };
 
 /** Outline tools and the column headings; reordering and collapsing are off while filtering. */
 export function ListHeader({ filtering }: { filtering: boolean }) {
@@ -64,7 +71,7 @@ export function ListHeader({ filtering }: { filtering: boolean }) {
         </IconButton>
       </div>
       {/* Visual column headings; assistive tech gets ListColumnHeaders inside the grid instead. */}
-      <div aria-hidden className={`${critical ? COLUMNS_WITH_SLIP : COLUMNS} h-6 px-1 text-xs font-semibold text-muted`}>
+      <div aria-hidden className={`${critical ? COLUMNS_WITH_SLIP : COLUMNS} h-6 px-1 text-xs font-semibold text-muted`} style={LIST_SHIFT}>
         <span className="pr-2 text-right">#</span>
         <span>Task</span>
         <span>Assignee</span>
@@ -75,7 +82,8 @@ export function ListHeader({ filtering }: { filtering: boolean }) {
           AWD
         </span>
         {critical ? <span className="px-1 text-right">Can slip</span> : null}
-        <span />
+        {/* Over the headings that scroll under the pinned row actions. */}
+        <span className="h-full bg-surface" style={PINNED} />
       </div>
     </div>
   );
@@ -195,7 +203,10 @@ export function ListRows({
   rowHeight,
   numbers,
   filtering,
+  pinned = false,
 }: {
+  /** the list is narrower than its columns: the row actions stay at its right edge */
+  pinned?: boolean;
   /** the rendered window */
   rows: readonly BoardRow[];
   /** every shown row (for drops and the footer position) */
@@ -212,6 +223,7 @@ export function ListRows({
   const capabilities = useCapabilities();
   const comments = useQuery({ ...commentCounts(board.sync.projectId), enabled: capabilities.comments }).data;
   const { state, calendar, resources, resourceMap, canEdit, canCreateResources } = board;
+  const tree = useMemo(() => buildTree(state), [state]);
   const run = useRun();
   const { selectedId, editingId, draftId, select, edit, center } = useSelection();
   const [cell, setCell] = useState<{ id: RowId; column: Column } | null>(null);
@@ -293,15 +305,15 @@ export function ListRows({
             aria-selected={selected}
             aria-expanded={entry.hasChildren ? !entry.collapsed : undefined}
             // A click only selects (highlights) the row; a double-click also brings its bar into view (its
-            // start just inside the chart's left edge) and opens the details panel. Not on a cell that edits.
+            // start just inside the chart's left edge). Not on a cell that edits. The details open from the bar.
             onClick={() => select(row.id, false)}
             onDoubleClick={(event) => {
               if ((event.target as HTMLElement).closest("[data-cell], [data-row-action], input")) return;
               center(row.id);
-              select(row.id, true);
+              select(row.id, false);
             }}
-            className={`group ${critical ? COLUMNS_WITH_SLIP : COLUMNS} absolute right-0 left-0 px-1 text-sm ${selected ? "bg-accent-soft" : "hover:bg-surface-2"} ${drag?.id === row.id ? "opacity-50" : entry.context ? "opacity-45" : ""}`}
-            style={{ top: (firstRow + index) * rowHeight, height: rowHeight }}
+            className={`group ${critical ? COLUMNS_WITH_SLIP : COLUMNS} absolute left-0 px-1 text-sm ${selected ? "bg-accent-soft" : "hover:bg-surface-2"} ${drag?.id === row.id ? "opacity-50" : entry.context ? "opacity-45" : ""}`}
+            style={{ top: (firstRow + index) * rowHeight, height: rowHeight, ...LIST_SHIFT }}
           >
             <span role="gridcell" aria-label={`Row ${entry.number}`} className="relative pr-2 text-right text-xs text-muted tabular-nums">
               {canEdit && !filtering ? (
@@ -515,15 +527,23 @@ export function ListRows({
               )}
             </span>
             {critical ? row.kind === "section" ? <span role="gridcell" /> : <SlipCell slack={entry.fromBaseline ? undefined : slack.get(row.id)} /> : null}
-            <span role="gridcell" className={`flex justify-end gap-1 ${selected ? "" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"}`}>
-              <RowActions id={row.id} title={row.title} />
+            <span
+              role="gridcell"
+              data-row-actions
+              {...(pinned ? { "data-pinned": true } : {})}
+              className={`flex h-full items-center justify-end gap-1 ${pinned ? "shadow-[-6px_0_8px_-6px_rgb(0_0_0/0.4)]" : ""}`}
+              style={pinned ? { ...PINNED, background: selected ? "linear-gradient(var(--accent-soft), var(--accent-soft)), var(--surface)" : "var(--surface)" } : undefined}
+            >
+              <span className={`flex gap-1 ${selected ? "" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"}`}>
+                  <RowActions id={row.id} title={row.title} inside={entry.hasChildren ? parentsWithin(tree, row.id) : []} filtering={filtering} />
+              </span>
             </span>
           </div>
         );
       })}
       {drag?.target && dropTarget ? <DropIndicator target={drag.target} depth={dropTarget.depth} rowHeight={rowHeight} valid={dropValid} /> : null}
       {canEdit && !filtering ? (
-        <div className="absolute left-0 flex gap-1 px-2 text-xs" style={{ top: allRows.length * rowHeight + 4 }}>
+        <div className="absolute left-0 flex gap-1 px-2 text-xs whitespace-nowrap" style={{ top: allRows.length * rowHeight + 4 }}>
           <button type="button" className="flex items-center gap-1 rounded px-2 py-1 text-muted hover:bg-surface-2 hover:text-text" onClick={() => addAtEnd(board, state, "task")}>
             <Plus size={13} /> Add task
           </button>
@@ -631,11 +651,14 @@ function CellButton({
 }
 
 /** The row's quick actions: bring its bar into view, then open its details (again: close them). */
-function RowActions({ id, title }: { id: RowId; title: string }) {
+/** `inside`: the rows within this one that have rows of their own (not the row itself, which keeps its own arrow). */
+function RowActions({ id, title, inside, filtering }: { id: RowId; title: string; inside: readonly RowId[]; filtering: boolean }) {
   const board = useBoard();
-  const { select, center, closePanel } = useSelection();
-  const showing = useSelection((selection) => selection.panelOpen && selection.selectedId === id);
+  const { select, center } = useSelection();
+  const collapsed = useCollapsed(board.sync.projectId);
   const name = title || "Untitled";
+  // Anything inside still open: collapse it all, leaving the row itself as it is. Otherwise open it all, the row too.
+  const anyOpen = inside.some((parent) => !collapsed.has(parent));
   return (
     <>
       <IconButton
@@ -650,20 +673,23 @@ function RowActions({ id, title }: { id: RowId; title: string }) {
       >
         <LocateFixed size={14} />
       </IconButton>
-      <IconButton
-        data-row-action
-        label={`Open details of “${name}”`}
-        aria-pressed={showing}
-        className={`h-6 w-auto! ${showing ? "bg-accent-soft text-text" : ""}`}
-        onClick={(event) => {
-          event.stopPropagation();
-          // A toggle for this row's details; on another row it just moves the panel there.
-          if (showing) closePanel();
-          else select(id, true);
-        }}
-      >
-        <PanelRightOpen size={14} />
-      </IconButton>
+      {inside.length > 0 ? (
+        <IconButton
+          data-row-action
+          label={`${anyOpen ? "Collapse" : "Expand"} all inside “${name}”`}
+          disabled={filtering}
+          className="h-6 w-auto! disabled:opacity-40"
+          onClick={(event) => {
+            event.stopPropagation();
+            if (anyOpen) setCollapsed(board.sync.projectId, inside, true);
+            else setCollapsed(board.sync.projectId, [id, ...inside], false);
+          }}
+        >
+          {anyOpen ? <ChevronsDownUp size={14} /> : <ChevronsUpDown size={14} />}
+        </IconButton>
+      ) : (
+        <span aria-hidden className="w-[22px] shrink-0" />
+      )}
       {board.canEdit ? (
         <IconButton
           data-row-action
@@ -680,6 +706,20 @@ function RowActions({ id, title }: { id: RowId; title: string }) {
       ) : null}
     </>
   );
+}
+
+/** The rows inside `id`, at any depth, that have rows of their own. */
+function parentsWithin(tree: Tree, id: RowId): RowId[] {
+  const found: RowId[] = [];
+  const walk = (parent: RowId) => {
+    for (const child of childrenOf(tree, parent)) {
+      if (childrenOf(tree, child.id).length === 0) continue;
+      found.push(child.id);
+      walk(child.id);
+    }
+  };
+  walk(id);
+  return found;
 }
 
 function DropIndicator({ target, depth, rowHeight, valid }: { target: NonNullable<DragState["target"]>; depth: number; rowHeight: number; valid: boolean }) {

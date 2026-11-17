@@ -100,3 +100,10 @@ export async function addTask(request: APIRequestContext, projectId: string, tit
 
 /** The list row showing `title`. */
 export const listRow = (page: Page, title: string) => page.getByRole("row").filter({ has: page.getByText(title, { exact: true }) });
+
+/** Opens a task's details: selects its row, then opens the drawer from its strip. */
+export async function openDetails(page: Page, title: string): Promise<void> {
+  await listRow(page, title).getByRole("gridcell", { name: /^Row / }).click();
+  const strip = page.getByRole("button", { name: /^Show details/ });
+  if (await strip.isVisible()) await strip.click();
+}

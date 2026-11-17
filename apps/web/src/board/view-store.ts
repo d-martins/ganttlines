@@ -23,10 +23,12 @@ const isZoom = (value: unknown): value is Zoom => value === "day" || value === "
 const isBarStyle = (value: unknown): value is BarStyle => value === "compact" || value === "roomy";
 const isWidth = (value: unknown): value is number => typeof value === "number" && value >= LIST_WIDTH.min && value <= LIST_WIDTH.max;
 
-/** `min` fits every list column (see COLUMNS in list/task-list.tsx: 412 px of columns + 8 px padding). */
-export const LIST_WIDTH = { min: 420, max: 900, initial: 500 } as const;
+/** Narrower than its columns, the list scrolls sideways (see listContentWidth); it starts wide enough for them. */
+export const LIST_WIDTH = { min: 240, max: 900, initial: 540 } as const;
 /** What the "Can slip" column adds to the list while Critical path is on. */
 export const SLIP_COLUMN = 72;
+/** The width the list's columns take, the task name at its least (COLUMNS in list/task-list.tsx, plus 8 px padding). */
+export const listContentWidth = (critical: boolean) => 40 + 200 + 120 + 40 + 40 + 76 + 8 + (critical ? SLIP_COLUMN : 0);
 
 const isStep = (value: unknown): value is number => typeof value === "number" && (ZOOM_STEPS as readonly number[]).includes(value);
 

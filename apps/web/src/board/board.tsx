@@ -22,7 +22,7 @@ import { useLinger } from "./linger";
 import { ListColumnHeaders, ListHeader, ListRows, useListKeys } from "./list/task-list";
 import { useSelection } from "./selection";
 import { boardModel, type CompareMode } from "./model";
-import { LIST_WIDTH, SLIP_COLUMN, useBoardView } from "./view-store";
+import { listContentWidth, LIST_WIDTH, SLIP_COLUMN, useBoardView } from "./view-store";
 import { useCriticalPath } from "./critical-path-view";
 import { boardSchedule } from "./slack";
 
@@ -97,6 +97,14 @@ export function Board({
   const critical = useCriticalPath(sync.projectId);
   const slipRoom = critical ? SLIP_COLUMN : 0;
   const listWidth = Math.min(chosenWidth + slipRoom, LIST_WIDTH.max + slipRoom);
+  // Narrower than its columns, the list scrolls sideways under its own scrollbar.
+  const listContent = listContentWidth(slipRoom > 0);
+  // (its right border takes a pixel of its width)
+  const listOver = listContent > listWidth ? listContent - listWidth + 1 : 0;
+  const [listScroll, setListScroll] = useState(0);
+  const listX = Math.min(listScroll, listOver);
+  const listBar = useRef<HTMLDivElement>(null);
+  const listVars = { ["--list-x" as string]: `${listX}px`, ["--list-over" as string]: `${listOver}px`, ["--list-content" as string]: `${listContent}px` };
   const collapsed = useCollapsed(sync.projectId);
   // Collapsed rows deleted since are forgotten (once the board has rows to compare with).
   useEffect(() => {
@@ -239,7 +247,19 @@ export function Board({
       useBoardView.getState().setDayWidth(next);
     };
     element.addEventListener("wheel", onWheel, { passive: false });
-    return () => element.removeEventListener("wheel", onWheel);
+    // Sideways over the list: the list scrolls, not the chart, while its columns don't fit.
+    const onListWheel = (event: WheelEvent) => {
+      const bar = listBar.current;
+      if (!bar || Math.abs(event.deltaX) <= Math.abs(event.deltaY) || event.ctrlKey || event.metaKey) return;
+      if (!(event.target instanceof Element) || !event.target.closest('[role="treegrid"], [data-list-header]')) return;
+      event.preventDefault();
+      bar.scrollLeft += event.deltaX;
+    };
+    element.addEventListener("wheel", onListWheel, { passive: false });
+    return () => {
+      element.removeEventListener("wheel", onWheel);
+      element.removeEventListener("wheel", onListWheel);
+    };
   }, []);
 
   const rowHeight = ROW_HEIGHT[barStyle];
@@ -320,7 +340,7 @@ export function Board({
       <div ref={scroller} onScroll={onScroll} data-testid="board-scroller" className="relative min-h-0 flex-1 overflow-auto">
         <div style={{ width: listWidth + timeline.width }}>
           <div className="sticky top-0 z-20 flex" style={{ height: HEADER_HEIGHT }}>
-            <div className="sticky left-0 z-10 shrink-0 overflow-hidden border-r border-[var(--list-edge)] bg-surface shadow-[var(--list-shadow)]" style={{ width: listWidth }}>
+            <div className="sticky left-0 z-10 shrink-0 overflow-hidden border-r border-[var(--list-edge)] bg-surface shadow-[var(--list-shadow)]" data-list-header style={{ width: listWidth, ...listVars }}>
               <ListHeader filtering={model.filtering} />
               {divider}
             </div>
@@ -348,10 +368,10 @@ export function Board({
                 event.currentTarget.focus({ preventScroll: true });
               }}
               className="sticky left-0 z-10 shrink-0 overflow-hidden border-r border-[var(--list-edge)] bg-surface shadow-[var(--list-shadow)] outline-none focus:outline-none focus-visible:outline-none"
-              style={{ width: listWidth, height: bodyHeight, ...listGrid }}
+              style={{ width: listWidth, height: bodyHeight, ...listGrid, ...listVars }}
             >
               <ListColumnHeaders />
-              <ListRows rows={shown} allRows={model.rows} firstRow={firstRow} rowHeight={rowHeight} numbers={model.numbers} filtering={model.filtering} />
+              <ListRows rows={shown} allRows={model.rows} firstRow={firstRow} rowHeight={rowHeight} numbers={model.numbers} filtering={model.filtering} pinned={listOver > 0} />
               {divider}
             </div>
             <DayMenu
@@ -391,6 +411,13 @@ export function Board({
             </div>
             </DayMenu>
           </div>
+          {listOver > 0 ? (
+            <div className="sticky bottom-0 left-0 z-20 border-t border-r border-[var(--list-edge)] bg-surface" style={{ width: listWidth }}>
+              <div ref={listBar} data-testid="list-scrollbar" className="list-scrollbar overflow-x-auto" onScroll={(event) => setListScroll(event.currentTarget.scrollLeft)}>
+                <div style={{ width: listContent, height: 8 }} />
+              </div>
+            </div>
+          ) : null}
         </div>
         {model.rows.length === 0 ? <p className="absolute top-16 left-4 text-sm text-muted">No tasks yet.</p> : null}
       </div>

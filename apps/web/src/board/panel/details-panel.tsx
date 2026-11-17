@@ -2,7 +2,7 @@ import { InterruptionsSection } from "./interruptions-section";
 import { buildTree, childrenOf, computeSchedule, CycleError, fromDay, isParentTask, TASK_COLORS, type Row, type RowId, type Schedule, type TaskRow } from "@ganttlines/engine";
 import { COMMAND_LIMITS } from "@ganttlines/protocol/constants";
 import { useQuery } from "@tanstack/react-query";
-import { Lock, MoreHorizontal, Plus, Trash2, UserRound, X } from "lucide-react";
+import { ChevronsLeft, ChevronsRight, Lock, MoreHorizontal, MousePointerClick, Plus, Trash2, UserRound } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { currentUser } from "../../api/queries";
 import { Avatar } from "../../ui/avatar";
@@ -122,8 +122,53 @@ function ConversationTabs({ comments, history }: { comments: ReactNode; history:
   );
 }
 
+/** The details drawer collapsed: a strip down the right edge with the selected row's name, that opens it again. */
+function DetailsStrip({ title, onOpen }: { title: string | null; onOpen: () => void }) {
+  const label = title === null ? "Show details" : `Show details of “${title || "Untitled"}”`;
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={onOpen}
+      className="absolute top-0 right-0 bottom-0 z-30 flex w-6 flex-col items-center gap-2 border-l border-border bg-bg pt-2 text-muted shadow-md hover:text-text"
+    >
+      <ChevronsLeft aria-hidden size={14} className="shrink-0" />
+      <span aria-hidden className="truncate text-xs [writing-mode:vertical-rl] rotate-180">
+        {title === null ? "Select a task" : title || "Untitled"}
+      </span>
+    </button>
+  );
+}
+
+/** The drawer open with nothing selected: how to pick a task. */
+function NoDetails({ onCollapse }: { onCollapse: () => void }) {
+  return (
+    <aside
+      aria-label="Details"
+      onKeyDown={(event) => {
+        if (event.key !== "Escape") return;
+        event.stopPropagation();
+        onCollapse();
+      }}
+      className="absolute top-0 right-0 bottom-0 z-30 flex w-[min(26rem,92%)] flex-col border-l border-border bg-bg shadow-xl"
+    >
+      <header className="flex items-center border-b border-border px-4 py-2">
+        <IconButton label="Collapse details (Esc)" className="ml-auto" onClick={onCollapse}>
+          <ChevronsRight size={16} />
+        </IconButton>
+      </header>
+      <div className="flex flex-1 flex-col items-center justify-center gap-2 px-8 text-center">
+        <MousePointerClick aria-hidden size={40} strokeWidth={1.25} className="text-muted" />
+        <p className="font-medium">Select a task to see its details</p>
+        <p className="text-sm text-muted">Click a row in the list, or double-click a bar.</p>
+      </div>
+    </aside>
+  );
+}
+
 /**
- * The details panel: slides over the chart from the right and shows the selected row — its fields
+ * The details drawer: slides over the chart from the right and shows the selected row — its fields
  * (edited through the same checked commands as the list and chart), description, subtasks,
  * comments and history. Selecting another row retargets it; Escape or × closes it.
  */
@@ -131,7 +176,7 @@ export function DetailsPanel({ numbers, filtering }: { numbers: ReadonlyMap<RowI
   const capabilities = useCapabilities();
   const board = useBoard();
   const { state, calendar, sync } = board;
-  const { selectedId, panelOpen, closePanel } = useSelection();
+  const { selectedId, panelOpen, closePanel, openPanel } = useSelection();
   const me = useQuery(currentUser);
   const run = useRun();
   const panel = useRef<HTMLElement>(null);
@@ -163,7 +208,9 @@ export function DetailsPanel({ numbers, filtering }: { numbers: ReadonlyMap<RowI
     }
   }, [state, calendar]);
 
-  if (!row) return null;
+  if (panelOpen && !selected) return <NoDetails onCollapse={closePanel} />;
+  const strip = open ? null : <DetailsStrip title={selected ? selected.title : null} onOpen={openPanel} />;
+  if (!row) return strip;
   // Selecting a row opens the panel without taking focus (the list keeps the keyboard). Closing it
   // from inside hands focus back to the row's title in the list.
   const close = () => {
@@ -184,8 +231,10 @@ export function DetailsPanel({ numbers, filtering }: { numbers: ReadonlyMap<RowI
   const kindLabel = row.kind === "section" ? "Section" : isParent ? "Parent task" : row.kind === "task" && row.duration === 0 ? "Milestone" : "Task";
 
   return (
-    <aside
-      ref={panel}
+    <>
+      {strip}
+      <aside
+        ref={panel}
       tabIndex={-1}
       aria-label={`Details of “${row.title || "Untitled"}”`}
       aria-hidden={!open}
@@ -221,8 +270,8 @@ export function DetailsPanel({ numbers, filtering }: { numbers: ReadonlyMap<RowI
             </MenuItem>
           </Menu>
         ) : null}
-        <IconButton label="Close details (Esc)" className={board.canEdit ? "" : "ml-auto"} onClick={close}>
-          <X size={16} />
+        <IconButton label="Collapse details (Esc)" className={board.canEdit ? "" : "ml-auto"} onClick={close}>
+          <ChevronsRight size={16} />
         </IconButton>
       </header>
       <div className="flex flex-col gap-3 px-4 py-3">
@@ -280,7 +329,8 @@ export function DetailsPanel({ numbers, filtering }: { numbers: ReadonlyMap<RowI
           <Activity projectId={sync.projectId} rowId={row.id} names={{ state, resources: board.resourceMap }} />
         </Section>
       ) : null}
-    </aside>
+      </aside>
+    </>
   );
 }
 

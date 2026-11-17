@@ -10,9 +10,10 @@ afterEach(() => {
   cleanup();
   // App-wide stores outlive a render: start every test clean.
   useToasts.setState({ toasts: [] });
+  // Storage first: the selection reads whether the drawer was left open from it.
+  localStorage.clear();
   resetSelection();
   useCollapse.setState({ byProject: {} });
-  localStorage.clear();
   useBoardView.setState(initialBoardView());
   vi.unstubAllGlobals();
   vi.restoreAllMocks();

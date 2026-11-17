@@ -1,12 +1,13 @@
 import { LocalSource } from "@ganttlines/client";
 import { IDBFactory } from "fake-indexeddb";
-import { act, waitFor } from "@testing-library/react";
+import { act, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { forgetLocalWorkspace, useStorageStatus } from "../src/workspace/local";
 import { serverSource, useWorkspace } from "../src/workspace";
 import { IndexedDbStore } from "../src/workspace/indexed-db-store";
 import { leaveTo } from "../src/app/leave";
 import { ADMIN, fakeApi, renderApp, screen } from "./utils";
+import { openDetails } from "./open-details";
 
 vi.mock("../src/app/leave", () => ({ leaveTo: vi.fn() }));
 
@@ -187,7 +188,7 @@ describe("local mode", () => {
     await user.click(screen.getByRole("button", { name: "Add task" }));
     await user.type(screen.getByRole("textbox", { name: "Title" }), "Dig{Enter}");
     const row = (await screen.findAllByRole("row")).find((candidate) => candidate.textContent?.includes("Dig"))!;
-    await user.dblClick(row.querySelector('[aria-label^="Row "]')!); // the row number, as the panel tests do
+    await openDetails(user, row)
     expect(await screen.findByRole("complementary", { name: /^Details of/ })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Comments" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("link", { name: "Settings" }));

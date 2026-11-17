@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { addTask, command, createProject, listRow, resetDatabase, setupAdmin } from "../support";
+import { addTask, command, createProject, listRow, resetDatabase, setupAdmin, openDetails } from "../support";
 
 const DAY = 32;
 const barOf = (page: Page, title: string) => page.getByRole("button", { name: new RegExp(`^${title}, `) });
@@ -75,7 +75,7 @@ test("A interrupts B from the menu, and moving A moves the gap", async ({ page }
   await expect(menu).toBeHidden();
   await expect(parts(page)).toHaveCount(2);
   // Off the board's way, the gap closes; the relation stays.
-  await page.getByRole("button", { name: "Open details of “Hotfix”" }).click();
+  await openDetails(page, "Hotfix");
   const panel = page.getByRole("complementary", { name: "Details of “Hotfix”" });
   await panel.getByLabel("Start", { exact: true }).fill("2026-11-02");
   await panel.getByLabel("Start", { exact: true }).press("Enter");
@@ -107,7 +107,7 @@ test("an interruption from the panel", async ({ page }) => {
   const projectId = await createProject(page.request, "Launch");
   await addTask(page.request, projectId, "Build", "2026-10-12", 2);
   await page.goto(`/p/${projectId}`);
-  await page.getByRole("button", { name: "Open details of “Build”" }).click();
+  await openDetails(page, "Build");
   const panel = page.getByRole("complementary", { name: "Details of “Build”" });
   await panel.getByRole("button", { name: "Add interruption" }).click();
   await panel.getByLabel("Interrupted from").fill("2026-10-13");

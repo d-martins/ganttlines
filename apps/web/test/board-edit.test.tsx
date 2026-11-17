@@ -4,6 +4,7 @@ import { fireEvent, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ANA, CALENDAR, FakeWebSocket, PROJECT_ID, projectState, section, task } from "./board-fixtures";
 import { ADMIN, project, renderApp, screen, signedIn, VIEWER } from "./utils";
+import { openDetails } from "./open-details";
 
 const ROWS = [
   section("design", { position: "a0" }),
@@ -32,7 +33,7 @@ const sentCommands = (): Command[] =>
   FakeWebSocket.last.sent.flatMap((message) => ((message as { type: string }).type === "command" ? [(message as { command: Command }).command] : []));
 /** Opens a task's add-link picker, in its details panel (the list has no predecessor column). */
 async function addLinkTo(user: ReturnType<typeof renderApp>["user"], title: string) {
-  await user.click(screen.getByRole("button", { name: `Open details of “${title}”` }));
+  await openDetails(user, listRow(title));
   const panel = await screen.findByRole("complementary", { name: `Details of “${title}”` });
   await user.click(within(panel).getByRole("button", { name: "Add link" }));
   return panel;
@@ -170,13 +171,13 @@ describe("editing the task list", () => {
 
   it("deletes the row shown in the details panel, and closes the panel", async () => {
     const { user } = await editableBoard();
-    await user.click(screen.getByRole("button", { name: "Open details of “ui”" }));
+    await openDetails(user, listRow("ui"));
     const panel = await screen.findByRole("complementary", { name: "Details of “ui”" });
     await user.click(within(panel).getByRole("button", { name: "More actions" }));
     await user.click(await screen.findByRole("menuitem", { name: "Delete task" }));
     expect(sentCommands()).toEqual([{ type: "deleteRows", ids: ["ui"] }]);
     await waitFor(() => expect(screen.queryByRole("complementary")).not.toBeInTheDocument());
-    await user.click(screen.getByRole("button", { name: "Open details of “design”" }));
+    await openDetails(user, listRow("design"));
     await user.click(within(await screen.findByRole("complementary", { name: "Details of “design”" })).getByRole("button", { name: "More actions" }));
     expect(await screen.findByRole("menuitem", { name: "Delete section" })).toBeInTheDocument();
   });
@@ -193,7 +194,7 @@ describe("editing the task list", () => {
   it("offers no delete buttons to viewers", async () => {
     const { user } = await editableBoard(ROWS, VIEWER);
     expect(screen.queryByRole("button", { name: /^Delete “/ })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Open details of “ui”" }));
+    await openDetails(user, listRow("ui"));
     expect(within(await screen.findByRole("complementary", { name: "Details of “ui”" })).queryByRole("button", { name: /^Delete / })).not.toBeInTheDocument();
   });
 
@@ -257,7 +258,7 @@ describe("editing the task list", () => {
     const { user } = await editableBoard();
     screen.getByRole("button", { name: "Title “ui”" }).focus();
     const stops: string[] = [];
-    for (let i = 0; i < 7; i++) {
+    for (let i = 0; i < 6; i++) {
       await user.tab();
       stops.push(document.activeElement?.getAttribute("aria-label") ?? "");
     }
@@ -267,7 +268,6 @@ describe("editing the task list", () => {
       "Working days of “ui”",
       "Actual work days of “ui”",
       "Show “ui” on the chart",
-      "Open details of “ui”",
       "Delete “ui”",
     ]);
     screen.getByRole("button", { name: "Title “ui”" }).focus();

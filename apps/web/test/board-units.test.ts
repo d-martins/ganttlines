@@ -242,11 +242,11 @@ describe("list and arrows", () => {
 });
 
 describe("list width", () => {
-  it("never narrows the list below its columns", async () => {
-    const { useBoardView, LIST_WIDTH } = await import("../src/board/view-store");
-    useBoardView.getState().setListWidth(250);
+  it("can narrow the list below its columns, which then scroll, but not below its least", async () => {
+    const { useBoardView, LIST_WIDTH, listContentWidth } = await import("../src/board/view-store");
+    useBoardView.getState().setListWidth(100);
     expect(useBoardView.getState().listWidth).toBe(LIST_WIDTH.min);
-    expect(LIST_WIDTH.min).toBe(40 + 96 + 120 + 40 + 40 + 76 + 8); // actions: three icon buttons (14 px), 4 px apart
+    expect(listContentWidth(false)).toBe(40 + 200 + 120 + 40 + 40 + 76 + 8); // actions: three icon buttons (14 px), 4 px apart
   });
 });
 
