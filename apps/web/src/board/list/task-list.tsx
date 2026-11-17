@@ -3,16 +3,16 @@ import { useHoveredMilestone } from "../chart/milestone-lines";
 import type { Slack } from "@ganttlines/engine";
 import { useCriticalPath } from "../critical-path-view";
 import { formatSlack, useSlackAnalysis } from "../slack";
-import type { Calendar, RowId } from "@ganttlines/engine";
-import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, GripVertical, LocateFixed, IndentDecrease, IndentIncrease, MessageSquare, PanelRightOpen, Plus, Trash2 } from "lucide-react";
-import { useEffect, useRef, useState, type HTMLAttributes, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type Ref } from "react";
+import { buildTree, childrenOf, type Calendar, type RowId, type Tree } from "@ganttlines/engine";
+import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, GripVertical, LocateFixed, IndentDecrease, IndentIncrease, MessageSquare, Plus, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type HTMLAttributes, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type Ref } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { commentCounts } from "../../api/queries";
 import { Avatar } from "../../ui/avatar";
 import { IconButton } from "../../ui/button";
 import { AssigneePicker } from "../assignee-picker";
 import { useBoard, useRun } from "../board-context";
-import { setCollapsed } from "../collapse";
+import { setCollapsed, useCollapsed } from "../collapse";
 import { formatDays } from "../chart/bars";
 import type { BoardRow } from "../model";
 import { useSelection } from "../selection";
@@ -223,6 +223,7 @@ export function ListRows({
   const capabilities = useCapabilities();
   const comments = useQuery({ ...commentCounts(board.sync.projectId), enabled: capabilities.comments }).data;
   const { state, calendar, resources, resourceMap, canEdit, canCreateResources } = board;
+  const tree = useMemo(() => buildTree(state), [state]);
   const run = useRun();
   const { selectedId, editingId, draftId, select, edit, center } = useSelection();
   const [cell, setCell] = useState<{ id: RowId; column: Column } | null>(null);
@@ -534,7 +535,7 @@ export function ListRows({
               style={pinned ? { ...PINNED, background: selected ? "linear-gradient(var(--accent-soft), var(--accent-soft)), var(--surface)" : "var(--surface)" } : undefined}
             >
               <span className={`flex gap-1 ${selected ? "" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"}`}>
-                <RowActions id={row.id} title={row.title} />
+                  <RowActions id={row.id} title={row.title} inside={entry.hasChildren ? parentsWithin(tree, row.id) : []} filtering={filtering} />
               </span>
             </span>
           </div>
@@ -650,11 +651,13 @@ function CellButton({
 }
 
 /** The row's quick actions: bring its bar into view, then open its details (again: close them). */
-function RowActions({ id, title }: { id: RowId; title: string }) {
+function RowActions({ id, title, inside, filtering }: { id: RowId; title: string; inside: readonly RowId[]; filtering: boolean }) {
   const board = useBoard();
-  const { select, center, closePanel } = useSelection();
-  const showing = useSelection((selection) => selection.panelOpen && selection.selectedId === id);
+  const { select, center } = useSelection();
+  const collapsed = useCollapsed(board.sync.projectId);
   const name = title || "Untitled";
+  // Anything inside still open, the row itself included: collapse it all; otherwise open it all.
+  const anyOpen = inside.some((parent) => !collapsed.has(parent));
   return (
     <>
       <IconButton
@@ -669,20 +672,22 @@ function RowActions({ id, title }: { id: RowId; title: string }) {
       >
         <LocateFixed size={14} />
       </IconButton>
-      <IconButton
-        data-row-action
-        label={`Open details of “${name}”`}
-        aria-pressed={showing}
-        className={`h-6 w-auto! ${showing ? "bg-accent-soft text-text" : ""}`}
-        onClick={(event) => {
-          event.stopPropagation();
-          // A toggle for this row's details; on another row it just moves the panel there.
-          if (showing) closePanel();
-          else select(id, true);
-        }}
-      >
-        <PanelRightOpen size={14} />
-      </IconButton>
+      {inside.length > 0 ? (
+        <IconButton
+          data-row-action
+          label={`${anyOpen ? "Collapse" : "Expand"} all inside “${name}”`}
+          disabled={filtering}
+          className="h-6 w-auto! disabled:opacity-40"
+          onClick={(event) => {
+            event.stopPropagation();
+            setCollapsed(board.sync.projectId, inside, anyOpen);
+          }}
+        >
+          {anyOpen ? <ChevronsDownUp size={14} /> : <ChevronsUpDown size={14} />}
+        </IconButton>
+      ) : (
+        <span aria-hidden className="w-[22px] shrink-0" />
+      )}
       {board.canEdit ? (
         <IconButton
           data-row-action
@@ -699,6 +704,19 @@ function RowActions({ id, title }: { id: RowId; title: string }) {
       ) : null}
     </>
   );
+}
+
+/** `id` and every row inside it that has rows of its own: what expanding or collapsing all of it changes. */
+function parentsWithin(tree: Tree, id: RowId): RowId[] {
+  const found: RowId[] = [];
+  const walk = (parent: RowId) => {
+    const children = childrenOf(tree, parent);
+    if (children.length === 0) return;
+    found.push(parent);
+    for (const child of children) walk(child.id);
+  };
+  walk(id);
+  return found;
 }
 
 function DropIndicator({ target, depth, rowHeight, valid }: { target: NonNullable<DragState["target"]>; depth: number; rowHeight: number; valid: boolean }) {

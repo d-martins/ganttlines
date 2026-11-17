@@ -7,6 +7,7 @@ import { serverSource, useWorkspace } from "../src/workspace";
 import { IndexedDbStore } from "../src/workspace/indexed-db-store";
 import { leaveTo } from "../src/app/leave";
 import { ADMIN, fakeApi, renderApp, screen } from "./utils";
+import { openDetails } from "./open-details";
 
 vi.mock("../src/app/leave", () => ({ leaveTo: vi.fn() }));
 
@@ -187,7 +188,7 @@ describe("local mode", () => {
     await user.click(screen.getByRole("button", { name: "Add task" }));
     await user.type(screen.getByRole("textbox", { name: "Title" }), "Dig{Enter}");
     const row = (await screen.findAllByRole("row")).find((candidate) => candidate.textContent?.includes("Dig"))!;
-    await user.click(within(row).getByRole("button", { name: /^Open details of/ }))
+    await openDetails(user, row)
     expect(await screen.findByRole("complementary", { name: /^Details of/ })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Comments" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("link", { name: "Settings" }));

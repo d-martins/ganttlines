@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { addTask, command, createProject, listRow, resetDatabase, setupAdmin, signedInUser } from "../support";
+import { addTask, command, createProject, listRow, resetDatabase, setupAdmin, signedInUser, openDetails } from "../support";
 
 test("filters by a person and a tag, tags a task from the panel, and a shared link keeps its filters", async ({ page, browser }) => {
   await resetDatabase();
@@ -40,7 +40,7 @@ test("filters by a person and a tag, tags a task from the panel, and a shared li
   // A tag added in the panel shows beside the task's bar.
   await filters.getByRole("button", { name: "Clear all" }).click();
   await expect(listRow(page, "Docs")).toBeVisible();
-  await page.getByRole("button", { name: "Open details of “Docs”" }).click();
+  await openDetails(page, "Docs");
   const panel = page.getByRole("complementary", { name: "Details of “Docs”" });
   await panel.getByRole("combobox", { name: "Add tag" }).fill("backend");
   await page.keyboard.press("Enter");

@@ -7,6 +7,7 @@ import { describeEntry } from "../src/board/panel/activity";
 import { RichTextView } from "../src/ui/rich-text";
 import { ANA, CALENDAR, FakeWebSocket, PROJECT_ID, projectState, section, task } from "./board-fixtures";
 import { ADMIN, project, renderApp, screen, signedIn, VIEWER } from "./utils";
+import { openDetails } from "./open-details";
 import { placeSuggestions } from "../src/board/panel/suggestion-list";
 import { newMilestonePlace } from "../src/board/slack";
 import { isCriticalPathOn, useCriticalPathView } from "../src/board/critical-path-view";
@@ -76,7 +77,7 @@ const rowOf = (title: string) => screen.getAllByRole("row").find((candidate) => 
 /** Opens a row's details: its "Open details" button in the list. */
 const selectRow = async (user: ReturnType<typeof import("@testing-library/user-event").default.setup>, title: string) => {
   if (screen.queryByRole("complementary", { name: `Details of “${title}”` })) return;
-  await user.click(within(rowOf(title)).getByRole("button", { name: /^Open details of/ }));
+  await openDetails(user, rowOf(title));
   await screen.findByRole("complementary", { name: /^Details of/ }); // (the panel is a separate download)
 };
 
@@ -264,27 +265,55 @@ describe("details panel", () => {
     expect(scrollTo).toHaveBeenCalledTimes(1);
   });
 
-  it("has row buttons to show the bar on the chart and to open the details", async () => {
+  it("has a row button to show the bar on the chart, and none to open the details", async () => {
     const { user } = await panelBoard();
     const scrollTo = vi.fn();
     const scroller = screen.getByTestId("board-scroller");
     scroller.scrollTo = scrollTo as unknown as typeof scroller.scrollTo;
-    const show = within(rowOf("hooks")).getByRole("button", { name: "Show “hooks” on the chart" });
-    const open = within(rowOf("hooks")).getByRole("button", { name: "Open details of “hooks”" });
-    await user.click(show!);
+    await user.click(within(rowOf("hooks")).getByRole("button", { name: "Show “hooks” on the chart" }));
     expect(scrollTo).toHaveBeenCalledTimes(1);
     expect(rowOf("hooks")).toHaveAttribute("aria-selected", "true");
     expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
-    await user.click(open!);
-    expect(panel()).toHaveAccessibleName("Details of “hooks”");
-    expect(open).toHaveAttribute("aria-pressed", "true");
-    expect(scrollTo).toHaveBeenCalledTimes(1);
-    // On another row it moves the panel there; again on the same row it closes it.
-    await user.click(within(rowOf("ui")).getByRole("button", { name: "Open details of “ui”" }));
-    expect(panel()).toHaveAccessibleName("Details of “ui”");
-    await user.click(within(rowOf("ui")).getByRole("button", { name: "Open details of “ui”" }));
-    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
-    expect(rowOf("ui")).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByRole("button", { name: /^Open details of/ })).not.toBeInTheDocument();
+  });
+
+  describe("expanding and collapsing everything inside a row", () => {
+    const NESTED = [
+      section("x", { position: "a0" }),
+      task("epic", { parentId: "x", position: "a0", userStart: "2026-10-12" }),
+      task("story", { parentId: "epic", position: "a0", userStart: "2026-10-12" }),
+      task("step", { parentId: "story", position: "a0", userStart: "2026-10-12" }),
+      task("lone", { parentId: "x", position: "a1", userStart: "2026-10-12" }),
+    ];
+    const shown = () => screen.getAllByRole("row").slice(1).map((row) => within(row).queryByRole("button", { name: /^Title/ })?.textContent ?? row.textContent);
+    const toggle = (name: string) => within(rowOf(name)).getByRole("button", { name: new RegExp(`^(Collapse|Expand) all inside “${name}”`) });
+
+    it("collapses all when anything inside is expanded, then expands all", async () => {
+      const { user } = await panelBoard(NESTED);
+      expect(toggle("epic")).toHaveAccessibleName("Collapse all inside “epic”");
+      await user.click(toggle("epic"));
+      expect(shown()).not.toContain("story");
+      expect(toggle("epic")).toHaveAccessibleName("Expand all inside “epic”");
+      await user.click(toggle("epic"));
+      expect(shown()).toEqual(expect.arrayContaining(["epic", "story", "step"]));
+      expect(toggle("story")).toHaveAccessibleName("Collapse all inside “story”");
+    });
+
+    it("counts the row itself: collapsed on its own, with a subtask inside still expanded, it still offers collapse all", async () => {
+      const { user } = await panelBoard(NESTED);
+      await user.click(within(rowOf("epic")).getByRole("button", { name: "Collapse" }));
+      expect(toggle("epic")).toHaveAccessibleName("Collapse all inside “epic”");
+      await user.click(toggle("epic"));
+      await user.click(toggle("epic"));
+      expect(shown()).toEqual(expect.arrayContaining(["story", "step"]));
+    });
+
+    it("isn't there on rows with nothing inside, and is off while filtering", async () => {
+      // (lone, with nothing inside, has none either: checked below on step, which the filter shows)
+      await panelBoard(NESTED, ADMIN, [], [], "?q=step");
+      expect(within(rowOf("step")).queryByRole("button", { name: /all inside/ })).not.toBeInTheDocument();
+      expect(toggle("epic")).toBeDisabled();
+    });
   });
 
   it("shows, posts and live-updates comments", async () => {
@@ -1360,7 +1389,7 @@ describe("details panel", () => {
 
     it("sections have no Tags section", async () => {
       const { user } = await panelBoard();
-      await user.click(within(rowOf("x")).getByRole("button", { name: /^Open details of/ }))
+      await openDetails(user, rowOf("x"))
       await screen.findByRole("complementary", { name: /^Details of/ });
       expect(within(panel()).queryByRole("heading", { name: "Tags" })).not.toBeInTheDocument();
     });
@@ -1380,14 +1409,14 @@ describe("details panel", () => {
 
   it("offers no Add a task on a section while filtering", async () => {
     const { user } = await panelBoard(ROWS, ADMIN, [], [], "?q=hooks");
-    await user.click(within(rowOf("x")).getByRole("button", { name: /^Open details of/ }))
+    await openDetails(user, rowOf("x"))
     await screen.findByRole("complementary", { name: /^Details of/ });
     expect(within(panel()).queryByRole("button", { name: /^Add a/ })).not.toBeInTheDocument();
   });
 
   describe("sections and the More actions menu", () => {
     const openSection = async (user: Awaited<ReturnType<typeof panelBoard>>["user"]) => {
-      await user.click(within(rowOf("x")).getByRole("button", { name: /^Open details of/ }))
+      await openDetails(user, rowOf("x"))
       await screen.findByRole("complementary", { name: /^Details of/ });
     };
 

@@ -1,36 +1,9 @@
 import { InterruptionsSection } from "./interruptions-section";
-import {
-  buildTree,
-  childrenOf,
-  computeSchedule,
-  CycleError,
-  fromDay,
-  isParentTask,
-  TASK_COLORS,
-  type Row,
-  type RowId,
-  type Schedule,
-  type TaskRow,
-} from "@ganttlines/engine";
+import { buildTree, childrenOf, computeSchedule, CycleError, fromDay, isParentTask, TASK_COLORS, type Row, type RowId, type Schedule, type TaskRow } from "@ganttlines/engine";
 import { COMMAND_LIMITS } from "@ganttlines/protocol/constants";
 import { useQuery } from "@tanstack/react-query";
-import {
-  ChevronsLeft,
-  ChevronsRight,
-  Lock,
-  MoreHorizontal,
-  Plus,
-  Trash2,
-  UserRound,
-} from "lucide-react";
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type KeyboardEvent,
-  type ReactNode,
-} from "react";
+import { ChevronsLeft, ChevronsRight, Lock, MoreHorizontal, Plus, Trash2, UserRound } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { currentUser } from "../../api/queries";
 import { Avatar } from "../../ui/avatar";
 import { RichTextEditor } from "../../ui/rich-text";
@@ -41,13 +14,7 @@ import { AssigneePicker } from "../assignee-picker";
 import { useBoard, useRun } from "../board-context";
 import { formatDay, taskColors } from "../format";
 import { formatDays } from "../chart/bars";
-import {
-  addSubtask,
-  deleteRow,
-  parseDays,
-  setActualDays,
-  setWorkingDays,
-} from "../list/list-actions";
+import { addSubtask, deleteRow, parseDays, setActualDays, setWorkingDays } from "../list/list-actions";
 import { actualDaysOf } from "../model";
 import { useSelection } from "../selection";
 import { Activity } from "./activity";
@@ -61,31 +28,10 @@ import { useCapabilities } from "../../workspace";
  * Morning or afternoon for a start or end date (AM / PM). An end in the morning means the task
  * ends at midday; in the afternoon, at the end of the day.
  */
-function HalfToggle({
-  what,
-  afternoon,
-  disabled,
-  onChange,
-}: {
-  what: "Starts" | "Ends";
-  afternoon: boolean;
-  disabled: boolean;
-  onChange: (afternoon: boolean) => void;
-}) {
-  const hint = (pm: boolean) =>
-    what === "Starts"
-      ? pm
-        ? "Starts in the afternoon"
-        : "Starts in the morning"
-      : pm
-        ? "Ends at the end of the day"
-        : "Ends at midday";
+function HalfToggle({ what, afternoon, disabled, onChange }: { what: "Starts" | "Ends"; afternoon: boolean; disabled: boolean; onChange: (afternoon: boolean) => void }) {
+  const hint = (pm: boolean) => (what === "Starts" ? (pm ? "Starts in the afternoon" : "Starts in the morning") : pm ? "Ends at the end of the day" : "Ends at midday");
   return (
-    <div
-      role="group"
-      aria-label={`${what}: morning or afternoon`}
-      className="flex shrink-0 overflow-hidden rounded-md border border-border-strong text-xs"
-    >
+    <div role="group" aria-label={`${what}: morning or afternoon`} className="flex shrink-0 overflow-hidden rounded-md border border-border-strong text-xs">
       {[false, true].map((pm) => (
         <button
           key={String(pm)}
@@ -116,9 +62,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="flex flex-col gap-2 border-t border-border px-4 py-3">
-      <h3 className="text-xs font-semibold tracking-wide text-muted uppercase">
-        {title}
-      </h3>
+      <h3 className="text-xs font-semibold tracking-wide text-muted uppercase">{title}</h3>
       {children}
     </section>
   );
@@ -131,18 +75,9 @@ const CONVERSATION_TABS = [
 type ConversationTab = (typeof CONVERSATION_TABS)[number]["id"];
 
 /** A row's comments and history as two tabs (comments first). ←/→ move between the tabs. */
-function ConversationTabs({
-  comments,
-  history,
-}: {
-  comments: ReactNode;
-  history: ReactNode;
-}) {
+function ConversationTabs({ comments, history }: { comments: ReactNode; history: ReactNode }) {
   const [tab, setTab] = useState<ConversationTab>("comments");
-  const tabs = useRef<Record<ConversationTab, HTMLButtonElement | null>>({
-    comments: null,
-    history: null,
-  });
+  const tabs = useRef<Record<ConversationTab, HTMLButtonElement | null>>({ comments: null, history: null });
   return (
     <section className="flex flex-col border-t border-border">
       <div
@@ -171,9 +106,7 @@ function ConversationTabs({
             tabIndex={tab === id ? 0 : -1}
             onClick={() => setTab(id)}
             className={`-mb-px border-b-2 py-2 text-xs font-semibold tracking-wide uppercase transition-colors ${
-              tab === id
-                ? "border-accent text-text"
-                : "border-transparent text-muted hover:text-text"
+              tab === id ? "border-accent text-text" : "border-transparent text-muted hover:text-text"
             }`}
           >
             {label}
@@ -181,14 +114,7 @@ function ConversationTabs({
         ))}
       </div>
       {CONVERSATION_TABS.map(({ id }) => (
-        <div
-          key={id}
-          role="tabpanel"
-          id={`conversation-panel-${id}`}
-          aria-labelledby={`conversation-tab-${id}`}
-          hidden={tab !== id}
-          className="px-4 py-3"
-        >
+        <div key={id} role="tabpanel" id={`conversation-panel-${id}`} aria-labelledby={`conversation-tab-${id}`} hidden={tab !== id} className="px-4 py-3">
           {id === "comments" ? comments : history}
         </div>
       ))}
@@ -200,17 +126,8 @@ function ConversationTabs({
  * The details drawer collapsed: a strip down the right edge with the selected row's name, that opens it again.
  * Disabled until a row is selected.
  */
-function DetailsStrip({
-  title,
-  onOpen,
-}: {
-  title: string | null;
-  onOpen: () => void;
-}) {
-  const label =
-    title === null
-      ? "Show details"
-      : `Show details of “${title || "Untitled"}”`;
+function DetailsStrip({ title, onOpen }: { title: string | null; onOpen: () => void }) {
+  const label = title === null ? "Show details" : `Show details of “${title || "Untitled"}”`;
   return (
     <button
       type="button"
@@ -221,10 +138,7 @@ function DetailsStrip({
       className="absolute top-0 right-0 bottom-0 z-30 flex w-6 flex-col items-center gap-2 border-l border-border bg-bg pt-2 text-muted shadow-md hover:text-text disabled:cursor-default disabled:hover:text-muted"
     >
       <ChevronsLeft aria-hidden size={14} className="shrink-0" />
-      <span
-        aria-hidden
-        className="truncate text-xs [writing-mode:vertical-rl] rotate-180"
-      >
+      <span aria-hidden className="truncate text-xs [writing-mode:vertical-rl] rotate-180">
         {title === null ? "Select a task" : title || "Untitled"}
       </span>
     </button>
@@ -236,13 +150,7 @@ function DetailsStrip({
  * (edited through the same checked commands as the list and chart), description, subtasks,
  * comments and history. Selecting another row retargets it; Escape or × closes it.
  */
-export function DetailsPanel({
-  numbers,
-  filtering,
-}: {
-  numbers: ReadonlyMap<RowId, number>;
-  filtering: boolean;
-}) {
+export function DetailsPanel({ numbers, filtering }: { numbers: ReadonlyMap<RowId, number>; filtering: boolean }) {
   const capabilities = useCapabilities();
   const board = useBoard();
   const { state, calendar, sync } = board;
@@ -263,8 +171,7 @@ export function DetailsPanel({
   useEffect(() => {
     const element = panel.current;
     if (!element) return;
-    const measure = () =>
-      setHalfHeight(Math.round(element.clientHeight / 2) || 240);
+    const measure = () => setHalfHeight(Math.round(element.clientHeight / 2) || 240);
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(element);
@@ -279,28 +186,18 @@ export function DetailsPanel({
     }
   }, [state, calendar]);
 
-  const strip = open ? null : (
-    <DetailsStrip title={selected ? selected.title : null} onOpen={openPanel} />
-  );
+  const strip = open ? null : <DetailsStrip title={selected ? selected.title : null} onOpen={openPanel} />;
   if (!row) return strip;
   // Selecting a row opens the panel without taking focus (the list keeps the keyboard). Closing it
   // from inside hands focus back to the row's title in the list.
   const close = () => {
     const inside = panel.current?.contains(document.activeElement) ?? false;
     closePanel();
-    if (inside)
-      (
-        document.querySelector<HTMLElement>(
-          `[data-cell="${CSS.escape(row.id)}:title"]`,
-        ) ?? document.querySelector<HTMLElement>('[role="treegrid"]')
-      )?.focus();
+    if (inside) (document.querySelector<HTMLElement>(`[data-cell="${CSS.escape(row.id)}:title"]`) ?? document.querySelector<HTMLElement>('[role="treegrid"]'))?.focus();
   };
   const onKey = (event: KeyboardEvent) => {
     const target = event.target as HTMLElement;
-    if (
-      event.key === "Escape" &&
-      !["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)
-    ) {
+    if (event.key === "Escape" && !["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) {
       event.stopPropagation();
       close();
     }
@@ -308,207 +205,120 @@ export function DetailsPanel({
   const tree = buildTree(state);
   const children = childrenOf(tree, row.id);
   const isParent = isParentTask(tree, row);
-  const kindLabel =
-    row.kind === "section"
-      ? "Section"
-      : isParent
-        ? "Parent task"
-        : row.kind === "task" && row.duration === 0
-          ? "Milestone"
-          : "Task";
+  const kindLabel = row.kind === "section" ? "Section" : isParent ? "Parent task" : row.kind === "task" && row.duration === 0 ? "Milestone" : "Task";
 
   return (
     <>
       {strip}
       <aside
         ref={panel}
-        tabIndex={-1}
-        aria-label={`Details of “${row.title || "Untitled"}”`}
-        aria-hidden={!open}
-        inert={!open}
-        onKeyDown={onKey}
-        // Slides in (on first mount by the keyframes, later by the transition) and out; still for reduced motion.
-        className={`animate-panel-in absolute top-0 right-0 bottom-0 z-30 flex w-[min(26rem,92%)] flex-col overflow-y-auto border-l border-border bg-bg shadow-xl outline-none transition-[translate,visibility] duration-200 ease-out motion-reduce:animate-none motion-reduce:transition-none ${
-          open ? "visible translate-x-0" : "invisible translate-x-full"
-        }`}
-      >
-        <header className="sticky top-0 z-10 flex items-center gap-2 border-b border-border bg-bg px-4 py-2">
-          <span className="text-xs text-muted">
-            #{numbers.get(row.id)} · {kindLabel}
-          </span>
-          {board.canEdit ? (
-            <Menu
-              trigger={
-                <IconButton label="More actions" className="ml-auto">
-                  <MoreHorizontal size={16} />
-                </IconButton>
-              }
-            >
-              <MenuItem
-                danger
-                onSelect={() => {
-                  deleteRow(board, row);
-                  closePanel();
-                }}
-              >
-                <span className="flex items-center gap-1.5">
-                  <Trash2 size={13} aria-hidden /> Delete{" "}
-                  {row.kind === "section" ? "section" : "task"}
-                </span>
-              </MenuItem>
-            </Menu>
-          ) : null}
-          <IconButton
-            label="Collapse details (Esc)"
-            className={board.canEdit ? "" : "ml-auto"}
-            onClick={close}
+      tabIndex={-1}
+      aria-label={`Details of “${row.title || "Untitled"}”`}
+      aria-hidden={!open}
+      inert={!open}
+      onKeyDown={onKey}
+      // Slides in (on first mount by the keyframes, later by the transition) and out; still for reduced motion.
+      className={`animate-panel-in absolute top-0 right-0 bottom-0 z-30 flex w-[min(26rem,92%)] flex-col overflow-y-auto border-l border-border bg-bg shadow-xl outline-none transition-[translate,visibility] duration-200 ease-out motion-reduce:animate-none motion-reduce:transition-none ${
+        open ? "visible translate-x-0" : "invisible translate-x-full"
+      }`}
+    >
+      <header className="sticky top-0 z-10 flex items-center gap-2 border-b border-border bg-bg px-4 py-2">
+        <span className="text-xs text-muted">
+          #{numbers.get(row.id)} · {kindLabel}
+        </span>
+        {board.canEdit ? (
+          <Menu
+            trigger={
+              <IconButton label="More actions" className="ml-auto">
+                <MoreHorizontal size={16} />
+              </IconButton>
+            }
           >
-            <ChevronsRight size={16} />
-          </IconButton>
-        </header>
-        <div className="flex flex-col gap-3 px-4 py-3">
-          <CommitInput
-            aria-label="Task title"
-            value={row.title}
-            placeholder="Untitled"
-            maxLength={COMMAND_LIMITS.titleMax}
-            disabled={!board.canEdit}
-            onCommit={(title) =>
-              run({ type: "updateTitle", id: row.id, title: title.trim() })
-            }
-            className="-ml-px border-transparent pl-0 text-base font-semibold transition-[padding,border-color] duration-200 ease-out focus:border-border-strong focus:pl-2 motion-reduce:transition-none"
-          />
-          <Description row={row} maxHeight={halfHeight} />
-          {row.kind === "task" ? (
-            <TaskFields
-              task={row}
-              isParent={isParent}
-              schedule={schedule}
-              numbers={numbers}
-            />
-          ) : null}
-        </div>
-        {row.kind === "task" ? (
-          <Section title="Tags">
-            <TagsSection key={row.id} task={row} />
-          </Section>
-        ) : null}
-        {row.kind === "task" && !isParent && row.duration !== 0 ? (
-          <Section title="Interruptions">
-            <InterruptionsSection
-              key={row.id}
-              task={row}
-              schedule={schedule}
-              calendar={calendar}
-              canEdit={board.canEdit}
-              run={run}
-            />
-          </Section>
-        ) : null}
-        {row.kind === "task" ? (
-          <Section title="Links">
-            <LinksSection
-              key={row.id}
-              task={row}
-              state={state}
-              numbers={numbers}
-              canEdit={board.canEdit}
-              run={run}
-              calendar={calendar}
-              schedule={schedule}
-            />
-          </Section>
-        ) : null}
-        <Section title={row.kind === "section" ? "Tasks" : "Subtasks"}>
-          <ul className="flex flex-col gap-1 text-sm">
-            {children.map((child) => (
-              <ChildLink
-                key={child.id}
-                child={child}
-                schedule={schedule}
-                numbers={numbers}
-              />
-            ))}
-          </ul>
-          {children.length === 0 ? (
-            <p className="text-sm text-muted">None.</p>
-          ) : null}
-          {board.canEdit && !filtering ? (
-            <button
-              type="button"
-              className="flex items-center gap-1 self-start rounded px-1 py-0.5 text-xs text-muted hover:bg-surface-2 hover:text-text"
-              onClick={() => addSubtask(board, state, row)}
+            <MenuItem
+              danger
+              onSelect={() => {
+                deleteRow(board, row);
+                closePanel();
+              }}
             >
-              <Plus size={13} /> Add{" "}
-              {row.kind === "section" ? "a task" : "a subtask"}
-            </button>
-          ) : null}
-        </Section>
-        {capabilities.comments && capabilities.activity ? (
-          <ConversationTabs
-            comments={
-              <Comments
-                projectId={sync.projectId}
-                taskId={row.id}
-                canComment={board.canComment}
-                isAdmin={me.data?.role === "admin"}
-                maxHeight={halfHeight}
-              />
-            }
-            history={
-              <Activity
-                projectId={sync.projectId}
-                rowId={row.id}
-                names={{ state, resources: board.resourceMap }}
-              />
-            }
-          />
-        ) : capabilities.comments ? (
-          <Section title="Comments">
-            <Comments
-              projectId={sync.projectId}
-              taskId={row.id}
-              canComment={board.canComment}
-              isAdmin={me.data?.role === "admin"}
-              maxHeight={halfHeight}
-            />
-          </Section>
-        ) : capabilities.activity ? (
-          <Section title="History">
-            <Activity
-              projectId={sync.projectId}
-              rowId={row.id}
-              names={{ state, resources: board.resourceMap }}
-            />
-          </Section>
+              <span className="flex items-center gap-1.5">
+                <Trash2 size={13} aria-hidden /> Delete {row.kind === "section" ? "section" : "task"}
+              </span>
+            </MenuItem>
+          </Menu>
         ) : null}
+        <IconButton label="Collapse details (Esc)" className={board.canEdit ? "" : "ml-auto"} onClick={close}>
+          <ChevronsRight size={16} />
+        </IconButton>
+      </header>
+      <div className="flex flex-col gap-3 px-4 py-3">
+        <CommitInput
+          aria-label="Task title"
+          value={row.title}
+          placeholder="Untitled"
+          maxLength={COMMAND_LIMITS.titleMax}
+          disabled={!board.canEdit}
+          onCommit={(title) => run({ type: "updateTitle", id: row.id, title: title.trim() })}
+          className="-ml-px border-transparent pl-0 text-base font-semibold transition-[padding,border-color] duration-200 ease-out focus:border-border-strong focus:pl-2 motion-reduce:transition-none"
+        />
+        <Description row={row} maxHeight={halfHeight} />
+        {row.kind === "task" ? <TaskFields task={row} isParent={isParent} schedule={schedule} numbers={numbers} /> : null}
+      </div>
+      {row.kind === "task" ? (
+        <Section title="Tags">
+          <TagsSection key={row.id} task={row} />
+        </Section>
+      ) : null}
+      {row.kind === "task" && !isParent && row.duration !== 0 ? (
+        <Section title="Interruptions">
+          <InterruptionsSection key={row.id} task={row} schedule={schedule} calendar={calendar} canEdit={board.canEdit} run={run} />
+        </Section>
+      ) : null}
+      {row.kind === "task" ? (
+        <Section title="Links">
+          <LinksSection key={row.id} task={row} state={state} numbers={numbers} canEdit={board.canEdit} run={run} calendar={calendar} schedule={schedule} />
+        </Section>
+      ) : null}
+      <Section title={row.kind === "section" ? "Tasks" : "Subtasks"}>
+        <ul className="flex flex-col gap-1 text-sm">
+          {children.map((child) => (
+            <ChildLink key={child.id} child={child} schedule={schedule} numbers={numbers} />
+          ))}
+        </ul>
+        {children.length === 0 ? <p className="text-sm text-muted">None.</p> : null}
+        {board.canEdit && !filtering ? (
+          <button type="button" className="flex items-center gap-1 self-start rounded px-1 py-0.5 text-xs text-muted hover:bg-surface-2 hover:text-text" onClick={() => addSubtask(board, state, row)}>
+            <Plus size={13} /> Add {row.kind === "section" ? "a task" : "a subtask"}
+          </button>
+        ) : null}
+      </Section>
+      {capabilities.comments && capabilities.activity ? (
+        <ConversationTabs
+          comments={<Comments projectId={sync.projectId} taskId={row.id} canComment={board.canComment} isAdmin={me.data?.role === "admin"} maxHeight={halfHeight} />}
+          history={<Activity projectId={sync.projectId} rowId={row.id} names={{ state, resources: board.resourceMap }} />}
+        />
+      ) : capabilities.comments ? (
+        <Section title="Comments">
+          <Comments projectId={sync.projectId} taskId={row.id} canComment={board.canComment} isAdmin={me.data?.role === "admin"} maxHeight={halfHeight} />
+        </Section>
+      ) : capabilities.activity ? (
+        <Section title="History">
+          <Activity projectId={sync.projectId} rowId={row.id} names={{ state, resources: board.resourceMap }} />
+        </Section>
+      ) : null}
       </aside>
     </>
   );
 }
 
-function TaskFields({
-  task,
-  isParent,
-  schedule,
-  numbers,
-}: {
-  task: TaskRow;
-  isParent: boolean;
-  schedule: Schedule | null;
-  numbers: ReadonlyMap<RowId, number>;
-}) {
+function TaskFields({ task, isParent, schedule, numbers }: { task: TaskRow; isParent: boolean; schedule: Schedule | null; numbers: ReadonlyMap<RowId, number> }) {
   const board = useBoard();
   const run = useRun();
   const { canEdit, resources, resourceMap, canCreateResources, state } = board;
   const span = schedule?.get(task.id)?.span ?? null;
-  const assignee = task.resourceId
-    ? resourceMap.get(task.resourceId)
-    : undefined;
+  const assignee = task.resourceId ? resourceMap.get(task.resourceId) : undefined;
   const leaf = !isParent;
-  const actualSum = isParent
-    ? actualDaysOf(state, buildTree(state), task.id)
-    : null;
+  const actualSum = isParent ? actualDaysOf(state, buildTree(state), task.id) : null;
   const milestone = leaf && task.duration === 0;
   const datesLocked = leaf && task.locked;
 
@@ -520,27 +330,11 @@ function TaskFields({
             value={task.resourceId}
             resources={resources}
             canCreate={canCreateResources}
-            onChange={(resourceId) =>
-              run({ type: "setAssignee", id: task.id, resourceId })
-            }
+            onChange={(resourceId) => run({ type: "setAssignee", id: task.id, resourceId })}
             trigger={
-              <button
-                type="button"
-                aria-label={`Assignee: ${assignee?.name ?? "nobody"}`}
-                className={`${INPUT} flex items-center gap-2 text-left`}
-              >
-                {assignee ? (
-                  <Avatar
-                    name={assignee.name}
-                    color={assignee.avatarColor}
-                    size={18}
-                  />
-                ) : (
-                  <UserRound size={16} className="text-muted" />
-                )}
-                {assignee?.name ?? (
-                  <span className="text-muted">Unassigned</span>
-                )}
+              <button type="button" aria-label={`Assignee: ${assignee?.name ?? "nobody"}`} className={`${INPUT} flex items-center gap-2 text-left`}>
+                {assignee ? <Avatar name={assignee.name} color={assignee.avatarColor} size={18} /> : <UserRound size={16} className="text-muted" />}
+                {assignee?.name ?? <span className="text-muted">Unassigned</span>}
               </button>
             }
           />
@@ -556,30 +350,14 @@ function TaskFields({
             value={span ? fromDay(span.start) : ""}
             disabled={!canEdit || datesLocked}
             // A new date keeps the half of the day it starts in.
-            onCommit={(date) =>
-              date &&
-              run({
-                type: "moveTask",
-                id: task.id,
-                start: date,
-                half: span?.startsAfternoon ? "afternoon" : "morning",
-              })
-            }
+            onCommit={(date) => date && run({ type: "moveTask", id: task.id, start: date, half: span?.startsAfternoon ? "afternoon" : "morning" })}
           />
           {!milestone ? (
             <HalfToggle
               what="Starts"
               afternoon={span?.startsAfternoon ?? false}
               disabled={!canEdit || datesLocked || !span}
-              onChange={(afternoon) =>
-                span &&
-                run({
-                  type: "moveTask",
-                  id: task.id,
-                  start: fromDay(span.start),
-                  half: afternoon ? "afternoon" : "morning",
-                })
-              }
+              onChange={(afternoon) => span && run({ type: "moveTask", id: task.id, start: fromDay(span.start), half: afternoon ? "afternoon" : "morning" })}
             />
           ) : null}
         </div>
@@ -593,31 +371,13 @@ function TaskFields({
               value={span ? fromDay(span.end) : ""}
               disabled={!canEdit || !leaf || datesLocked || !span}
               min={span ? fromDay(span.start) : undefined}
-              onCommit={(date) =>
-                date &&
-                run({
-                  type: "resizeTask",
-                  id: task.id,
-                  edge: "end",
-                  date,
-                  half: span?.endsMidday ? "morning" : "afternoon",
-                })
-              }
+              onCommit={(date) => date && run({ type: "resizeTask", id: task.id, edge: "end", date, half: span?.endsMidday ? "morning" : "afternoon" })}
             />
             <HalfToggle
               what="Ends"
               afternoon={!(span?.endsMidday ?? false)}
               disabled={!canEdit || !leaf || datesLocked || !span}
-              onChange={(afternoon) =>
-                span &&
-                run({
-                  type: "resizeTask",
-                  id: task.id,
-                  edge: "end",
-                  date: fromDay(span.end),
-                  half: afternoon ? "afternoon" : "morning",
-                })
-              }
+              onChange={(afternoon) => span && run({ type: "resizeTask", id: task.id, edge: "end", date: fromDay(span.end), half: afternoon ? "afternoon" : "morning" })}
             />
           </div>
         </Field>
@@ -639,11 +399,7 @@ function TaskFields({
         </Field>
       ) : (
         <Field label="Dates">
-          <span className="text-muted">
-            {span
-              ? `${formatDay(span.start)} – ${formatDay(span.end)} (from its subtasks)`
-              : "From its subtasks (none scheduled)"}
-          </span>
+          <span className="text-muted">{span ? `${formatDay(span.start)} – ${formatDay(span.end)} (from its subtasks)` : "From its subtasks (none scheduled)"}</span>
         </Field>
       )}
       {leaf && !milestone ? (
@@ -654,9 +410,7 @@ function TaskFields({
             min={0.5}
             step={0.5}
             placeholder="Not recorded"
-            value={
-              task.actualDuration === null ? "" : String(task.actualDuration)
-            }
+            value={task.actualDuration === null ? "" : String(task.actualDuration)}
             disabled={!canEdit}
             onCommit={(value) => setActualDays(board, task, parseDays(value))}
           />
@@ -664,17 +418,11 @@ function TaskFields({
       ) : null}
       {!leaf && actualSum !== null ? (
         <Field label="Actual work days">
-          <span className="text-muted">
-            {formatDays(actualSum)} (from its subtasks)
-          </span>
+          <span className="text-muted">{formatDays(actualSum)} (from its subtasks)</span>
         </Field>
       ) : null}
       <Field label="Color">
-        <div
-          role="radiogroup"
-          aria-label="Color"
-          className="flex flex-wrap gap-1"
-        >
+        <div role="radiogroup" aria-label="Color" className="flex flex-wrap gap-1">
           {TASK_COLORS.map((color) => (
             <button
               key={color}
@@ -683,10 +431,7 @@ function TaskFields({
               aria-checked={task.color === color}
               aria-label={color}
               disabled={!canEdit}
-              onClick={() =>
-                color !== task.color &&
-                run({ type: "setColor", id: task.id, color })
-              }
+              onClick={() => color !== task.color && run({ type: "setColor", id: task.id, color })}
               className={`h-5 w-5 rounded ${task.color === color ? "ring-2 ring-text ring-offset-1 ring-offset-bg" : ""}`}
               style={{ background: taskColors(color).fill }}
             />
@@ -696,33 +441,11 @@ function TaskFields({
       {leaf ? (
         <div className="flex gap-4 pl-[7.5rem] text-sm">
           <label className="flex items-center gap-1.5">
-            <input
-              type="checkbox"
-              checked={milestone}
-              disabled={!canEdit || datesLocked}
-              onChange={(event) =>
-                run({
-                  type: "convertMilestone",
-                  id: task.id,
-                  milestone: event.target.checked,
-                })
-              }
-            />
+            <input type="checkbox" checked={milestone} disabled={!canEdit || datesLocked} onChange={(event) => run({ type: "convertMilestone", id: task.id, milestone: event.target.checked })} />
             Milestone
           </label>
           <label className="flex items-center gap-1.5">
-            <input
-              type="checkbox"
-              checked={task.locked}
-              disabled={!canEdit}
-              onChange={(event) =>
-                run({
-                  type: "setLocked",
-                  id: task.id,
-                  locked: event.target.checked,
-                })
-              }
-            />
+            <input type="checkbox" checked={task.locked} disabled={!canEdit} onChange={(event) => run({ type: "setLocked", id: task.id, locked: event.target.checked })} />
             <Lock size={12} aria-hidden /> Lock dates
           </label>
         </div>
@@ -747,47 +470,24 @@ function Description({ row, maxHeight }: { row: Row; maxHeight: number }) {
       editable={canEdit}
       autoSize={{ min: 72, max: maxHeight, expandOnFocus: true }}
       onCommit={(description) => {
-        if (description.length > COMMAND_LIMITS.descriptionMax)
-          return toast(
-            `Descriptions are limited to ${COMMAND_LIMITS.descriptionMax} characters`,
-            { tone: "error" },
-          );
+        if (description.length > COMMAND_LIMITS.descriptionMax) return toast(`Descriptions are limited to ${COMMAND_LIMITS.descriptionMax} characters`, { tone: "error" });
         run({ type: "setDescription", id: row.id, description });
       }}
     />
   );
 }
 
-function ChildLink({
-  child,
-  schedule,
-  numbers,
-}: {
-  child: Row;
-  schedule: Schedule | null;
-  numbers: ReadonlyMap<RowId, number>;
-}) {
+function ChildLink({ child, schedule, numbers }: { child: Row; schedule: Schedule | null; numbers: ReadonlyMap<RowId, number> }) {
   const select = useSelection((selection) => selection.select);
   const span = schedule?.get(child.id)?.span;
   return (
     <li>
-      <button
-        type="button"
-        onClick={() => select(child.id)}
-        className="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left hover:bg-surface-2"
-      >
-        <span className="w-8 text-right text-xs text-muted tabular-nums">
-          #{numbers.get(child.id)}
-        </span>
+      <button type="button" onClick={() => select(child.id)} className="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left hover:bg-surface-2">
+        <span className="w-8 text-right text-xs text-muted tabular-nums">#{numbers.get(child.id)}</span>
         <span className="truncate">{child.title || "Untitled"}</span>
-        <span className="ml-auto shrink-0 text-xs text-muted">
-          {span
-            ? span.start === span.end
-              ? formatDay(span.start)
-              : `${formatDay(span.start)} – ${formatDay(span.end)}`
-            : "–"}
-        </span>
+        <span className="ml-auto shrink-0 text-xs text-muted">{span ? (span.start === span.end ? formatDay(span.start) : `${formatDay(span.start)} – ${formatDay(span.end)}`) : "–"}</span>
       </button>
     </li>
   );
 }
+

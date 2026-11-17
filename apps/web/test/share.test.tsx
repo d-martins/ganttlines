@@ -3,6 +3,7 @@ import { fireEvent, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ANA, CALENDAR, FakeWebSocket, PROJECT_ID, projectState, section, task } from "./board-fixtures";
 import { ADMIN, fakeApi, GUEST, project, renderApp, screen, signedIn, VIEWER, type FakeApi } from "./utils";
+import { openDetails } from "./open-details";
 
 const TOKEN = "tok_abc";
 const ROWS = [section("x", { position: "a0" }), task("ui", { parentId: "x", position: "a0", userStart: "2026-09-30", duration: 5 })];
@@ -89,7 +90,7 @@ describe("share links", () => {
     await joined();
     expect(screen.getByText("Editing via a shared link — changes are saved for everyone.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add task" })).toBeInTheDocument();
-    await user.click(within(screen.getAllByRole("row")[2]!).getByRole("button", { name: /^Open details of/ })) // the second task (row 0 is the header)
+    await openDetails(user, screen.getAllByRole("row")[2]!) // the second task (row 0 is the header)
     expect(await screen.findByRole("textbox", { name: "Write a comment" })).toBeInTheDocument();
     fireEvent.contextMenu(document.querySelector("[data-chart-body]")!, { clientX: 100, clientY: 5 });
     expect(await screen.findByRole("menuitem", { name: "Highlight this day…" })).toBeInTheDocument();
@@ -136,7 +137,7 @@ describe("tag suggestions on a collaborative link", () => {
   const openTask = async (user: ReturnType<typeof renderApp>["user"]) => {
     await screen.findByRole("treegrid", { name: "Tasks" });
     await joined();
-    await user.click(within(screen.getAllByRole("row")[2]!).getByRole("button", { name: /^Open details of/ }))
+    await openDetails(user, screen.getAllByRole("row")[2]!)
     expect(await screen.findByRole("combobox", { name: "Add tag" })).toBeInTheDocument(); // they may add tags...
     await user.click(screen.getByRole("combobox", { name: "Add tag" }));
     await user.keyboard("x");

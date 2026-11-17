@@ -1,7 +1,7 @@
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { expect, test } from "@playwright/test";
 import { createHash, randomBytes } from "node:crypto";
-import { addTask, BASE_URL, createProject, listRow, resetDatabase, setupAdmin } from "../support";
+import { addTask, BASE_URL, createProject, listRow, resetDatabase, setupAdmin, openDetails } from "../support";
 
 const REDIRECT = "https://ai-app.example/callback";
 
@@ -136,7 +136,7 @@ test("AI access: tasks an app adds show up live on an open board, credited to th
   });
 
   // The task's history credits the person, via the app.
-  await listRow(page, "Build").getByRole("button", { name: /Open details/ }).click();
+  await openDetails(page, "Build");
   await page.getByRole("tab", { name: "History" }).click();
   await expect(page.getByText(/Ada Admin via Claude/).first()).toBeVisible();
 

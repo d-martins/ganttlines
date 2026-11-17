@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { addTask, createProject, listRow, resetDatabase, setupAdmin, signedInUser } from "../support";
+import { addTask, createProject, listRow, resetDatabase, setupAdmin, signedInUser, openDetails } from "../support";
 
 test("creates a milestone from Add link, sees a miss, turns on Critical path, and a shared link keeps the filter", async ({ page, browser }) => {
   await resetDatabase();
@@ -12,7 +12,7 @@ test("creates a milestone from Add link, sees a miss, turns on Critical path, an
   await expect(listRow(page, "Build")).toBeVisible();
 
   // Named on the spot: it starts on the task's finish, so nothing is late yet.
-  await page.getByRole("button", { name: "Open details of “Build”" }).click();
+  await openDetails(page, "Build");
   const panel = page.getByRole("complementary", { name: "Details of “Build”" });
   await panel.getByRole("button", { name: "Add link" }).click();
   await panel.getByRole("combobox", { name: "New link: this task" }).selectOption("aims for");
@@ -62,7 +62,7 @@ test("switching between an aim and a link is one Undo", async ({ page }) => {
   await addTask(page.request, projectId, "Build", "2026-10-12", 5);
 
   await page.goto(`/p/${projectId}`);
-  await page.getByRole("button", { name: "Open details of “Build”" }).click();
+  await openDetails(page, "Build");
   const panel = page.getByRole("complementary", { name: "Details of “Build”" });
   await panel.getByRole("button", { name: "Add link" }).click();
   await panel.getByRole("combobox", { name: "New link: this task" }).selectOption("aims for");
