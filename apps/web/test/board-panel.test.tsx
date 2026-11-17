@@ -207,10 +207,30 @@ describe("details panel", () => {
       const { user } = await panelBoard();
       expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
       expect(strip()).toHaveAccessibleName("Show details");
-      expect(strip()).toBeDisabled(); // nothing selected yet
       await user.click(within(rowOf("hooks")).getByRole("gridcell", { name: /^Row / }));
       expect(strip()).toHaveAccessibleName("Show details of “hooks”");
       expect(strip()).toHaveTextContent("hooks");
+    });
+
+    it("with nothing selected, it opens to say how to pick a task, and fills in when one is picked", async () => {
+      const { user } = await panelBoard();
+      await user.click(strip());
+      const empty = await screen.findByRole("complementary", { name: "Details" });
+      expect(empty).toHaveTextContent("Select a task to see its details");
+      expect(empty).toHaveTextContent("Click a row in the list, or double-click a bar.");
+      await user.click(within(rowOf("hooks")).getByRole("gridcell", { name: /^Row / }));
+      expect(await screen.findByRole("complementary", { name: "Details of “hooks”" })).toBeInTheDocument();
+    });
+
+    it("the empty drawer collapses like any other", async () => {
+      const { user } = await panelBoard();
+      await user.click(strip());
+      await user.click(within(await screen.findByRole("complementary", { name: "Details" })).getByRole("button", { name: "Collapse details (Esc)" }));
+      expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+      await user.click(strip());
+      within(await screen.findByRole("complementary", { name: "Details" })).getByRole("button", { name: "Collapse details (Esc)" }).focus();
+      await user.keyboard("{Escape}");
+      expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
     });
 
     it("the strip opens it on the selected task; Esc collapses it back to the strip", async () => {
