@@ -288,28 +288,34 @@ describe("details panel", () => {
     const shown = () => screen.getAllByRole("row").slice(1).map((row) => within(row).queryByRole("button", { name: /^Title/ })?.textContent ?? row.textContent);
     const toggle = (name: string) => within(rowOf(name)).getByRole("button", { name: new RegExp(`^(Collapse|Expand) all inside “${name}”`) });
 
-    it("collapses all when anything inside is expanded, then expands all", async () => {
+    it("collapses everything inside while anything inside is open, keeping the row itself open", async () => {
       const { user } = await panelBoard(NESTED);
       expect(toggle("epic")).toHaveAccessibleName("Collapse all inside “epic”");
       await user.click(toggle("epic"));
-      expect(shown()).not.toContain("story");
+      expect(shown()).toContain("story"); // the row stays open
+      expect(shown()).not.toContain("step");
       expect(toggle("epic")).toHaveAccessibleName("Expand all inside “epic”");
       await user.click(toggle("epic"));
       expect(shown()).toEqual(expect.arrayContaining(["epic", "story", "step"]));
-      expect(toggle("story")).toHaveAccessibleName("Collapse all inside “story”");
     });
 
-    it("counts the row itself: collapsed on its own, with a subtask inside still expanded, it still offers collapse all", async () => {
+    it("goes by what's inside, not the row itself: expand all opens the row too", async () => {
       const { user } = await panelBoard(NESTED);
       await user.click(within(rowOf("epic")).getByRole("button", { name: "Collapse" }));
-      expect(toggle("epic")).toHaveAccessibleName("Collapse all inside “epic”");
+      expect(toggle("epic")).toHaveAccessibleName("Collapse all inside “epic”"); // story inside is still open
       await user.click(toggle("epic"));
+      expect(shown()).not.toContain("story"); // the row stays as it was: collapsed
+      expect(toggle("epic")).toHaveAccessibleName("Expand all inside “epic”");
       await user.click(toggle("epic"));
-      expect(shown()).toEqual(expect.arrayContaining(["story", "step"]));
+      expect(shown()).toEqual(expect.arrayContaining(["epic", "story", "step"]));
+    });
+
+    it("needs rows inside that have rows of their own: one with only simple tasks inside has its arrow for that", async () => {
+      await panelBoard(NESTED);
+      expect(within(rowOf("story")).queryByRole("button", { name: /all inside/ })).not.toBeInTheDocument();
     });
 
     it("isn't there on rows with nothing inside, and is off while filtering", async () => {
-      // (lone, with nothing inside, has none either: checked below on step, which the filter shows)
       await panelBoard(NESTED, ADMIN, [], [], "?q=step");
       expect(within(rowOf("step")).queryByRole("button", { name: /all inside/ })).not.toBeInTheDocument();
       expect(toggle("epic")).toBeDisabled();

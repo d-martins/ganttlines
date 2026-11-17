@@ -651,12 +651,13 @@ function CellButton({
 }
 
 /** The row's quick actions: bring its bar into view, then open its details (again: close them). */
+/** `inside`: the rows within this one that have rows of their own (not the row itself, which keeps its own arrow). */
 function RowActions({ id, title, inside, filtering }: { id: RowId; title: string; inside: readonly RowId[]; filtering: boolean }) {
   const board = useBoard();
   const { select, center } = useSelection();
   const collapsed = useCollapsed(board.sync.projectId);
   const name = title || "Untitled";
-  // Anything inside still open, the row itself included: collapse it all; otherwise open it all.
+  // Anything inside still open: collapse it all, leaving the row itself as it is. Otherwise open it all, the row too.
   const anyOpen = inside.some((parent) => !collapsed.has(parent));
   return (
     <>
@@ -680,7 +681,8 @@ function RowActions({ id, title, inside, filtering }: { id: RowId; title: string
           className="h-6 w-auto! disabled:opacity-40"
           onClick={(event) => {
             event.stopPropagation();
-            setCollapsed(board.sync.projectId, inside, anyOpen);
+            if (anyOpen) setCollapsed(board.sync.projectId, inside, true);
+            else setCollapsed(board.sync.projectId, [id, ...inside], false);
           }}
         >
           {anyOpen ? <ChevronsDownUp size={14} /> : <ChevronsUpDown size={14} />}
@@ -706,14 +708,15 @@ function RowActions({ id, title, inside, filtering }: { id: RowId; title: string
   );
 }
 
-/** `id` and every row inside it that has rows of its own: what expanding or collapsing all of it changes. */
+/** The rows inside `id`, at any depth, that have rows of their own. */
 function parentsWithin(tree: Tree, id: RowId): RowId[] {
   const found: RowId[] = [];
   const walk = (parent: RowId) => {
-    const children = childrenOf(tree, parent);
-    if (children.length === 0) return;
-    found.push(parent);
-    for (const child of children) walk(child.id);
+    for (const child of childrenOf(tree, parent)) {
+      if (childrenOf(tree, child.id).length === 0) continue;
+      found.push(child.id);
+      walk(child.id);
+    }
   };
   walk(id);
   return found;
