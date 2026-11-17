@@ -268,6 +268,10 @@ export function ChartRows({
               useHoveredRow.setState((current) => (current.id === row.id ? { id: null } : current));
               if (hover?.index === absoluteIndex) setHover(null);
             }}
+            // A double-click on a bar opens its details.
+            onDoubleClick={(event) => {
+              if ((event.target as HTMLElement).closest("[data-bar]")) select(row.id, true);
+            }}
             onClick={() => {
               if (unscheduledLeaf && canEdit && hover?.index === absoluteIndex) run({ type: "moveTask", id: row.id, start: fromDay(hover.day) });
               select(row.id, false);

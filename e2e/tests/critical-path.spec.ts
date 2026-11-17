@@ -28,7 +28,7 @@ test("creates a milestone from Add link, sees a miss, turns on Critical path, an
   await date.press("Enter");
   await expect(panel.getByText(/2 days late/)).toBeVisible();
   await expect(page.locator('[data-slack="late"]')).toHaveCount(1);
-  await panel.getByRole("button", { name: "Close details (Esc)" }).click();
+  await panel.getByRole("button", { name: "Collapse details (Esc)" }).click();
 
   // Adding the aim turned it on.
   await expect(page.getByRole("button", { name: "Critical path" })).toHaveAttribute("aria-pressed", "true");

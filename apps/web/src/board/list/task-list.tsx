@@ -23,12 +23,19 @@ import { useCapabilities } from "../../workspace";
 /**
  * Column template shared by the header and the rows: # · title · assignee · WD · AWD · row actions (show the bar, open details, delete).
  * (Predecessors are set in the details panel, or by linking bars on the chart.)
- * Fixed columns + the title's minimum + padding = LIST_WIDTH.min, so no column is ever cut off.
+ * Fixed columns + the title's minimum + padding = listContentWidth in view-store.ts: a narrower list scrolls sideways.
  */
-const COLUMNS = "grid grid-cols-[40px_minmax(96px,1fr)_120px_40px_40px_76px] items-center";
+const COLUMNS = "grid grid-cols-[40px_minmax(200px,1fr)_120px_40px_40px_76px] items-center";
 /** The same, with "Can slip" after AWD; SLIP_COLUMN in view-store.ts is its 72 px. */
-const COLUMNS_WITH_SLIP = "grid grid-cols-[40px_minmax(96px,1fr)_120px_40px_40px_72px_76px] items-center";
+const COLUMNS_WITH_SLIP = "grid grid-cols-[40px_minmax(200px,1fr)_120px_40px_40px_72px_76px] items-center";
 const INDENT = 16;
+
+/**
+ * Narrower than its columns, the list scrolls sideways: rows and headings move by `--list-x`, set on the list, and
+ * the row actions stay at its right edge (`--list-over` is how much wider the columns are than the list).
+ */
+const LIST_SHIFT = { width: "max(100%, var(--list-content, 0px))", transform: "translateX(calc(-1 * var(--list-x, 0px)))" };
+const PINNED = { transform: "translateX(calc(var(--list-x, 0px) - var(--list-over, 0px)))" };
 
 /** Outline tools and the column headings; reordering and collapsing are off while filtering. */
 export function ListHeader({ filtering }: { filtering: boolean }) {
@@ -64,7 +71,7 @@ export function ListHeader({ filtering }: { filtering: boolean }) {
         </IconButton>
       </div>
       {/* Visual column headings; assistive tech gets ListColumnHeaders inside the grid instead. */}
-      <div aria-hidden className={`${critical ? COLUMNS_WITH_SLIP : COLUMNS} h-6 px-1 text-xs font-semibold text-muted`}>
+      <div aria-hidden className={`${critical ? COLUMNS_WITH_SLIP : COLUMNS} h-6 px-1 text-xs font-semibold text-muted`} style={LIST_SHIFT}>
         <span className="pr-2 text-right">#</span>
         <span>Task</span>
         <span>Assignee</span>
@@ -195,7 +202,10 @@ export function ListRows({
   rowHeight,
   numbers,
   filtering,
+  pinned = false,
 }: {
+  /** the list is narrower than its columns: the row actions stay at its right edge */
+  pinned?: boolean;
   /** the rendered window */
   rows: readonly BoardRow[];
   /** every shown row (for drops and the footer position) */
@@ -293,15 +303,15 @@ export function ListRows({
             aria-selected={selected}
             aria-expanded={entry.hasChildren ? !entry.collapsed : undefined}
             // A click only selects (highlights) the row; a double-click also brings its bar into view (its
-            // start just inside the chart's left edge) and opens the details panel. Not on a cell that edits.
+            // start just inside the chart's left edge). Not on a cell that edits. The details open from the bar.
             onClick={() => select(row.id, false)}
             onDoubleClick={(event) => {
               if ((event.target as HTMLElement).closest("[data-cell], [data-row-action], input")) return;
               center(row.id);
-              select(row.id, true);
+              select(row.id, false);
             }}
-            className={`group ${critical ? COLUMNS_WITH_SLIP : COLUMNS} absolute right-0 left-0 px-1 text-sm ${selected ? "bg-accent-soft" : "hover:bg-surface-2"} ${drag?.id === row.id ? "opacity-50" : entry.context ? "opacity-45" : ""}`}
-            style={{ top: (firstRow + index) * rowHeight, height: rowHeight }}
+            className={`group ${critical ? COLUMNS_WITH_SLIP : COLUMNS} absolute left-0 px-1 text-sm ${selected ? "bg-accent-soft" : "hover:bg-surface-2"} ${drag?.id === row.id ? "opacity-50" : entry.context ? "opacity-45" : ""}`}
+            style={{ top: (firstRow + index) * rowHeight, height: rowHeight, ...LIST_SHIFT }}
           >
             <span role="gridcell" aria-label={`Row ${entry.number}`} className="relative pr-2 text-right text-xs text-muted tabular-nums">
               {canEdit && !filtering ? (
@@ -515,8 +525,16 @@ export function ListRows({
               )}
             </span>
             {critical ? row.kind === "section" ? <span role="gridcell" /> : <SlipCell slack={entry.fromBaseline ? undefined : slack.get(row.id)} /> : null}
-            <span role="gridcell" className={`flex justify-end gap-1 ${selected ? "" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"}`}>
-              <RowActions id={row.id} title={row.title} />
+            <span
+              role="gridcell"
+              data-row-actions
+              {...(pinned ? { "data-pinned": true } : {})}
+              className={`flex h-full items-center justify-end gap-1 ${pinned ? "shadow-[-6px_0_8px_-6px_rgb(0_0_0/0.4)]" : ""}`}
+              style={pinned ? { ...PINNED, background: selected ? "linear-gradient(var(--accent-soft), var(--accent-soft)), var(--surface)" : "var(--surface)" } : undefined}
+            >
+              <span className={`flex gap-1 ${selected ? "" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"}`}>
+                <RowActions id={row.id} title={row.title} />
+              </span>
             </span>
           </div>
         );

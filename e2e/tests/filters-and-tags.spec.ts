@@ -45,7 +45,7 @@ test("filters by a person and a tag, tags a task from the panel, and a shared li
   await panel.getByRole("combobox", { name: "Add tag" }).fill("backend");
   await page.keyboard.press("Enter");
   await expect(panel.getByRole("list", { name: "Tags" })).toContainText("backend");
-  await panel.getByRole("button", { name: "Close details (Esc)" }).click();
+  await panel.getByRole("button", { name: "Collapse details (Esc)" }).click();
   await expect(page.getByRole("button", { name: "Filter by the tag “backend”" })).toBeVisible(); // on the chart, beside Docs' bar
 
   // Someone else opens the shared link: the same filters, the same rows.

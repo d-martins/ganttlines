@@ -73,9 +73,10 @@ const sentCommands = (): Command[] =>
   FakeWebSocket.last.sent.flatMap((message) => ((message as { type: string }).type === "command" ? [(message as { command: Command }).command] : []));
 const panel = () => screen.getByRole("complementary", { name: /^Details of/ });
 const rowOf = (title: string) => screen.getAllByRole("row").find((candidate) => within(candidate).queryByText(title, { exact: true }))!;
-/** Opens a row: a double-click on its number in the list (selects it, reveals its bar and opens the panel). */
+/** Opens a row's details: its "Open details" button in the list. */
 const selectRow = async (user: ReturnType<typeof import("@testing-library/user-event").default.setup>, title: string) => {
-  await user.dblClick(rowOf(title).querySelector('[aria-label^="Row "]')!);
+  if (screen.queryByRole("complementary", { name: `Details of “${title}”` })) return;
+  await user.click(within(rowOf(title)).getByRole("button", { name: /^Open details of/ }));
   await screen.findByRole("complementary", { name: /^Details of/ }); // (the panel is a separate download)
 };
 
@@ -92,7 +93,7 @@ describe("details panel", () => {
     await selectRow(user, "hooks");
     expect(panel()).toHaveAccessibleName("Details of “hooks”");
     expect(panel()).not.toHaveFocus(); // the list keeps the keyboard
-    within(panel()).getByRole("button", { name: "Close details (Esc)" }).focus();
+    within(panel()).getByRole("button", { name: "Collapse details (Esc)" }).focus();
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("complementary")).not.toBeInTheDocument(); // closed: hidden and inert while it slides out
     expect(screen.getByRole("button", { name: "Title “hooks”" })).toHaveFocus();
@@ -175,7 +176,7 @@ describe("details panel", () => {
     expect(panel()).toHaveAccessibleName("Details of “hooks”");
   });
 
-  it("selects on a click; a double-click reveals the bar (start just inside the left edge) and opens the panel", async () => {
+  it("selects on a click; a double-click reveals the bar (start just inside the left edge), leaving the details as they are", async () => {
     const { user } = await panelBoard();
     const scrollTo = vi.fn();
     const scroller = screen.getByTestId("board-scroller");
@@ -189,8 +190,8 @@ describe("details panel", () => {
     await user.click(screen.getByRole("button", { name: "Working days of “hooks”" })); // opens the cell
     await user.keyboard("{Escape}");
     expect(scrollTo).not.toHaveBeenCalled();
-    await selectRow(user, "hooks");
-    expect(panel()).toHaveAccessibleName("Details of “hooks”");
+    await user.dblClick(rowOf("hooks").querySelector('[aria-label^="Row "]')!);
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
     expect(scrollTo).toHaveBeenCalledTimes(1);
     const { left, behavior } = scrollTo.mock.calls[0]![0] as ScrollToOptions;
     // hooks starts Oct 12; the chart starts Mon Aug 31 at 32 px a day: its start lands 24 px inside the left edge
@@ -198,7 +199,57 @@ describe("details panel", () => {
     expect(behavior).toBe("smooth");
   });
 
-  it("centers on a double-click on the row, but a double-click on a cell edits it instead", async () => {
+  describe("as a drawer", () => {
+    const strip = () => screen.getByRole("button", { name: /^Show details/ });
+
+    it("starts collapsed to a strip, which names the selected task", async () => {
+      const { user } = await panelBoard();
+      expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+      expect(strip()).toHaveAccessibleName("Show details");
+      expect(strip()).toBeDisabled(); // nothing selected yet
+      await user.click(within(rowOf("hooks")).getByRole("gridcell", { name: /^Row / }));
+      expect(strip()).toHaveAccessibleName("Show details of “hooks”");
+      expect(strip()).toHaveTextContent("hooks");
+    });
+
+    it("the strip opens it on the selected task; Esc collapses it back to the strip", async () => {
+      const { user } = await panelBoard();
+      await user.click(within(rowOf("hooks")).getByRole("gridcell", { name: /^Row / }));
+      await user.click(strip());
+      expect(await screen.findByRole("complementary", { name: "Details of “hooks”" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /^Show details/ })).not.toBeInTheDocument();
+      within(panel()).getByRole("button", { name: "Collapse details (Esc)" }).focus();
+      await user.keyboard("{Escape}");
+      expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+      expect(strip()).toHaveAccessibleName("Show details of “hooks”");
+    });
+
+    it("double-clicking a bar opens it; double-clicking a row in the list doesn't", async () => {
+      const { user } = await panelBoard();
+      await user.dblClick(rowOf("hooks").querySelector('[aria-label^="Row "]')!);
+      expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+      await user.dblClick(screen.getByRole("button", { name: /^hooks, / }));
+      expect(await screen.findByRole("complementary", { name: "Details of “hooks”" })).toBeInTheDocument();
+    });
+
+    it("while open, selecting another row shows that one", async () => {
+      const { user } = await panelBoard();
+      await selectRow(user, "hooks");
+      await user.click(within(rowOf("ui")).getByRole("gridcell", { name: /^Row / }));
+      expect(await screen.findByRole("complementary", { name: "Details of “ui”" })).toBeInTheDocument();
+    });
+
+    it("is remembered: open or collapsed, in this browser", async () => {
+      const { user } = await panelBoard();
+      await selectRow(user, "hooks");
+      expect(JSON.parse(localStorage.getItem("gp.detailsOpen")!)).toBe(true);
+      within(panel()).getByRole("button", { name: "Collapse details (Esc)" }).focus();
+      await user.keyboard("{Escape}");
+      expect(JSON.parse(localStorage.getItem("gp.detailsOpen")!)).toBe(false);
+    });
+  });
+
+  it("centers on a double-click on the row, without opening the details, but a double-click on a cell edits it instead", async () => {
     const { user } = await panelBoard();
     const scrollTo = vi.fn();
     const scroller = screen.getByTestId("board-scroller");
@@ -206,6 +257,7 @@ describe("details panel", () => {
     const row = () => screen.getAllByRole("row").find((candidate) => within(candidate).queryByText("ui", { exact: true }))!;
     await user.dblClick(row().querySelector('[aria-label^="Row "]')!);
     expect(scrollTo).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Title" })).not.toBeInTheDocument();
     await user.dblClick(screen.getByRole("button", { name: "Title “hooks”" }));
     expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("hooks");
@@ -1308,7 +1360,7 @@ describe("details panel", () => {
 
     it("sections have no Tags section", async () => {
       const { user } = await panelBoard();
-      await user.dblClick(rowOf("x").querySelector('[aria-label^="Row "]')!);
+      await user.click(within(rowOf("x")).getByRole("button", { name: /^Open details of/ }))
       await screen.findByRole("complementary", { name: /^Details of/ });
       expect(within(panel()).queryByRole("heading", { name: "Tags" })).not.toBeInTheDocument();
     });
@@ -1328,14 +1380,14 @@ describe("details panel", () => {
 
   it("offers no Add a task on a section while filtering", async () => {
     const { user } = await panelBoard(ROWS, ADMIN, [], [], "?q=hooks");
-    await user.dblClick(rowOf("x").querySelector('[aria-label^="Row "]')!);
+    await user.click(within(rowOf("x")).getByRole("button", { name: /^Open details of/ }))
     await screen.findByRole("complementary", { name: /^Details of/ });
     expect(within(panel()).queryByRole("button", { name: /^Add a/ })).not.toBeInTheDocument();
   });
 
   describe("sections and the More actions menu", () => {
     const openSection = async (user: Awaited<ReturnType<typeof panelBoard>>["user"]) => {
-      await user.dblClick(rowOf("x").querySelector('[aria-label^="Row "]')!);
+      await user.click(within(rowOf("x")).getByRole("button", { name: /^Open details of/ }))
       await screen.findByRole("complementary", { name: /^Details of/ });
     };
 
@@ -1366,7 +1418,7 @@ describe("details panel", () => {
       await selectRow(user, "hooks");
       expect(within(panel()).queryByRole("button", { name: /^Delete (task|section)$/ })).not.toBeInTheDocument();
       const more = within(panel()).getByRole("button", { name: "More actions" });
-      const close = within(panel()).getByRole("button", { name: "Close details (Esc)" });
+      const close = within(panel()).getByRole("button", { name: "Collapse details (Esc)" });
       expect(more.closest("header")).toBe(close.closest("header"));
       await openSection(user);
       expect(within(panel()).queryByRole("button", { name: /^Delete (task|section)$/ })).not.toBeInTheDocument();

@@ -98,7 +98,7 @@ describe("half days and actual work days", () => {
     // Fri 9 afternoon → Mon 12 end of day: 1.5 working days; the bar starts mid-column
     const hooks = screen.getByRole("button", { name: /^hooks, .*\(afternoon\) – / });
     expect(width(hooks)).toBe(4 * 32 - 16);
-    await user.dblClick(within(listRow("hooks")).getByRole("gridcell", { name: "Row 2" }));
+    await user.click(within(listRow("hooks")).getByRole("button", { name: /^Open details of/ }))
     const panel = await screen.findByRole("complementary", { name: "Details of “hooks”" });
     const starts = within(panel).getByRole("group", { name: "Starts: morning or afternoon" });
     expect(within(starts).getByRole("button", { name: "Starts in the afternoon" })).toHaveAttribute("aria-pressed", "true");
@@ -123,7 +123,7 @@ describe("half days and actual work days", () => {
 
   it("records actual days in the details panel", async () => {
     const { user } = await board();
-    await user.dblClick(within(listRow("hooks")).getByRole("gridcell", { name: "Row 2" }));
+    await user.click(within(listRow("hooks")).getByRole("button", { name: /^Open details of/ }))
     const panel = await screen.findByRole("complementary", { name: "Details of “hooks”" });
     const field = within(panel).getByRole("spinbutton", { name: "Actual work days" });
     await user.type(field, "4.5{Enter}");
