@@ -35,7 +35,8 @@ const INDENT = 16;
  * the row actions stay at its right edge (`--list-over` is how much wider the columns are than the list).
  */
 const LIST_SHIFT = { width: "max(100%, var(--list-content, 0px))", transform: "translateX(calc(-1 * var(--list-x, 0px)))" };
-const PINNED = { transform: "translateX(calc(var(--list-x, 0px) - var(--list-over, 0px)))" };
+/** Pinned: the row's 4 px of padding and the list's 1 px border are covered too, or what scrolls shows through them. */
+const PINNED = { transform: "translateX(calc(var(--list-x, 0px) - var(--list-over, 0px)))", marginRight: "-5px", paddingRight: "5px" };
 
 /** Outline tools and the column headings; reordering and collapsing are off while filtering. */
 export function ListHeader({ filtering }: { filtering: boolean }) {
@@ -687,9 +688,7 @@ function RowActions({ id, title, inside, filtering }: { id: RowId; title: string
         >
           {anyOpen ? <ChevronsDownUp size={14} /> : <ChevronsUpDown size={14} />}
         </IconButton>
-      ) : (
-        <span aria-hidden className="w-[22px] shrink-0" />
-      )}
+      ) : null}
       {board.canEdit ? (
         <IconButton
           data-row-action

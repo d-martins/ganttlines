@@ -340,7 +340,7 @@ export function Board({
       <div ref={scroller} onScroll={onScroll} data-testid="board-scroller" className="relative min-h-0 flex-1 overflow-auto">
         <div style={{ width: listWidth + timeline.width }}>
           <div className="sticky top-0 z-20 flex" style={{ height: HEADER_HEIGHT }}>
-            <div className="sticky left-0 z-10 shrink-0 overflow-hidden border-r border-[var(--list-edge)] bg-surface shadow-[var(--list-shadow)]" data-list-header style={{ width: listWidth, ...listVars }}>
+            <div className="sticky left-0 z-10 shrink-0 overflow-clip border-r border-[var(--list-edge)] bg-surface shadow-[var(--list-shadow)]" data-list-header style={{ width: listWidth, ...listVars }}>
               <ListHeader filtering={model.filtering} />
               {divider}
             </div>
@@ -367,7 +367,7 @@ export function Board({
                 }
                 event.currentTarget.focus({ preventScroll: true });
               }}
-              className="sticky left-0 z-10 shrink-0 overflow-hidden border-r border-[var(--list-edge)] bg-surface shadow-[var(--list-shadow)] outline-none focus:outline-none focus-visible:outline-none"
+              className="sticky left-0 z-10 shrink-0 overflow-clip border-r border-[var(--list-edge)] bg-surface shadow-[var(--list-shadow)] outline-none focus:outline-none focus-visible:outline-none"
               style={{ width: listWidth, height: bodyHeight, ...listGrid, ...listVars }}
             >
               <ListColumnHeaders />

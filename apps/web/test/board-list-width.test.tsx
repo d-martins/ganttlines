@@ -35,4 +35,27 @@ describe("the task list's width", () => {
     expect(list.style.getPropertyValue("--list-over")).toBe(`${listContentWidth(false) - 300 + 1}px`); // and the list's right border
     expect(screen.getByRole("button", { name: "Delete “t”" }).closest("[data-row-actions]")).toHaveAttribute("data-pinned");
   });
+
+  it("pinned, the actions reach the list's right edge, so nothing shows past them", async () => {
+    useBoardView.getState().setListWidth(300);
+    await board([task("t", { userStart: "2026-10-12" })]);
+    const cell = screen.getByRole("button", { name: "Delete “t”" }).closest("[data-row-actions]") as HTMLElement;
+    // Past the cell: the row's 4 px of padding and the list's 1 px border.
+    expect(cell.style.marginRight).toBe("-5px");
+    expect(cell.style.paddingRight).toBe("5px");
+  });
+
+  it("a row with nothing inside has its two actions side by side, with no gap where the third would be", async () => {
+    await board([task("t", { userStart: "2026-10-12" })]);
+    const actions = screen.getByRole("button", { name: "Delete “t”" }).parentElement!;
+    expect([...actions.children].map((child) => child.getAttribute("aria-label"))).toEqual(["Show “t” on the chart", "Delete “t”"]);
+  });
+
+  it("can't be scrolled by the browser bringing a cell into view: only its own scrollbar moves it", async () => {
+    useBoardView.getState().setListWidth(300);
+    await board([task("t", { userStart: "2026-10-12" })]);
+    // clip, not hidden: a hidden overflow can still be scrolled, which would throw the rows and the pinned actions out of line
+    expect(screen.getByRole("treegrid", { name: "Tasks" })).toHaveClass("overflow-clip");
+    expect(document.querySelector("[data-list-header]")).toHaveClass("overflow-clip");
+  });
 });
