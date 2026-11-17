@@ -27,8 +27,8 @@ const isWidth = (value: unknown): value is number => typeof value === "number" &
 export const LIST_WIDTH = { min: 240, max: 900, initial: 540 } as const;
 /** What the "Can slip" column adds to the list while Critical path is on. */
 export const SLIP_COLUMN = 72;
-/** The row actions column: room for `count` icon buttons (14 px, 4 px apart) after a 26 px gap. */
-export const rowActionsWidth = (count: number) => count * 14 + (count - 1) * 4 + 26;
+/** The row actions column: room for `count` icon buttons (14 px, 4 px apart) after an 8 px gap. */
+export const rowActionsWidth = (count: number) => count * 14 + (count - 1) * 4 + 8;
 /**
  * The most actions any row shows: "show on the chart" always, "expand / collapse all inside" on a row with nested rows
  * inside (a row two levels down exists), and "delete" for editors.

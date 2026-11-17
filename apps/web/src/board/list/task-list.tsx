@@ -26,9 +26,9 @@ import { useCapabilities } from "../../workspace";
  * (Predecessors are set in the details panel, or by linking bars on the chart.)
  * Fixed columns + the title's minimum + padding = listContentWidth in view-store.ts: a narrower list scrolls sideways.
  */
-const COLUMNS = "grid grid-cols-[40px_minmax(200px,1fr)_120px_40px_40px_var(--actions-width,76px)] items-center";
+const COLUMNS = "grid grid-cols-[40px_minmax(200px,1fr)_120px_40px_40px_var(--actions-width,58px)] items-center";
 /** The same, with "Can slip" after AWD; SLIP_COLUMN in view-store.ts is its 72 px. */
-const COLUMNS_WITH_SLIP = "grid grid-cols-[40px_minmax(200px,1fr)_120px_40px_40px_72px_var(--actions-width,76px)] items-center";
+const COLUMNS_WITH_SLIP = "grid grid-cols-[40px_minmax(200px,1fr)_120px_40px_40px_72px_var(--actions-width,58px)] items-center";
 const INDENT = 16;
 
 /**

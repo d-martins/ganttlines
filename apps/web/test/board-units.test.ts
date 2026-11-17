@@ -246,7 +246,7 @@ describe("list width", () => {
     const { useBoardView, LIST_WIDTH, listContentWidth } = await import("../src/board/view-store");
     useBoardView.getState().setListWidth(100);
     expect(useBoardView.getState().listWidth).toBe(LIST_WIDTH.min);
-    expect(listContentWidth(false)).toBe(40 + 200 + 120 + 40 + 40 + 76 + 8); // actions: three icon buttons (14 px), 4 px apart
+    expect(listContentWidth(false)).toBe(40 + 200 + 120 + 40 + 40 + 58 + 8); // actions: three icon buttons (14 px), 4 px apart, 8 px before them
   });
 });
 

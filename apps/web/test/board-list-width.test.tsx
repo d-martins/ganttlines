@@ -7,13 +7,13 @@ import { screen, VIEWER } from "./utils";
 
 describe("the task list's width", () => {
   it("keeps every column: the content is as wide as the columns need, the task name at least 200 px", () => {
-    expect(listContentWidth(false)).toBe(40 + 200 + 120 + 40 + 40 + 76 + 8);
+    expect(listContentWidth(false)).toBe(40 + 200 + 120 + 40 + 40 + 58 + 8);
     expect(listContentWidth(true)).toBe(listContentWidth(false) + 72);
-    expect(listContentWidth(false, 2)).toBe(40 + 200 + 120 + 40 + 40 + 58 + 8);
+    expect(listContentWidth(false, 2)).toBe(40 + 200 + 120 + 40 + 40 + 40 + 8);
   });
 
-  it("sizes the actions column to the most actions a row can show: 14 px icons, 4 px apart, 26 px before them", () => {
-    expect([1, 2, 3].map(rowActionsWidth)).toEqual([40, 58, 76]);
+  it("sizes the actions column to the most actions a row can show: 14 px icons, 4 px apart, 8 px before them", () => {
+    expect([1, 2, 3].map(rowActionsWidth)).toEqual([22, 40, 58]);
   });
 
   it("counts the actions: show on chart always, expand/collapse all inside when a row has nested rows inside, delete for editors", () => {
@@ -27,17 +27,17 @@ describe("the task list's width", () => {
 
   it("an editor's board with no nested rows gets a two-action column", async () => {
     await board([task("t", { userStart: "2026-10-12" })]);
-    expect(screen.getByRole("treegrid", { name: "Tasks" }).style.getPropertyValue("--actions-width")).toBe("58px");
+    expect(screen.getByRole("treegrid", { name: "Tasks" }).style.getPropertyValue("--actions-width")).toBe("40px");
   });
 
   it("a row with nested rows inside makes room for the third action", async () => {
     await board([task("a", { userStart: "2026-10-12" }), task("b", { parentId: "a", userStart: "2026-10-12" }), task("c", { parentId: "b", userStart: "2026-10-12" })]);
-    expect(screen.getByRole("treegrid", { name: "Tasks" }).style.getPropertyValue("--actions-width")).toBe("76px");
+    expect(screen.getByRole("treegrid", { name: "Tasks" }).style.getPropertyValue("--actions-width")).toBe("58px");
   });
 
   it("a viewer, who can't delete, gets one action's room", async () => {
     await board([task("t", { userStart: "2026-10-12" })], VIEWER);
-    expect(screen.getByRole("treegrid", { name: "Tasks" }).style.getPropertyValue("--actions-width")).toBe("40px");
+    expect(screen.getByRole("treegrid", { name: "Tasks" }).style.getPropertyValue("--actions-width")).toBe("22px");
   });
 
   it("can be made narrower than the columns, and starts wide enough for them", () => {
