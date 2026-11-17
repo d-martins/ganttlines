@@ -82,7 +82,8 @@ export function ListHeader({ filtering }: { filtering: boolean }) {
           AWD
         </span>
         {critical ? <span className="px-1 text-right">Can slip</span> : null}
-        <span />
+        {/* Over the headings that scroll under the pinned row actions. */}
+        <span className="h-full bg-surface" style={PINNED} />
       </div>
     </div>
   );
@@ -541,7 +542,7 @@ export function ListRows({
       })}
       {drag?.target && dropTarget ? <DropIndicator target={drag.target} depth={dropTarget.depth} rowHeight={rowHeight} valid={dropValid} /> : null}
       {canEdit && !filtering ? (
-        <div className="absolute left-0 flex gap-1 px-2 text-xs" style={{ top: allRows.length * rowHeight + 4 }}>
+        <div className="absolute left-0 flex gap-1 px-2 text-xs whitespace-nowrap" style={{ top: allRows.length * rowHeight + 4 }}>
           <button type="button" className="flex items-center gap-1 rounded px-2 py-1 text-muted hover:bg-surface-2 hover:text-text" onClick={() => addAtEnd(board, state, "task")}>
             <Plus size={13} /> Add task
           </button>

@@ -32,7 +32,7 @@ describe("the task list's width", () => {
     fireEvent.scroll(bar);
     const list = screen.getByRole("treegrid", { name: "Tasks" });
     expect(list.style.getPropertyValue("--list-x")).toBe("120px");
-    expect(list.style.getPropertyValue("--list-over")).toBe(`${listContentWidth(false) - 300}px`);
+    expect(list.style.getPropertyValue("--list-over")).toBe(`${listContentWidth(false) - 300 + 1}px`); // and the list's right border
     expect(screen.getByRole("button", { name: "Open details of “t”" }).closest("[data-row-actions]")).toHaveAttribute("data-pinned");
   });
 });

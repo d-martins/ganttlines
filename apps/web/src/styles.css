@@ -218,3 +218,20 @@ body {
   color: var(--muted);
   pointer-events: none;
 }
+
+/* The task list's own sideways scrollbar: always shown, as overlay scrollbars hide until you scroll and this one says
+   there's more to the list. */
+.list-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+.list-scrollbar::-webkit-scrollbar {
+  height: 8px;
+}
+.list-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 4px;
+}
+.list-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}

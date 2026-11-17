@@ -99,7 +99,8 @@ export function Board({
   const listWidth = Math.min(chosenWidth + slipRoom, LIST_WIDTH.max + slipRoom);
   // Narrower than its columns, the list scrolls sideways under its own scrollbar.
   const listContent = listContentWidth(slipRoom > 0);
-  const listOver = Math.max(listContent - listWidth, 0);
+  // (its right border takes a pixel of its width)
+  const listOver = listContent > listWidth ? listContent - listWidth + 1 : 0;
   const [listScroll, setListScroll] = useState(0);
   const listX = Math.min(listScroll, listOver);
   const listBar = useRef<HTMLDivElement>(null);
@@ -412,8 +413,8 @@ export function Board({
           </div>
           {listOver > 0 ? (
             <div className="sticky bottom-0 left-0 z-20 border-t border-r border-[var(--list-edge)] bg-surface" style={{ width: listWidth }}>
-              <div ref={listBar} data-testid="list-scrollbar" className="overflow-x-auto" onScroll={(event) => setListScroll(event.currentTarget.scrollLeft)}>
-                <div style={{ width: listContent, height: 1 }} />
+              <div ref={listBar} data-testid="list-scrollbar" className="list-scrollbar overflow-x-auto" onScroll={(event) => setListScroll(event.currentTarget.scrollLeft)}>
+                <div style={{ width: listContent, height: 8 }} />
               </div>
             </div>
           ) : null}
