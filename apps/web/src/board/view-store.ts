@@ -27,8 +27,19 @@ const isWidth = (value: unknown): value is number => typeof value === "number" &
 export const LIST_WIDTH = { min: 240, max: 900, initial: 540 } as const;
 /** What the "Can slip" column adds to the list while Critical path is on. */
 export const SLIP_COLUMN = 72;
+/** The row actions column: room for `count` icon buttons (14 px, 4 px apart) after a 26 px gap. */
+export const rowActionsWidth = (count: number) => count * 14 + (count - 1) * 4 + 26;
+/**
+ * The most actions any row shows: "show on the chart" always, "expand / collapse all inside" on a row with nested rows
+ * inside (a row two levels down exists), and "delete" for editors.
+ */
+export function mostRowActions(rows: readonly { id: string; parentId: string | null }[], canEdit: boolean): number {
+  const parentOf = new Map(rows.map((row) => [row.id, row.parentId]));
+  const nested = rows.some((row) => row.parentId !== null && (parentOf.get(row.parentId) ?? null) !== null);
+  return 1 + (nested ? 1 : 0) + (canEdit ? 1 : 0);
+}
 /** The width the list's columns take, the task name at its least (COLUMNS in list/task-list.tsx, plus 8 px padding). */
-export const listContentWidth = (critical: boolean) => 40 + 200 + 120 + 40 + 40 + 76 + 8 + (critical ? SLIP_COLUMN : 0);
+export const listContentWidth = (critical: boolean, actions = 3) => 40 + 200 + 120 + 40 + 40 + rowActionsWidth(actions) + 8 + (critical ? SLIP_COLUMN : 0);
 
 const isStep = (value: unknown): value is number => typeof value === "number" && (ZOOM_STEPS as readonly number[]).includes(value);
 

@@ -22,7 +22,7 @@ import { useLinger } from "./linger";
 import { ListColumnHeaders, ListHeader, ListRows, useListKeys } from "./list/task-list";
 import { useSelection } from "./selection";
 import { boardModel, type CompareMode } from "./model";
-import { listContentWidth, LIST_WIDTH, SLIP_COLUMN, useBoardView } from "./view-store";
+import { listContentWidth, LIST_WIDTH, mostRowActions, rowActionsWidth, SLIP_COLUMN, useBoardView } from "./view-store";
 import { useCriticalPath } from "./critical-path-view";
 import { boardSchedule } from "./slack";
 
@@ -98,13 +98,15 @@ export function Board({
   const slipRoom = critical ? SLIP_COLUMN : 0;
   const listWidth = Math.min(chosenWidth + slipRoom, LIST_WIDTH.max + slipRoom);
   // Narrower than its columns, the list scrolls sideways under its own scrollbar.
-  const listContent = listContentWidth(slipRoom > 0);
+  // The row actions column is as wide as the most actions any row shows.
+  const actions = useMemo(() => mostRowActions(Object.values(state.rows), canEdit), [state.rows, canEdit]);
+  const listContent = listContentWidth(slipRoom > 0, actions);
   // (its right border takes a pixel of its width)
   const listOver = listContent > listWidth ? listContent - listWidth + 1 : 0;
   const [listScroll, setListScroll] = useState(0);
   const listX = Math.min(listScroll, listOver);
   const listBar = useRef<HTMLDivElement>(null);
-  const listVars = { ["--list-x" as string]: `${listX}px`, ["--list-over" as string]: `${listOver}px`, ["--list-content" as string]: `${listContent}px` };
+  const listVars = { ["--list-x" as string]: `${listX}px`, ["--list-over" as string]: `${listOver}px`, ["--list-content" as string]: `${listContent}px`, ["--actions-width" as string]: `${rowActionsWidth(actions)}px` };
   const collapsed = useCollapsed(sync.projectId);
   // Collapsed rows deleted since are forgotten (once the board has rows to compare with).
   useEffect(() => {

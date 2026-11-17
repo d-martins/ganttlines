@@ -1,14 +1,43 @@
 import { fireEvent } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { LIST_WIDTH, listContentWidth, useBoardView } from "../src/board/view-store";
+import { LIST_WIDTH, listContentWidth, mostRowActions, rowActionsWidth, useBoardView } from "../src/board/view-store";
 import { task } from "./board-fixtures";
 import { board } from "./chart-board";
-import { screen } from "./utils";
+import { screen, VIEWER } from "./utils";
 
 describe("the task list's width", () => {
   it("keeps every column: the content is as wide as the columns need, the task name at least 200 px", () => {
     expect(listContentWidth(false)).toBe(40 + 200 + 120 + 40 + 40 + 76 + 8);
     expect(listContentWidth(true)).toBe(listContentWidth(false) + 72);
+    expect(listContentWidth(false, 2)).toBe(40 + 200 + 120 + 40 + 40 + 58 + 8);
+  });
+
+  it("sizes the actions column to the most actions a row can show: 14 px icons, 4 px apart, 26 px before them", () => {
+    expect([1, 2, 3].map(rowActionsWidth)).toEqual([40, 58, 76]);
+  });
+
+  it("counts the actions: show on chart always, expand/collapse all inside when a row has nested rows inside, delete for editors", () => {
+    const flat = [{ id: "a", parentId: null }, { id: "b", parentId: "a" }];
+    const nested = [{ id: "a", parentId: null }, { id: "b", parentId: "a" }, { id: "c", parentId: "b" }];
+    expect(mostRowActions(flat, true)).toBe(2);
+    expect(mostRowActions(flat, false)).toBe(1);
+    expect(mostRowActions(nested, true)).toBe(3);
+    expect(mostRowActions(nested, false)).toBe(2);
+  });
+
+  it("an editor's board with no nested rows gets a two-action column", async () => {
+    await board([task("t", { userStart: "2026-10-12" })]);
+    expect(screen.getByRole("treegrid", { name: "Tasks" }).style.getPropertyValue("--actions-width")).toBe("58px");
+  });
+
+  it("a row with nested rows inside makes room for the third action", async () => {
+    await board([task("a", { userStart: "2026-10-12" }), task("b", { parentId: "a", userStart: "2026-10-12" }), task("c", { parentId: "b", userStart: "2026-10-12" })]);
+    expect(screen.getByRole("treegrid", { name: "Tasks" }).style.getPropertyValue("--actions-width")).toBe("76px");
+  });
+
+  it("a viewer, who can't delete, gets one action's room", async () => {
+    await board([task("t", { userStart: "2026-10-12" })], VIEWER);
+    expect(screen.getByRole("treegrid", { name: "Tasks" }).style.getPropertyValue("--actions-width")).toBe("40px");
   });
 
   it("can be made narrower than the columns, and starts wide enough for them", () => {
@@ -27,12 +56,12 @@ describe("the task list's width", () => {
     useBoardView.getState().setListWidth(300);
     await board([task("t", { userStart: "2026-10-12" })]);
     const bar = screen.getByTestId("list-scrollbar");
-    expect((bar.firstElementChild as HTMLElement).style.width).toBe(`${listContentWidth(false)}px`);
+    expect((bar.firstElementChild as HTMLElement).style.width).toBe(`${listContentWidth(false, 2)}px`);
     bar.scrollLeft = 120;
     fireEvent.scroll(bar);
     const list = screen.getByRole("treegrid", { name: "Tasks" });
     expect(list.style.getPropertyValue("--list-x")).toBe("120px");
-    expect(list.style.getPropertyValue("--list-over")).toBe(`${listContentWidth(false) - 300 + 1}px`); // and the list's right border
+    expect(list.style.getPropertyValue("--list-over")).toBe(`${listContentWidth(false, 2) - 300 + 1}px`); // and the list's right border
     expect(screen.getByRole("button", { name: "Delete “t”" }).closest("[data-row-actions]")).toHaveAttribute("data-pinned");
   });
 

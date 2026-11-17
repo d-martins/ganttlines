@@ -21,13 +21,14 @@ import { AUTO_SCROLL_STEP, AUTO_SCROLL_TICK_MS, edgePush, HEADER_HEIGHT } from "
 import { useCapabilities } from "../../workspace";
 
 /**
- * Column template shared by the header and the rows: # · title · assignee · WD · AWD · row actions (show the bar, open details, delete).
+ * Column template shared by the header and the rows: # · title · assignee · WD · AWD · row actions (show the bar, expand / collapse all
+ * inside, delete), as wide as the most actions any row shows (`--actions-width`, set on the list).
  * (Predecessors are set in the details panel, or by linking bars on the chart.)
  * Fixed columns + the title's minimum + padding = listContentWidth in view-store.ts: a narrower list scrolls sideways.
  */
-const COLUMNS = "grid grid-cols-[40px_minmax(200px,1fr)_120px_40px_40px_76px] items-center";
+const COLUMNS = "grid grid-cols-[40px_minmax(200px,1fr)_120px_40px_40px_var(--actions-width,76px)] items-center";
 /** The same, with "Can slip" after AWD; SLIP_COLUMN in view-store.ts is its 72 px. */
-const COLUMNS_WITH_SLIP = "grid grid-cols-[40px_minmax(200px,1fr)_120px_40px_40px_72px_76px] items-center";
+const COLUMNS_WITH_SLIP = "grid grid-cols-[40px_minmax(200px,1fr)_120px_40px_40px_72px_var(--actions-width,76px)] items-center";
 const INDENT = 16;
 
 /**
@@ -651,7 +652,7 @@ function CellButton({
   );
 }
 
-/** The row's quick actions: bring its bar into view, then open its details (again: close them). */
+/** The row's quick actions: bring its bar into view, expand or collapse everything inside it, delete it. */
 /** `inside`: the rows within this one that have rows of their own (not the row itself, which keeps its own arrow). */
 function RowActions({ id, title, inside, filtering }: { id: RowId; title: string; inside: readonly RowId[]; filtering: boolean }) {
   const board = useBoard();
