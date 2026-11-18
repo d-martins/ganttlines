@@ -73,7 +73,7 @@ export function ChartHeader({
         : segments(timeline, days, monthKey, (day) => MONTHS[dateParts(day).month]!);
 
   return (
-    <div className="relative h-full shrink-0 bg-surface text-xs" style={{ width: timeline.width }}>
+    <div data-chart-header className="relative h-full shrink-0 bg-surface text-xs" style={{ width: timeline.width }}>
       {top.map((cell) => (
         <div
           key={cell.key}

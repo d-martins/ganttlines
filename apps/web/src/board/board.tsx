@@ -1,4 +1,5 @@
 import { applyCommand, toDay, weekday, type Calendar, type DayNum, type ProjectState } from "@ganttlines/engine";
+import { useShallow } from "zustand/react/shallow";
 import type { BaselineTaskDto, CalendarDto, HighlightDto, ResourceDto } from "@ganttlines/protocol";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
@@ -22,7 +23,7 @@ import { useLinger } from "./linger";
 import { ListColumnHeaders, ListHeader, ListRows, useListKeys } from "./list/task-list";
 import { useSelection } from "./selection";
 import { boardModel, type CompareMode } from "./model";
-import { listContentWidth, LIST_WIDTH, SLIP_COLUMN, useBoardView } from "./view-store";
+import { listContentWidth, LIST_WIDTH, mostRowActions, rowActionsWidth, SLIP_COLUMN, useBoardView } from "./view-store";
 import { useCriticalPath } from "./critical-path-view";
 import { boardSchedule } from "./slack";
 
@@ -50,6 +51,8 @@ const HEADER_HEIGHT = 48;
 const BAR_REVEAL_MARGIN = 24;
 const OVERSCAN_ROWS = 10;
 const OVERSCAN_PX = 600;
+/** Room below the board's scroll area for its own sideways scrollbar, kept out of view (thicker than any browser's). */
+const HIDDEN_SCROLLBAR = 20;
 /** Where "today" (and the day kept in place when zooming) sits: a third into the chart. */
 const ANCHOR = 1 / 3;
 /** how long a row that stopped matching stays after it is no longer selected */
@@ -64,6 +67,16 @@ interface Viewport {
 }
 
 /** The size of the scroll area; jsdom reports 0, so tests get a sensible default. */
+/**
+ * Scrolling re-renders the board only when the rows and days it draws would change: every few rows or few hundred
+ * pixels, well inside the overscan, so nothing undrawn comes into view in between.
+ */
+const sameWindow = (a: Viewport, b: Viewport, rowHeight: number) =>
+  a.width === b.width &&
+  a.height === b.height &&
+  Math.floor(a.top / (rowHeight * (OVERSCAN_ROWS / 2))) === Math.floor(b.top / (rowHeight * (OVERSCAN_ROWS / 2))) &&
+  Math.floor(a.left / (OVERSCAN_PX / 2)) === Math.floor(b.left / (OVERSCAN_PX / 2));
+
 const measure = (element: HTMLElement): Viewport => ({
   top: element.scrollTop,
   left: element.scrollLeft,
@@ -98,13 +111,21 @@ export function Board({
   const slipRoom = critical ? SLIP_COLUMN : 0;
   const listWidth = Math.min(chosenWidth + slipRoom, LIST_WIDTH.max + slipRoom);
   // Narrower than its columns, the list scrolls sideways under its own scrollbar.
-  const listContent = listContentWidth(slipRoom > 0);
+  // The row actions column is as wide as the most actions any row shows.
+  const actions = useMemo(() => mostRowActions(Object.values(state.rows), canEdit), [state.rows, canEdit]);
+  const listContent = listContentWidth(slipRoom > 0, actions);
   // (its right border takes a pixel of its width)
   const listOver = listContent > listWidth ? listContent - listWidth + 1 : 0;
-  const [listScroll, setListScroll] = useState(0);
-  const listX = Math.min(listScroll, listOver);
+  // Scrolling sets --list-x on the list and its headings directly: the board doesn't re-render while the list scrolls.
+  const listScroll = useRef(0);
   const listBar = useRef<HTMLDivElement>(null);
-  const listVars = { ["--list-x" as string]: `${listX}px`, ["--list-over" as string]: `${listOver}px`, ["--list-content" as string]: `${listContent}px` };
+  const applyListX = useCallback(() => {
+    const x = Math.min(listScroll.current, listOver);
+    scroller.current?.querySelectorAll<HTMLElement>('[data-list-header], [role="treegrid"]').forEach((element) => element.style.setProperty("--list-x", `${x}px`));
+  }, [listOver]);
+  // A narrower overflow clamps the offset.
+  useLayoutEffect(applyListX, [applyListX]);
+  const listVars = { ["--list-over" as string]: `${listOver}px`, ["--list-content" as string]: `${listContent}px`, ["--actions-width" as string]: `${rowActionsWidth(actions)}px` };
   const collapsed = useCollapsed(sync.projectId);
   // Collapsed rows deleted since are forgotten (once the board has rows to compare with).
   useEffect(() => {
@@ -130,7 +151,7 @@ export function Board({
   );
   const tagFilter = useMemo<TagFilter>(() => ({ active: (tag) => hasTag(filters, tag), toggle: (tag) => updateFilters((current) => toggleTag(current, tag)) }), [filters, updateFilters]);
   const team = useMemo(() => new Set(resources.map((resource) => resource.id)), [resources]);
-  const { selectedId, select, centerRequest } = useSelection();
+  const { selectedId, select, centerRequest } = useSelection(useShallow(({ selectedId, select, centerRequest }) => ({ selectedId, select, centerRequest })));
   // A row an edit takes out of the filter stays while it is selected, and a little after.
   const matches = useMemo(() => filterRows(displayed, filters, team)?.matches ?? NO_ROWS, [displayed, filters, team]);
   const shownMatches = useLinger(matches, selectedId, LINGER_MS, filterKey);
@@ -170,6 +191,8 @@ export function Board({
   }, [first, last, dayWidth, showWeekends, calendarDto.workingWeekdays]);
 
   const scroller = useRef<HTMLDivElement>(null);
+  const content = useRef<HTMLDivElement>(null);
+  const chartBar = useRef<HTMLDivElement>(null);
   const chartBody = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState<Viewport>({ top: 0, left: 0, width: 1200, height: 800 });
   /**
@@ -186,11 +209,14 @@ export function Board({
   const onScroll = () => {
     const element = scroller.current;
     if (!element) return;
+    // How far the chart has scrolled under the list (bar titles move along by CSS), and its scrollbar follows; straight to the DOM.
+    content.current?.style.setProperty("--chart-hidden", `${element.scrollLeft}px`);
+    if (chartBar.current && chartBar.current.scrollLeft !== element.scrollLeft) chartBar.current.scrollLeft = element.scrollLeft;
     const x = element.scrollLeft + chartWidth * ANCHOR;
     const day = timeline.dayAt(x);
     anchor.current = { day, fraction: Math.min(Math.max((x - timeline.x(day)) / timeline.dayWidth, 0), 1) };
     cancelAnimationFrame(frame.current);
-    frame.current = requestAnimationFrame(() => setViewport(measure(element)));
+    frame.current = requestAnimationFrame(() => setViewport((previous) => (sameWindow(previous, measure(element), rowHeight) ? previous : measure(element))));
   };
 
   useLayoutEffect(() => {
@@ -337,89 +363,118 @@ export function Board({
           These tasks' dependencies form a loop, so their dates can't be worked out.
         </p>
       ) : null}
-      <div ref={scroller} onScroll={onScroll} data-testid="board-scroller" className="relative min-h-0 flex-1 overflow-auto">
-        <div style={{ width: listWidth + timeline.width }}>
-          <div className="sticky top-0 z-20 flex" style={{ height: HEADER_HEIGHT }}>
-            <div className="sticky left-0 z-10 shrink-0 overflow-hidden border-r border-[var(--list-edge)] bg-surface shadow-[var(--list-shadow)]" data-list-header style={{ width: listWidth, ...listVars }}>
-              <ListHeader filtering={model.filtering} />
-              {divider}
+      {/* The board scrolls natively both ways, but its own sideways scrollbar would run under the list: the scroll area
+          reaches HIDDEN_SCROLLBAR past the bottom, out of view, and each pane has its own bar instead. */}
+      <div className="relative min-h-0 flex-1 overflow-hidden">
+        <div ref={scroller} onScroll={onScroll} data-testid="board-scroller" className="absolute inset-x-0 top-0 overflow-auto" style={{ bottom: -HIDDEN_SCROLLBAR }}>
+          <div ref={content} style={{ width: listWidth + timeline.width }}>
+            <div className="sticky top-0 z-20 flex" style={{ height: HEADER_HEIGHT }}>
+              <div className="sticky left-0 z-10 shrink-0 overflow-clip border-r border-[var(--list-edge)] bg-surface shadow-[var(--list-shadow)]" data-list-header style={{ width: listWidth, ...listVars }}>
+                <ListHeader filtering={model.filtering} pinned={listOver > 0} />
+                {divider}
+              </div>
+              <ChartHeader timeline={timeline} zoom={scaleOf(dayWidth)} stickyLeft={listWidth} days={days} highlights={highlightDays} holidays={holidayNames} todayDay={todayDay} milestones={milestones} />
             </div>
-            <ChartHeader timeline={timeline} zoom={scaleOf(dayWidth)} stickyLeft={listWidth} days={days} highlights={highlightDays} holidays={holidayNames} todayDay={todayDay} milestones={milestones} />
-          </div>
-          <div className="flex" style={{ height: bodyHeight }}>
-            <div
-              role="treegrid"
-              aria-label="Tasks"
-              aria-rowcount={model.rows.length + 1}
-              aria-multiselectable={false}
-              // Not a Tab stop itself (its cells are); focused on row clicks so the list keys keep working.
-              tabIndex={-1}
-              onKeyDown={onListKey}
-              onMouseDown={(event) => {
-                const target = event.target as HTMLElement;
-                if (target.closest("button, input")) return;
-                if (!target.closest('[role="row"]')) {
-                  // Empty space below the rows: nothing selected, and the list lets go of focus.
-                  event.preventDefault();
-                  select(null);
-                  if (event.currentTarget.contains(document.activeElement)) (document.activeElement as HTMLElement).blur();
-                  return;
-                }
-                event.currentTarget.focus({ preventScroll: true });
-              }}
-              className="sticky left-0 z-10 shrink-0 overflow-hidden border-r border-[var(--list-edge)] bg-surface shadow-[var(--list-shadow)] outline-none focus:outline-none focus-visible:outline-none"
-              style={{ width: listWidth, height: bodyHeight, ...listGrid, ...listVars }}
-            >
-              <ListColumnHeaders />
-              <ListRows rows={shown} allRows={model.rows} firstRow={firstRow} rowHeight={rowHeight} numbers={model.numbers} filtering={model.filtering} pinned={listOver > 0} />
-              {divider}
-            </div>
-            <DayMenu
-              projectId={sync.projectId}
-              // React events from the bar's menu bubble here through its portal: a right-click or long-press in it isn't one on a day.
-              enabled={canEdit && !barMenuOpen}
-              canEditCalendar={canEditCalendar}
-              dayAt={(clientX) => timeline.dayAt(clientX - (chartBody.current?.getBoundingClientRect().left ?? 0))}
-              highlights={highlightDays}
-              resources={resources}
-            >
-            <div
-              ref={chartBody}
-              data-chart-body
-              // clip, not hidden: section names stick to the scroll area, which a hidden overflow would cut them off from
-              className="relative shrink-0 overflow-clip"
-              style={{ width: timeline.width, height: bodyHeight, ["--list-width" as string]: `${listWidth}px`, ...chartGrid }}
-            >
-              <Shading
-                timeline={timeline}
-                calendar={calendar}
-                calendarDto={calendarDto}
-                days={days}
-                rows={shown}
-                rowHeight={rowHeight}
-                firstRow={firstRow}
-                height={bodyHeight}
+            <div className="flex" style={{ height: bodyHeight }}>
+              <div
+                role="treegrid"
+                aria-label="Tasks"
+                aria-rowcount={model.rows.length + 1}
+                aria-multiselectable={false}
+                // Not a Tab stop itself (its cells are); focused on row clicks so the list keys keep working.
+                tabIndex={-1}
+                onKeyDown={onListKey}
+                onMouseDown={(event) => {
+                  const target = event.target as HTMLElement;
+                  if (target.closest("button, input")) return;
+                  if (!target.closest('[role="row"]')) {
+                    // Empty space below the rows: nothing selected, and the list lets go of focus.
+                    event.preventDefault();
+                    select(null);
+                    if (event.currentTarget.contains(document.activeElement)) (document.activeElement as HTMLElement).blur();
+                    return;
+                  }
+                  event.currentTarget.focus({ preventScroll: true });
+                }}
+                className="sticky left-0 z-10 shrink-0 overflow-clip border-r border-[var(--list-edge)] bg-surface shadow-[var(--list-shadow)] outline-none focus:outline-none focus-visible:outline-none"
+                style={{ width: listWidth, height: bodyHeight, ...listGrid, ...listVars }}
+              >
+                <ListColumnHeaders />
+                <ListRows rows={shown} allRows={model.rows} firstRow={firstRow} rowHeight={rowHeight} numbers={model.numbers} filtering={model.filtering} pinned={listOver > 0} />
+                {divider}
+              </div>
+              <DayMenu
+                projectId={sync.projectId}
+                // React events from the bar's menu bubble here through its portal: a right-click or long-press in it isn't one on a day.
+                enabled={canEdit && !barMenuOpen}
+                canEditCalendar={canEditCalendar}
+                dayAt={(clientX) => timeline.dayAt(clientX - (chartBody.current?.getBoundingClientRect().left ?? 0))}
                 highlights={highlightDays}
-              />
-              {selectedIndex >= 0 ? (
-                <div aria-hidden className="absolute right-0 left-0 bg-accent-soft opacity-60" style={{ top: selectedIndex * rowHeight, height: rowHeight }} />
-              ) : null}
-              <div aria-hidden className="absolute top-0 w-0.5 bg-[var(--today)]" style={{ left: timeline.x(todayDay) + timeline.dayWidth / 2 - 1, height: bodyHeight }} />
-              <MilestoneLines milestones={milestones} timeline={timeline} height={bodyHeight} />
-              <Dependencies rows={model.rows} links={model.links} firstRow={firstRow} lastRow={lastRow} timeline={timeline} style={barStyle} />
-              <ChartRows rows={shown} allRows={model.rows} firstRow={firstRow} timeline={timeline} style={barStyle} visibleLeft={viewport.left} tagFilter={tagFilter} filtering={model.filtering} />
+                resources={resources}
+              >
+              <div
+                ref={chartBody}
+                data-chart-body
+                // clip, not hidden: section names stick to the scroll area, which a hidden overflow would cut them off from
+                className="relative shrink-0 overflow-clip"
+                style={{ width: timeline.width, height: bodyHeight, ["--list-width" as string]: `${listWidth}px`, ...chartGrid }}
+              >
+                <Shading
+                  timeline={timeline}
+                  calendar={calendar}
+                  calendarDto={calendarDto}
+                  days={days}
+                  rows={shown}
+                  rowHeight={rowHeight}
+                  firstRow={firstRow}
+                  height={bodyHeight}
+                  highlights={highlightDays}
+                />
+                {selectedIndex >= 0 ? (
+                  <div aria-hidden className="absolute right-0 left-0 bg-accent-soft opacity-60" style={{ top: selectedIndex * rowHeight, height: rowHeight }} />
+                ) : null}
+                <div aria-hidden className="absolute top-0 w-0.5 bg-[var(--today)]" style={{ left: timeline.x(todayDay) + timeline.dayWidth / 2 - 1, height: bodyHeight }} />
+                <MilestoneLines milestones={milestones} timeline={timeline} height={bodyHeight} />
+                <Dependencies rows={model.rows} links={model.links} firstRow={firstRow} lastRow={lastRow} timeline={timeline} style={barStyle} />
+                <ChartRows rows={shown} allRows={model.rows} firstRow={firstRow} timeline={timeline} style={barStyle} tagFilter={tagFilter} filtering={model.filtering} />
+              </div>
+              </DayMenu>
             </div>
-            </DayMenu>
-          </div>
-          {listOver > 0 ? (
-            <div className="sticky bottom-0 left-0 z-20 border-t border-r border-[var(--list-edge)] bg-surface" style={{ width: listWidth }}>
-              <div ref={listBar} data-testid="list-scrollbar" className="list-scrollbar overflow-x-auto" onScroll={(event) => setListScroll(event.currentTarget.scrollLeft)}>
-                <div style={{ width: listContent, height: 8 }} />
+            {/* Each pane's own sideways scrollbar: the list's under the list (while its columns don't fit), the chart's under the chart. */}
+            <div className="pointer-events-none sticky left-0 z-20 flex" style={{ bottom: HIDDEN_SCROLLBAR, width: listWidth + chartWidth }}>
+              {listOver > 0 ? (
+                <div className="pointer-events-auto absolute bottom-0 left-0 border-t border-r border-[var(--list-edge)] bg-surface" style={{ width: listWidth }}>
+                  <div
+                    ref={listBar}
+                    data-testid="list-scrollbar"
+                    className="list-scrollbar overflow-x-auto"
+                    onScroll={(event) => {
+                      listScroll.current = event.currentTarget.scrollLeft;
+                      applyListX();
+                    }}
+                  >
+                    <div style={{ width: listContent, height: 8 }} />
+                  </div>
+                </div>
+              ) : null}
+              <div className="pointer-events-auto border-t border-[var(--list-edge)] bg-surface" style={{ marginLeft: listWidth, width: chartWidth }}>
+                <div
+                  ref={chartBar}
+                  data-testid="chart-scrollbar"
+                  className="list-scrollbar overflow-x-auto"
+                  onScroll={(event) => {
+                    const element = scroller.current;
+                    if (element && element.scrollLeft !== event.currentTarget.scrollLeft) element.scrollLeft = event.currentTarget.scrollLeft;
+                  }}
+                >
+                  <div style={{ width: timeline.width, height: 8 }} />
+                </div>
               </div>
             </div>
-          ) : null}
+          </div>
+          <div style={{ height: HIDDEN_SCROLLBAR }} />
+          {model.rows.length === 0 ? <p className="absolute top-16 left-4 text-sm text-muted">No tasks yet.</p> : null}
         </div>
-        {model.rows.length === 0 ? <p className="absolute top-16 left-4 text-sm text-muted">No tasks yet.</p> : null}
       </div>
       {DetailsPanel ? <DetailsPanel numbers={model.numbers} filtering={model.filtering} /> : null}
     </div>

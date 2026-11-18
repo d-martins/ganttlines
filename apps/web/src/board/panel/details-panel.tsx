@@ -1,4 +1,6 @@
 import { InterruptionsSection } from "./interruptions-section";
+import { useShallow } from "zustand/react/shallow";
+import { useShow } from "../../ui/use-show";
 import { buildTree, childrenOf, computeSchedule, CycleError, fromDay, isParentTask, TASK_COLORS, type Row, type RowId, type Schedule, type TaskRow } from "@ganttlines/engine";
 import { COMMAND_LIMITS } from "@ganttlines/protocol/constants";
 import { useQuery } from "@tanstack/react-query";
@@ -131,28 +133,20 @@ function DetailsStrip({ title, onOpen }: { title: string | null; onOpen: () => v
       aria-label={label}
       title={label}
       onClick={onOpen}
-      className="absolute top-0 right-0 bottom-0 z-30 flex w-6 flex-col items-center gap-2 border-l border-border bg-bg pt-2 text-muted shadow-md hover:text-text"
+      className="absolute top-0 right-0 bottom-0 z-30 flex w-9 flex-col items-center gap-2.5 border-l border-border bg-bg pt-3 text-muted shadow-md hover:text-text"
     >
-      <ChevronsLeft aria-hidden size={14} className="shrink-0" />
-      <span aria-hidden className="truncate text-xs [writing-mode:vertical-rl] rotate-180">
+      <ChevronsLeft aria-hidden size={16} className="shrink-0" />
+      <span aria-hidden className="truncate text-sm [writing-mode:vertical-rl] rotate-180">
         {title === null ? "Select a task" : title || "Untitled"}
       </span>
     </button>
   );
 }
 
-/** The drawer open with nothing selected: how to pick a task. */
+/** The drawer's contents with nothing selected: how to pick a task. */
 function NoDetails({ onCollapse }: { onCollapse: () => void }) {
   return (
-    <aside
-      aria-label="Details"
-      onKeyDown={(event) => {
-        if (event.key !== "Escape") return;
-        event.stopPropagation();
-        onCollapse();
-      }}
-      className="absolute top-0 right-0 bottom-0 z-30 flex w-[min(26rem,92%)] flex-col border-l border-border bg-bg shadow-xl"
-    >
+    <>
       <header className="flex items-center border-b border-border px-4 py-2">
         <IconButton label="Collapse details (Esc)" className="ml-auto" onClick={onCollapse}>
           <ChevronsRight size={16} />
@@ -163,7 +157,7 @@ function NoDetails({ onCollapse }: { onCollapse: () => void }) {
         <p className="font-medium">Select a task to see its details</p>
         <p className="text-sm text-muted">Click a row in the list, or double-click a bar.</p>
       </div>
-    </aside>
+    </>
   );
 }
 
@@ -173,19 +167,17 @@ function NoDetails({ onCollapse }: { onCollapse: () => void }) {
  * comments and history. Selecting another row retargets it; Escape or × closes it.
  */
 export function DetailsPanel({ numbers, filtering }: { numbers: ReadonlyMap<RowId, number>; filtering: boolean }) {
-  const capabilities = useCapabilities();
-  const board = useBoard();
-  const { state, calendar, sync } = board;
-  const { selectedId, panelOpen, closePanel, openPanel } = useSelection();
-  const me = useQuery(currentUser);
-  const run = useRun();
+  const { state } = useBoard();
+  const { selectedId, panelOpen: open, closePanel, openPanel } = useSelection(
+    useShallow(({ selectedId, panelOpen, closePanel, openPanel }) => ({ selectedId, panelOpen, closePanel, openPanel })),
+  );
   const panel = useRef<HTMLElement>(null);
   const selected = selectedId ? state.rows[selectedId] : undefined;
-  const open = panelOpen && selected !== undefined;
-  // While sliding out, keep showing the row it had (the selection may already be gone).
+  // One drawer, open or not; what's inside follows the selection. Sliding out, it keeps showing what it had.
+  const { shouldRender, onAnimationEnd } = useShow(open);
   const [lastId, setLastId] = useState<RowId | null>(null);
   useEffect(() => {
-    if (open) setLastId(selected.id);
+    if (open) setLastId(selected?.id ?? null);
   }, [open, selected?.id]);
   const row = open ? selected : lastId ? state.rows[lastId] : undefined;
   // Rich text boxes grow up to half the panel's height.
@@ -198,25 +190,15 @@ export function DetailsPanel({ numbers, filtering }: { numbers: ReadonlyMap<RowI
     const observer = new ResizeObserver(measure);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [row !== undefined]);
-  const schedule = useMemo<Schedule | null>(() => {
-    try {
-      return computeSchedule(state, calendar);
-    } catch (error) {
-      if (error instanceof CycleError) return null;
-      throw error;
-    }
-  }, [state, calendar]);
+  }, [shouldRender]);
 
-  if (panelOpen && !selected) return <NoDetails onCollapse={closePanel} />;
   const strip = open ? null : <DetailsStrip title={selected ? selected.title : null} onOpen={openPanel} />;
-  if (!row) return strip;
   // Selecting a row opens the panel without taking focus (the list keeps the keyboard). Closing it
   // from inside hands focus back to the row's title in the list.
   const close = () => {
     const inside = panel.current?.contains(document.activeElement) ?? false;
     closePanel();
-    if (inside) (document.querySelector<HTMLElement>(`[data-cell="${CSS.escape(row.id)}:title"]`) ?? document.querySelector<HTMLElement>('[role="treegrid"]'))?.focus();
+    if (inside && row) (document.querySelector<HTMLElement>(`[data-cell="${CSS.escape(row.id)}:title"]`) ?? document.querySelector<HTMLElement>('[role="treegrid"]'))?.focus();
   };
   const onKey = (event: KeyboardEvent) => {
     const target = event.target as HTMLElement;
@@ -225,6 +207,60 @@ export function DetailsPanel({ numbers, filtering }: { numbers: ReadonlyMap<RowI
       close();
     }
   };
+
+  return (
+    <>
+      {strip}
+      {shouldRender ? (
+        <aside
+          ref={panel}
+          tabIndex={-1}
+          aria-label={row ? `Details of “${row.title || "Untitled"}”` : "Details"}
+          aria-hidden={!open}
+          inert={!open}
+          onKeyDown={onKey}
+          onAnimationEnd={onAnimationEnd}
+          // Slides in when opened and out when collapsed (then goes); still for reduced motion.
+          className={`absolute top-0 right-0 bottom-0 z-30 flex w-[min(26rem,92%)] flex-col overflow-y-auto border-l border-border bg-bg shadow-xl outline-none motion-reduce:animate-none ${
+            open ? "animate-panel-in" : "animate-panel-out"
+          }`}
+        >
+          {row ? <RowDetails row={row} numbers={numbers} filtering={filtering} halfHeight={halfHeight} onCollapse={close} /> : <NoDetails onCollapse={close} />}
+        </aside>
+      ) : null}
+    </>
+  );
+}
+
+/** The drawer's contents for a row: its fields, description, tags, interruptions, links, subtasks, comments and history. */
+function RowDetails({
+  row,
+  numbers,
+  filtering,
+  halfHeight,
+  onCollapse,
+}: {
+  row: Row;
+  numbers: ReadonlyMap<RowId, number>;
+  filtering: boolean;
+  halfHeight: number;
+  onCollapse: () => void;
+}) {
+  const capabilities = useCapabilities();
+  const board = useBoard();
+  const { state, calendar, sync } = board;
+  const closePanel = useSelection((selection) => selection.closePanel);
+  const me = useQuery(currentUser);
+  const run = useRun();
+  // Only while there's a row to show: not on every change while the drawer is collapsed.
+  const schedule = useMemo<Schedule | null>(() => {
+    try {
+      return computeSchedule(state, calendar);
+    } catch (error) {
+      if (error instanceof CycleError) return null;
+      throw error;
+    }
+  }, [state, calendar]);
   const tree = buildTree(state);
   const children = childrenOf(tree, row.id);
   const isParent = isParentTask(tree, row);
@@ -232,19 +268,6 @@ export function DetailsPanel({ numbers, filtering }: { numbers: ReadonlyMap<RowI
 
   return (
     <>
-      {strip}
-      <aside
-        ref={panel}
-      tabIndex={-1}
-      aria-label={`Details of “${row.title || "Untitled"}”`}
-      aria-hidden={!open}
-      inert={!open}
-      onKeyDown={onKey}
-      // Slides in (on first mount by the keyframes, later by the transition) and out; still for reduced motion.
-      className={`animate-panel-in absolute top-0 right-0 bottom-0 z-30 flex w-[min(26rem,92%)] flex-col overflow-y-auto border-l border-border bg-bg shadow-xl outline-none transition-[translate,visibility] duration-200 ease-out motion-reduce:animate-none motion-reduce:transition-none ${
-        open ? "visible translate-x-0" : "invisible translate-x-full"
-      }`}
-    >
       <header className="sticky top-0 z-10 flex items-center gap-2 border-b border-border bg-bg px-4 py-2">
         <span className="text-xs text-muted">
           #{numbers.get(row.id)} · {kindLabel}
@@ -270,7 +293,7 @@ export function DetailsPanel({ numbers, filtering }: { numbers: ReadonlyMap<RowI
             </MenuItem>
           </Menu>
         ) : null}
-        <IconButton label="Collapse details (Esc)" className={board.canEdit ? "" : "ml-auto"} onClick={close}>
+        <IconButton label="Collapse details (Esc)" className={board.canEdit ? "" : "ml-auto"} onClick={onCollapse}>
           <ChevronsRight size={16} />
         </IconButton>
       </header>
@@ -329,7 +352,6 @@ export function DetailsPanel({ numbers, filtering }: { numbers: ReadonlyMap<RowI
           <Activity projectId={sync.projectId} rowId={row.id} names={{ state, resources: board.resourceMap }} />
         </Section>
       ) : null}
-      </aside>
     </>
   );
 }

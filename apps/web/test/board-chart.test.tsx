@@ -63,12 +63,11 @@ describe("chart editing", () => {
     useBoardView.getState().setBarStyle("roomy");
     await chartBoard();
     const shape = bar(/^ui,/);
-    const content = () => (shape as HTMLElement).style.paddingLeft;
-    expect(content()).toBe("6px");
-    const scroller = screen.getByTestId("board-scroller");
-    scroller.scrollLeft = parseFloat((shape as HTMLElement).style.left) + 40; // the bar's first 40 px are under the list
-    fireEvent.scroll(scroller);
-    await waitFor(() => expect(content()).toBe("46px"));
+    // By CSS, from how far the chart has scrolled under the list (--chart-hidden): up to where the content still fits.
+    const left = parseFloat((shape as HTMLElement).style.left);
+    const width = parseFloat((shape as HTMLElement).style.width);
+    expect((shape as HTMLElement).getAttribute("style")).toContain(`padding-left: calc(6px + clamp(0px, var(--chart-hidden, 0px) - ${left}px, `);
+    expect(width).toBeGreaterThan(0);
     useBoardView.getState().setBarStyle("compact");
   });
 

@@ -144,8 +144,16 @@ body {
   }
 }
 
+@keyframes panel-out {
+  to {
+    translate: 100% 0;
+  }
+}
+
 @theme {
   --animate-panel-in: panel-in 200ms ease-out;
+  /* (stays out until it's unmounted) */
+  --animate-panel-out: panel-out 200ms ease-in forwards;
 }
 
 /* Rich text (descriptions and comments): compact, readable, theme-aware. */

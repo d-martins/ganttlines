@@ -165,7 +165,6 @@ export function RowBar({
   resources,
   shape,
   titleGap = 6,
-  visibleLeft = -Infinity,
   tags = null,
   slack = null,
 }: {
@@ -178,8 +177,6 @@ export function RowBar({
   shape?: ShapeProps | undefined;
   /** space between the shape and a title drawn beside it (room for the link bullet) */
   titleGap?: number;
-  /** the chart x at the list's edge: a roomy bar's contents slide right to stay in view */
-  visibleLeft?: number;
   /** drawn after the title (the task's tags) */
   tags?: ReactNode;
   /** past a limit, or none left: an outline, as a bar's colour stays the person's own */
@@ -311,8 +308,9 @@ export function RowBar({
   const showAvatar = Boolean(assignee) && firstWidth >= 44;
   const contentWidth = 12 + (showAvatar ? 24 : 0) + (locked ? 16 : 0) + titleWidth(row.title);
   const inside = contentWidth <= firstWidth;
-  // When the bar starts under the list, its avatar and title move along to stay readable.
-  const shift = Math.min(Math.max(visibleLeft - left, 0), Math.max(firstWidth - (inside ? contentWidth : 36), 0));
+  // When the bar starts under the list, its avatar and title move along to stay readable: by CSS, from how far the
+  // chart has scrolled (--chart-hidden, set on the board), so scrolling doesn't re-render the bars.
+  const shift = `clamp(0px, var(--chart-hidden, 0px) - ${left}px, ${Math.max(firstWidth - (inside ? contentWidth : 36), 0)}px)`;
   return (
     <>
       <Tooltip.Root>
@@ -321,7 +319,7 @@ export function RowBar({
             {...shapeAttrs}
             {...partMark}
             className={`absolute flex items-center gap-1.5 overflow-hidden rounded-[4px] pr-1.5 text-xs font-semibold ${mainEnd} ${violation} ${shapeClass}`}
-            style={{ left, width: firstWidth, top: barTop, height: barHeight, background: fill, color: ink, paddingLeft: 6 + shift }}
+            style={{ left, width: firstWidth, top: barTop, height: barHeight, background: fill, color: ink, paddingLeft: `calc(6px + ${shift})` }}
           >
             {showAvatar ? <Avatar name={assignee!.name} color={assignee!.avatarColor} size={18} /> : null}
             {inside ? (

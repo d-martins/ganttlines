@@ -66,7 +66,6 @@ export function ChartRows({
   firstRow,
   timeline,
   style,
-  visibleLeft,
   tagFilter,
   filtering,
 }: {
@@ -77,8 +76,6 @@ export function ChartRows({
   firstRow: number;
   timeline: Timeline;
   style: BarStyle;
-  /** chart x of the first visible pixel (the list covers what's left of it) */
-  visibleLeft: number;
   /** what a click on a task's tag does: toggles it in the board's filter */
   tagFilter: TagFilter;
   /** the board is filtered: no rows are added from the chart */
@@ -290,7 +287,6 @@ export function ChartRows({
                 style={style}
                 resources={resourceMap}
                 titleGap={editable ? 18 : 6}
-                visibleLeft={visibleLeft}
                 slack={slackMark(entry, slack, critical)}
                 tags={task && task.tags.length > 0 ? <TagChips title={row.title} tags={task.tags} filter={tagFilter} /> : null}
                 shape={
