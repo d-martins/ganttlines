@@ -368,17 +368,21 @@ export function ListRows({
             aria-level={entry.depth + 1}
             aria-selected={selected}
             aria-expanded={entry.hasChildren ? !entry.collapsed : undefined}
-            // A click only selects (highlights) the row; a double-click also brings its bar into view (its
-            // start just inside the chart's left edge). Not on a cell that edits. The details open from the bar.
+            // A click only selects (highlights) the row; a double-click also brings its bar into view and opens its
+            // details. Not on a cell that edits.
             onClick={() => select(row.id, false)}
             onDoubleClick={(event) => {
               if ((event.target as HTMLElement).closest("[data-cell], [data-row-action], input")) return;
               center(row.id);
-              select(row.id, false);
+              select(row.id, true);
             }}
             className={`group ${critical ? COLUMNS_WITH_SLIP : COLUMNS} absolute left-0 px-1 text-sm ${selected ? "bg-accent-soft" : "hover:bg-surface-2 hover:[--row-bg:var(--surface-2)]"} ${drag?.id === row.id ? "opacity-50" : entry.context ? "opacity-45" : ""}`}
             style={{ top: (firstRow + index) * rowHeight, height: rowHeight, ...LIST_SHIFT }}
             onPointerDown={(event) => armDrag(event, row.id)}
+            // The second press of a double-click would select the text in the columns (but not inside an open editor).
+            onMouseDown={(event) => {
+              if (event.detail > 1 && !(event.target as HTMLElement).closest('input, textarea, [contenteditable="true"]')) event.preventDefault();
+            }}
           >
             <span
               role="gridcell"

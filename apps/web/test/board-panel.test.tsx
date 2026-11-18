@@ -177,7 +177,7 @@ describe("details panel", () => {
     expect(panel()).toHaveAccessibleName("Details of “hooks”");
   });
 
-  it("selects on a click; a double-click reveals the bar (start 4½ days in from the task list), leaving the details as they are", async () => {
+  it("selects on a click; a double-click reveals the bar (start 4½ days in from the task list) and opens its details", async () => {
     const { user } = await panelBoard();
     const scrollTo = vi.fn();
     const scroller = screen.getByTestId("board-scroller");
@@ -192,7 +192,7 @@ describe("details panel", () => {
     await user.keyboard("{Escape}");
     expect(scrollTo).not.toHaveBeenCalled();
     await user.dblClick(rowOf("hooks").querySelector('[aria-label^="Row "]')!);
-    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    expect(await screen.findByRole("complementary", { name: "Details of “hooks”" })).toBeInTheDocument();
     expect(scrollTo).toHaveBeenCalledTimes(1);
     const { left, behavior } = scrollTo.mock.calls[0]![0] as ScrollToOptions;
     // hooks starts Oct 12; the chart starts Mon Aug 31 at 32 px a day: its start lands 4½ days in (as a left edge arrow puts it)
@@ -245,12 +245,19 @@ describe("details panel", () => {
       expect(strip()).toHaveAccessibleName("Show details of “hooks”");
     });
 
-    it("double-clicking a bar opens it; double-clicking a row in the list doesn't", async () => {
+    it("double-clicking a bar opens it, and so does double-clicking a row in the list", async () => {
       const { user } = await panelBoard();
       await user.dblClick(rowOf("hooks").querySelector('[aria-label^="Row "]')!);
-      expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
-      await user.dblClick(screen.getByRole("button", { name: /^hooks, / }));
       expect(await screen.findByRole("complementary", { name: "Details of “hooks”" })).toBeInTheDocument();
+      await user.dblClick(screen.getByRole("button", { name: /^ui, / }));
+      expect(await screen.findByRole("complementary", { name: "Details of “ui”" })).toBeInTheDocument();
+    });
+
+    it("a double-click on a row doesn't select the text in its columns (it still does in an open editor)", async () => {
+      await panelBoard();
+      const cell = within(rowOf("hooks")).getByRole("button", { name: "Working days of “hooks”" });
+      expect(fireEvent.mouseDown(cell, { detail: 1 })).toBe(true); // a first press is ordinary
+      expect(fireEvent.mouseDown(cell, { detail: 2 })).toBe(false); // the second doesn't start a selection
     });
 
     it("while open, selecting another row shows that one", async () => {
@@ -270,7 +277,7 @@ describe("details panel", () => {
     });
   });
 
-  it("centers on a double-click on the row, without opening the details, but a double-click on a cell edits it instead", async () => {
+  it("centers on a double-click on the row and opens its details, but a double-click on a cell edits it instead", async () => {
     const { user } = await panelBoard();
     const scrollTo = vi.fn();
     const scroller = screen.getByTestId("board-scroller");
@@ -278,7 +285,7 @@ describe("details panel", () => {
     const row = () => screen.getAllByRole("row").find((candidate) => within(candidate).queryByText("ui", { exact: true }))!;
     await user.dblClick(row().querySelector('[aria-label^="Row "]')!);
     expect(scrollTo).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    expect(await screen.findByRole("complementary", { name: "Details of “ui”" })).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Title" })).not.toBeInTheDocument();
     await user.dblClick(screen.getByRole("button", { name: "Title “hooks”" }));
     expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("hooks");
