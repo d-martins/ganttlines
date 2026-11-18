@@ -35,7 +35,7 @@ describe("AI access: read tools", () => {
     const { admin } = await plannedProject();
     const clientId = await registerApp(t.app);
     const client = await mcpClient(t.app, (await connect(t.app, admin, clientId, { grant: ["plans:read"] })).access_token);
-    expect((await client.listTools()).tools.map((tool) => tool.name).sort()).toEqual(["find_tasks", "get_project", "get_recent_changes", "list_projects"]);
+    expect((await client.listTools()).tools.map((tool) => tool.name).sort()).toEqual(["find_tasks", "get_baseline", "get_project", "get_recent_changes", "list_baselines", "list_projects"]);
 
     const both = await mcpClient(t.app, (await connect(t.app, admin, clientId, { grant: ["plans:read", "team:read"] })).access_token);
     expect((await both.listTools()).tools.map((tool) => tool.name)).toContain("get_calendar");
