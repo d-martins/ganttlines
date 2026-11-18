@@ -1,4 +1,5 @@
 import * as Tooltip from "@radix-ui/react-tooltip";
+import { useShallow } from "zustand/react/shallow";
 import { useHoveredMilestone } from "../chart/milestone-lines";
 import type { Slack } from "@ganttlines/engine";
 import { useCriticalPath } from "../critical-path-view";
@@ -36,11 +37,23 @@ const INDENT = 16;
  * the row actions stay at its right edge (`--list-over` is how much wider the columns are than the list).
  */
 const LIST_SHIFT = { width: "max(100%, var(--list-content, 0px))", transform: "translateX(calc(-1 * var(--list-x, 0px)))" };
+/** The # column, pinned at the left: the row's 4 px of padding is covered too, or what scrolls shows through it. */
+const PINNED_LEFT = { transform: "translateX(var(--list-x, 0px))", marginLeft: "-4px", paddingLeft: "4px" };
 /** Pinned: the row's 4 px of padding and the list's 1 px border are covered too, or what scrolls shows through them. */
 const PINNED = { transform: "translateX(calc(var(--list-x, 0px) - var(--list-over, 0px)))", marginRight: "-5px", paddingRight: "5px" };
 
+/**
+ * A pinned cell's own background (the list's shows through nowhere), with the line between rows drawn back in, in the
+ * row's colour: `--row-bg`, which the row sets while hovered.
+ */
+const pinnedBackground = (selected: boolean) =>
+  `linear-gradient(to top, var(--grid) 1px, transparent 1px), ${selected ? "linear-gradient(var(--accent-soft), var(--accent-soft)), " : ""}var(--row-bg, var(--surface))`;
+
+/** A pinned heading's background, with the header's bottom border (which the headings overlap) drawn back in. */
+const PINNED_HEADING = "linear-gradient(to top, var(--border) 1px, transparent 1px), var(--surface)";
+
 /** Outline tools and the column headings; reordering and collapsing are off while filtering. */
-export function ListHeader({ filtering }: { filtering: boolean }) {
+export function ListHeader({ filtering, pinned = false }: { filtering: boolean; pinned?: boolean }) {
   const { canEdit, sync, state } = useBoard();
   const critical = useCriticalPath(sync.projectId);
   const run = useRun();
@@ -74,7 +87,13 @@ export function ListHeader({ filtering }: { filtering: boolean }) {
       </div>
       {/* Visual column headings; assistive tech gets ListColumnHeaders inside the grid instead. */}
       <div aria-hidden className={`${critical ? COLUMNS_WITH_SLIP : COLUMNS} h-6 px-1 text-xs font-semibold text-muted`} style={LIST_SHIFT}>
-        <span className="pr-2 text-right">#</span>
+        <span
+          {...(pinned ? { "data-pinned": true } : {})}
+          className="relative z-[1] h-full pr-2 text-right leading-6"
+          style={pinned ? { ...PINNED_LEFT, background: PINNED_HEADING } : undefined}
+        >
+          #
+        </span>
         <span>Task</span>
         <span>Assignee</span>
         <span title="Working days" className="px-1 text-right">
@@ -85,7 +104,7 @@ export function ListHeader({ filtering }: { filtering: boolean }) {
         </span>
         {critical ? <span className="px-1 text-right">Can slip</span> : null}
         {/* Over the headings that scroll under the pinned row actions. */}
-        <span className="h-full bg-surface" style={PINNED} />
+        <span {...(pinned ? { "data-pinned": true } : {})} className="h-full" style={{ ...PINNED, background: PINNED_HEADING }} />
       </div>
     </div>
   );
@@ -207,7 +226,7 @@ export function ListRows({
   filtering,
   pinned = false,
 }: {
-  /** the list is narrower than its columns: the row actions stay at its right edge */
+  /** the list is narrower than its columns: the # column stays at its left edge, the row actions at its right */
   pinned?: boolean;
   /** the rendered window */
   rows: readonly BoardRow[];
@@ -227,7 +246,9 @@ export function ListRows({
   const { state, calendar, resources, resourceMap, canEdit, canCreateResources } = board;
   const tree = useMemo(() => buildTree(state), [state]);
   const run = useRun();
-  const { selectedId, editingId, draftId, select, edit, center } = useSelection();
+  const { selectedId, editingId, draftId, select, edit, center } = useSelection(
+    useShallow(({ selectedId, editingId, draftId, select, edit, center }) => ({ selectedId, editingId, draftId, select, edit, center })),
+  );
   const [cell, setCell] = useState<{ id: RowId; column: Column } | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
   // A row being edited can vanish (deleted by someone else): stop editing it.
@@ -314,10 +335,16 @@ export function ListRows({
               center(row.id);
               select(row.id, false);
             }}
-            className={`group ${critical ? COLUMNS_WITH_SLIP : COLUMNS} absolute left-0 px-1 text-sm ${selected ? "bg-accent-soft" : "hover:bg-surface-2"} ${drag?.id === row.id ? "opacity-50" : entry.context ? "opacity-45" : ""}`}
+            className={`group ${critical ? COLUMNS_WITH_SLIP : COLUMNS} absolute left-0 px-1 text-sm ${selected ? "bg-accent-soft" : "hover:bg-surface-2 hover:[--row-bg:var(--surface-2)]"} ${drag?.id === row.id ? "opacity-50" : entry.context ? "opacity-45" : ""}`}
             style={{ top: (firstRow + index) * rowHeight, height: rowHeight, ...LIST_SHIFT }}
           >
-            <span role="gridcell" aria-label={`Row ${entry.number}`} className="relative pr-2 text-right text-xs text-muted tabular-nums">
+            <span
+              role="gridcell"
+              aria-label={`Row ${entry.number}`}
+              {...(pinned ? { "data-pinned": true } : {})}
+              className="relative z-[1] flex h-full items-center justify-end pr-2 text-xs text-muted tabular-nums"
+              style={pinned ? { ...PINNED_LEFT, background: pinnedBackground(selected) } : undefined}
+            >
               {canEdit && !filtering ? (
                 <button
                   type="button"
@@ -533,8 +560,8 @@ export function ListRows({
               role="gridcell"
               data-row-actions
               {...(pinned ? { "data-pinned": true } : {})}
-              className={`flex h-full items-center justify-end gap-1 ${pinned ? "shadow-[-6px_0_8px_-6px_rgb(0_0_0/0.4)]" : ""}`}
-              style={pinned ? { ...PINNED, background: selected ? "linear-gradient(var(--accent-soft), var(--accent-soft)), var(--surface)" : "var(--surface)" } : undefined}
+              className="flex h-full items-center justify-end gap-1"
+              style={pinned ? { ...PINNED, background: pinnedBackground(selected) } : undefined}
             >
               <span className={`flex gap-1 ${selected ? "" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"}`}>
                   <RowActions id={row.id} title={row.title} inside={entry.hasChildren ? parentsWithin(tree, row.id) : []} filtering={filtering} />
@@ -656,7 +683,7 @@ function CellButton({
 /** `inside`: the rows within this one that have rows of their own (not the row itself, which keeps its own arrow). */
 function RowActions({ id, title, inside, filtering }: { id: RowId; title: string; inside: readonly RowId[]; filtering: boolean }) {
   const board = useBoard();
-  const { select, center } = useSelection();
+  const { select, center } = useSelection(useShallow(({ select, center }) => ({ select, center })));
   const collapsed = useCollapsed(board.sync.projectId);
   const name = title || "Untitled";
   // Anything inside still open: collapse it all, leaving the row itself as it is. Otherwise open it all, the row too.
@@ -666,7 +693,7 @@ function RowActions({ id, title, inside, filtering }: { id: RowId; title: string
       <IconButton
         data-row-action
         label={`Show “${name}” on the chart`}
-        className="h-6 w-auto!"
+        className="h-6! w-auto!"
         onClick={(event) => {
           event.stopPropagation();
           select(id, false);
@@ -680,7 +707,7 @@ function RowActions({ id, title, inside, filtering }: { id: RowId; title: string
           data-row-action
           label={`${anyOpen ? "Collapse" : "Expand"} all inside “${name}”`}
           disabled={filtering}
-          className="h-6 w-auto! disabled:opacity-40"
+          className="h-6! w-auto! disabled:opacity-40"
           onClick={(event) => {
             event.stopPropagation();
             if (anyOpen) setCollapsed(board.sync.projectId, inside, true);
@@ -694,7 +721,7 @@ function RowActions({ id, title, inside, filtering }: { id: RowId; title: string
         <IconButton
           data-row-action
           label={`Delete “${name}”`}
-          className="h-6 w-auto! hover:text-danger"
+          className="h-6! w-auto! hover:text-danger"
           onClick={(event) => {
             event.stopPropagation();
             const row = board.state.rows[id];
@@ -744,7 +771,7 @@ function DropIndicator({ target, depth, rowHeight, valid }: { target: NonNullabl
 export function useListKeys(allRows: readonly BoardRow[], filtering = false) {
   const board = useBoard();
   const run = useRun();
-  const { selectedId, select, edit } = useSelection();
+  const { selectedId, select, edit } = useSelection(useShallow(({ selectedId, select, edit }) => ({ selectedId, select, edit })));
   return (event: KeyboardEvent<HTMLElement>) => {
     const target = event.target as HTMLElement;
     if (target.tagName === "INPUT") return;
