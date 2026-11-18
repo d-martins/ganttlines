@@ -161,12 +161,43 @@ describe("chart editing", () => {
       expect(right).toHaveClass("right-0");
     });
 
-    it("clicking one selects the task and brings its bar into view", async () => {
+    const hooksBox = () => {
+      const shape = bar(/^hooks,/); // one part (no weekend inside)
+      return { left: parseFloat(shape.style.left), right: parseFloat(shape.style.left) + parseFloat(shape.style.width) };
+    };
+    const scrollerOf = (width: number) => {
+      const scroller = screen.getByTestId("board-scroller");
+      Object.defineProperty(scroller, "clientWidth", { configurable: true, value: width });
+      return scroller;
+    };
+
+    it("the left one scrolls back until the bar's start is 4½ days in from the task list, past where its arrow shows", async () => {
       await chartBoard();
-      fireEvent.click(arrow("right", "hooks"));
+      const scroller = scrollerOf(1200);
+      const box = hooksBox();
+      fireEvent.click(arrow("left", "hooks"));
+      // 4½ days (32 px each) before the bar, or further if the arrow would still show (as its quick tools still stick).
+      expect(scroller.scrollLeft).toBe(Math.max(Math.min(box.left - 4.5 * 32, toolsLeft(box) - 28 - 1), 0));
       const { useSelection } = await import("../src/board/selection");
       expect(useSelection.getState().selectedId).toBe("hooks");
-      expect(useSelection.getState().centerRequest?.id).toBe("hooks");
+    });
+
+    it("the right one scrolls on until the bar's end has 4½ days of room before the chart's right edge", async () => {
+      await chartBoard();
+      const scroller = scrollerOf(1200);
+      const box = hooksBox();
+      fireEvent.click(arrow("right", "hooks"));
+      // The chart shows the scroll area less the task list; its right edge is clear of the drawer's strip (40 px).
+      const chartWidth = 1200 - LIST_WIDTH.initial;
+      expect(scroller.scrollLeft).toBe(Math.max(box.right + 4.5 * 32 + 40 - chartWidth, 0));
+      const { useSelection } = await import("../src/board/selection");
+      expect(useSelection.getState().selectedId).toBe("hooks");
+    });
+
+    it("slide in as they appear (still, for reduced motion), and show a pointer", async () => {
+      await chartBoard();
+      expect(arrow("left", "hooks")).toHaveClass("group-data-[past-left]/row:animate-edge-in-left", "motion-reduce:animate-none!", "cursor-pointer");
+      expect(arrow("right", "hooks")).toHaveClass("group-data-[past-right]/row:animate-edge-in-right", "motion-reduce:animate-none!", "cursor-pointer");
     });
 
     it("are for the mouse (the list's Show on chart is the keyboard's way): out of the tab order and hidden from screen readers", async () => {

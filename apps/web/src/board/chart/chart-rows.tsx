@@ -67,7 +67,19 @@ const TOOLS_STICK = 4 + EDGE_ARROW + 4;
 /** Where the right arrows stick: clear of the details drawer's collapsed strip (36 px), and a gap. */
 export const EDGE_RIGHT = 40;
 const ARROW_BUTTON =
-  "pointer-events-auto sticky hidden h-5 w-5 shrink-0 items-center justify-center rounded bg-bg text-muted/55 shadow-sm ring-1 ring-border group-hover/row:text-muted hover:text-text!";
+  "pointer-events-auto sticky hidden h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded bg-bg text-muted/55 shadow-sm ring-1 ring-border group-hover/row:text-muted hover:text-text! motion-reduce:animate-none!";
+/** How much room an edge arrow's click leaves between the bar and that edge, in days. */
+const EDGE_ROOM_DAYS = 4.5;
+
+/**
+ * Where an edge arrow's click scrolls the chart: back until the bar's start is EDGE_ROOM_DAYS in from the task list
+ * (or further, past where its left arrow shows), or on until its end has EDGE_ROOM_DAYS of room before the right edge.
+ */
+export function edgeScrollTarget(side: "left" | "right", box: { left: number; right: number }, dayWidth: number, chartWidth: number): number {
+  const room = EDGE_ROOM_DAYS * dayWidth;
+  const left = side === "left" ? Math.min(box.left - room, toolsLeft(box) - TOOLS_STICK - 1) : box.right + room + EDGE_RIGHT - chartWidth;
+  return Math.max(left, 0);
+}
 
 /**
  * Tells each row whether its bar is past the chart's left or right edge (data-past-left / data-past-right), which shows
@@ -129,7 +141,7 @@ function EdgeArrows({
   title: string;
   id: string;
   marker: (element: HTMLElement | null) => void;
-  onClick: () => void;
+  onClick: (side: "left" | "right") => void;
 }) {
   const label = `Scroll to “${title}”`;
   const arrow = (side: "left" | "right") => (
@@ -139,11 +151,11 @@ function EdgeArrows({
       title={label}
       data-edge-arrow={side}
       data-row-id={id}
-      className={`${ARROW_BUTTON} ${side === "left" ? "group-data-[past-left]/row:flex" : "ml-auto group-data-[past-right]/row:flex"}`}
+      className={`${ARROW_BUTTON} ${side === "left" ? "group-data-[past-left]/row:flex group-data-[past-left]/row:animate-edge-in-left" : "ml-auto group-data-[past-right]/row:flex group-data-[past-right]/row:animate-edge-in-right"}`}
       style={side === "right" ? { right: "var(--edge-right, 4px)" } : { left: "calc(var(--list-width) + 4px)" }}
       onClick={(event) => {
         event.stopPropagation();
-        onClick();
+        onClick(side);
       }}
     >
       {side === "right" ? <ArrowRight size={12} /> : <ArrowLeft size={12} />}
@@ -193,7 +205,6 @@ export function ChartRows({
   const [linkChoice, setLinkChoice] = useState<LinkChoice | null>(null);
   const critical = useCriticalPath(board.sync.projectId);
   const select = useSelection((selection) => selection.select);
-  const centerBar = useSelection((selection) => selection.center);
   const edgeMarker = useEdgeMarkers(scroller, listWidth);
   const drag = useChartDrag((store) => store.drag);
   const [hover, setHover] = useState<{ index: number; day: DayNum } | null>(null);
@@ -394,9 +405,14 @@ export function ChartRows({
                 title={row.title || "Untitled"}
                 id={row.id}
                 marker={edgeMarker}
-                onClick={() => {
+                onClick={(side) => {
                   select(row.id, false);
-                  centerBar(row.id);
+                  const element = scroller?.current;
+                  if (!element) return;
+                  const left = edgeScrollTarget(side, box, timeline.dayWidth, Math.max(element.clientWidth - listWidth, 0));
+                  const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+                  if (typeof element.scrollTo === "function") element.scrollTo({ left, behavior: reduce ? "auto" : "smooth" });
+                  else element.scrollLeft = left;
                 }}
               />
             ) : null}

@@ -150,7 +150,34 @@ body {
   }
 }
 
+/* Tailwind gives buttons the arrow cursor (the browser's own default); here anything you can click shows the pointer.
+   (Utilities still win: a bar's grab cursor, a resize handle's.) */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  select:not(:disabled),
+  summary {
+    cursor: pointer;
+  }
+}
+
+/* An edge arrow coming in: from just outside the chart's edge. */
+@keyframes edge-in-left {
+  from {
+    opacity: 0;
+    translate: -6px 0;
+  }
+}
+@keyframes edge-in-right {
+  from {
+    opacity: 0;
+    translate: 6px 0;
+  }
+}
+
 @theme {
+  --animate-edge-in-left: edge-in-left 160ms ease-out;
+  --animate-edge-in-right: edge-in-right 160ms ease-out;
   --animate-panel-in: panel-in 200ms ease-out;
   /* (stays out until it's unmounted) */
   --animate-panel-out: panel-out 200ms ease-in forwards;
