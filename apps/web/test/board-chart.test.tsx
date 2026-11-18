@@ -82,40 +82,83 @@ describe("chart editing", () => {
   });
 
   describe("edge arrows", () => {
-    const arrow = (side: "left" | "right", name: string) => document.querySelector(`[data-edge-arrow="${side}"][data-row-id="${name}"]`) as HTMLElement;
+    /** jsdom has no IntersectionObserver: a fake that records what's watched, and reports what the test says. */
+    class FakeObserver {
+      static last: FakeObserver;
+      watched = new Set<Element>();
+      constructor(
+        public callback: IntersectionObserverCallback,
+        public options: IntersectionObserverInit,
+      ) {
+        FakeObserver.last = this;
+      }
+      observe(element: Element) {
+        this.watched.add(element);
+      }
+      unobserve(element: Element) {
+        this.watched.delete(element);
+      }
+      disconnect() {
+        this.watched.clear();
+      }
+      /** The marker is in view or not, as the browser would report it. */
+      report(element: Element, inView: boolean) {
+        act(() => this.callback([{ target: element, isIntersecting: inView } as IntersectionObserverEntry], this as unknown as IntersectionObserver));
+      }
+    }
+    beforeEach(() => vi.stubGlobal("IntersectionObserver", FakeObserver));
 
-    it("each bar has an arrow for either edge, shown by CSS alone once the bar has gone past that edge", async () => {
+    const rowOf = (id: string) => document.querySelector(`[data-edge-arrow="left"][data-row-id="${id}"]`)!.closest("[data-row]") as HTMLElement;
+    const arrow = (side: "left" | "right", id: string) => document.querySelector(`[data-edge-arrow="${side}"][data-row-id="${id}"]`) as HTMLElement;
+    const marker = (side: "left" | "right", id: string) => rowOf(id).querySelector(`[data-edge-marker="${side}"]`) as HTMLElement;
+
+    it("stick to the edges by CSS, above the bar, its title and its quick tools; nothing clips them", async () => {
       await chartBoard();
-      const shape = bar(/^hooks,/); // one part (no weekend inside)
-      const left = parseFloat(shape.style.left);
-      const right = left + parseFloat(shape.style.width);
-      // Right: it rests just before the bar's start, past the end of a box that cuts off what's outside it (overflow:
-      // clip, no clip-path: Chromium mis-paints sticky content inside one). Sticky to the chart's right edge (clear of the
-      // drawer's strip), it comes into that box only once the bar's start has gone past the edge, and never over the bar.
-      const toRight = arrow("right", "hooks");
-      expect(toRight.className).toContain("sticky");
-      expect(toRight.style.right).toBe("var(--edge-right, 4px)");
-      const rightTrack = toRight.parentElement!;
-      expect(rightTrack.style.width).toBe(`${left}px`);
-      const rightBox = rightTrack.parentElement!;
-      expect(rightBox).toHaveClass("overflow-clip", "z-[5]");
-      expect(rightBox.style.width).toBe(`${left - 20}px`);
-      // Left: the same, mirrored: it rests just after the bar's end; sticks past the task list.
       const toLeft = arrow("left", "hooks");
-      expect(toLeft.className).toContain("sticky");
+      const toRight = arrow("right", "hooks");
+      expect(toLeft).toHaveClass("sticky");
       expect(toLeft.style.left).toBe("calc(var(--list-width) + 4px)");
-      const leftBox = toLeft.parentElement!.parentElement!;
-      expect(leftBox).toHaveClass("overflow-clip", "z-[5]");
-      expect(leftBox.style.left).toBe(`${right + 20}px`);
-      expect(document.querySelector("[data-edge-arrow]")!.closest("[style*=clip-path]")).toBeNull();
-      // Always shown, above the bar and its quick tools: solid, with only the icon faded except on the hovered row.
-      expect(toRight).toHaveClass("bg-bg", "text-muted/55", "group-hover/row:text-muted");
-      expect(toRight.className).not.toMatch(/\bopacity-/);
+      expect(toRight).toHaveClass("sticky");
+      expect(toRight.style.right).toBe("var(--edge-right, 4px)");
+      const strip = toLeft.parentElement!;
+      expect(strip).toBe(toRight.parentElement);
+      expect(strip).toHaveClass("absolute", "right-0", "left-0", "z-[5]", "pointer-events-none");
+      expect(toLeft.closest(".overflow-clip, [style*=clip-path]")).toBe(document.querySelector("[data-chart-body]"));
+      // Solid buttons the size and look of the quick tools; only the icon fades off the hovered row.
+      expect(toLeft).toHaveClass("h-5", "w-5", "rounded", "bg-bg", "ring-1", "ring-border", "text-muted/55", "group-hover/row:text-muted");
     });
 
-    it("leave room for the drawer's collapsed strip on the right", async () => {
+    it("show only while the bar is past that edge, as the browser reports its markers going out of view", async () => {
       await chartBoard();
-      expect((document.querySelector("[data-chart-body]") as HTMLElement).style.getPropertyValue("--edge-right")).toBe("40px");
+      const observer = FakeObserver.last;
+      // Watching the visible chart: the task list covers its left, the drawer's strip its right; rows above and below count.
+      expect(observer.options.root).toBe(screen.getByTestId("board-scroller"));
+      expect(observer.options.rootMargin).toBe(`10000px -40px 10000px -${LIST_WIDTH.initial}px`);
+      const row = rowOf("hooks");
+      expect(observer.watched).toContain(marker("left", "hooks"));
+      expect(observer.watched).toContain(marker("right", "hooks"));
+      // Hidden unless the row says the bar is past that edge.
+      expect(arrow("left", "hooks")).toHaveClass("hidden", "group-data-[past-left]/row:flex");
+      expect(arrow("right", "hooks")).toHaveClass("hidden", "group-data-[past-right]/row:flex");
+      observer.report(marker("left", "hooks"), false);
+      expect(row).toHaveAttribute("data-past-left");
+      observer.report(marker("left", "hooks"), true);
+      expect(row).not.toHaveAttribute("data-past-left");
+      observer.report(marker("right", "hooks"), false);
+      expect(row).toHaveAttribute("data-past-right");
+    });
+
+    it("the left arrow comes as the quick tools start to stick: its marker runs from the chart's start to there", async () => {
+      await chartBoard();
+      const shape = bar(/^hooks,/); // one part (no weekend inside)
+      const box = { left: parseFloat(shape.style.left), right: parseFloat(shape.style.left) + parseFloat(shape.style.width) };
+      const left = marker("left", "hooks");
+      expect(left.style.left).toBe("0px");
+      expect(left.style.width).toBe(`${toolsLeft(box) - 28}px`);
+      // The right one runs from the bar's end to the chart's end: out of view once the end has passed the right edge.
+      const right = marker("right", "hooks");
+      expect(right.style.left).toBe(`${box.right}px`);
+      expect(right).toHaveClass("right-0");
     });
 
     it("clicking one selects the task and brings its bar into view", async () => {
@@ -132,6 +175,11 @@ describe("chart editing", () => {
       expect(toRight).toHaveAttribute("tabindex", "-1");
       expect(toRight.closest("[aria-hidden]")).not.toBeNull();
       expect(toRight).toHaveAttribute("title", "Scroll to “ui”");
+    });
+
+    it("leave room for the drawer's collapsed strip on the right", async () => {
+      await chartBoard();
+      expect((document.querySelector("[data-chart-body]") as HTMLElement).style.getPropertyValue("--edge-right")).toBe("40px");
     });
 
     it("sections have none", async () => {

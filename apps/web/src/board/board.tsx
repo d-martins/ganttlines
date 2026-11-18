@@ -5,7 +5,7 @@ import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { BoardSearch } from "../router";
 import { ROW_HEIGHT } from "./chart/bars";
-import { ChartRows } from "./chart/chart-rows";
+import { ChartRows, EDGE_RIGHT } from "./chart/chart-rows";
 import { DayMenu } from "./chart/day-menu";
 import { useChartDrag } from "./chart/drag";
 import { ChartHeader } from "./chart/chart-header";
@@ -53,8 +53,6 @@ const OVERSCAN_ROWS = 10;
 const OVERSCAN_PX = 600;
 /** Room below the board's scroll area for its own sideways scrollbar, kept out of view (thicker than any browser's). */
 const HIDDEN_SCROLLBAR = 20;
-/** Where the chart's right edge arrows stick: clear of the details drawer's collapsed strip (36 px), and a gap. */
-const EDGE_RIGHT = 40;
 /** Where "today" (and the day kept in place when zooming) sits: a third into the chart. */
 const ANCHOR = 1 / 3;
 /** how long a row that stopped matching stays after it is no longer selected */
@@ -438,7 +436,7 @@ export function Board({
                 <div aria-hidden className="absolute top-0 w-0.5 bg-[var(--today)]" style={{ left: timeline.x(todayDay) + timeline.dayWidth / 2 - 1, height: bodyHeight }} />
                 <MilestoneLines milestones={milestones} timeline={timeline} height={bodyHeight} />
                 <Dependencies rows={model.rows} links={model.links} firstRow={firstRow} lastRow={lastRow} timeline={timeline} style={barStyle} />
-                <ChartRows rows={shown} allRows={model.rows} firstRow={firstRow} timeline={timeline} style={barStyle} tagFilter={tagFilter} filtering={model.filtering} />
+                <ChartRows rows={shown} allRows={model.rows} firstRow={firstRow} timeline={timeline} style={barStyle} tagFilter={tagFilter} filtering={model.filtering} scroller={scroller} listWidth={listWidth} />
               </div>
               </DayMenu>
             </div>

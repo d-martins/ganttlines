@@ -1,7 +1,7 @@
 import type { SlackAnalysis } from "@ganttlines/engine";
 import { fromDay, spanEnd, spanStart, type Command, type DayNum, type RowId } from "@ganttlines/engine";
 import { ArrowLeft, ArrowRight, SquareCenterlineDashedHorizontal, UserRound } from "lucide-react";
-import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { AssigneePicker } from "../assignee-picker";
 import { runCommand, useBoard } from "../board-context";
 import { useCriticalPath } from "../critical-path-view";
@@ -60,19 +60,77 @@ function slackMark(entry: BoardRow, { slack, pastTarget }: SlackAnalysis, critic
   return critical && mine.halves === 0 ? "zero" : null;
 }
 
-/** An edge arrow's size: the same as a bar's quick-tool buttons. */
+/** Where the edge arrows stick: 4 px past the task list (the quick tools stick past the arrow), clear of the drawer's strip. */
 const EDGE_ARROW = 20;
+/** The quick tools stick this far past the task list: the left arrow and a gap either side. */
+const TOOLS_STICK = 4 + EDGE_ARROW + 4;
+/** Where the right arrows stick: clear of the details drawer's collapsed strip (36 px), and a gap. */
+export const EDGE_RIGHT = 40;
 const ARROW_BUTTON =
-  "pointer-events-auto sticky flex h-5 w-5 shrink-0 items-center justify-center rounded bg-bg text-muted/55 shadow-sm ring-1 ring-border group-hover/row:text-muted hover:text-text!";
+  "pointer-events-auto sticky hidden h-5 w-5 shrink-0 items-center justify-center rounded bg-bg text-muted/55 shadow-sm ring-1 ring-border group-hover/row:text-muted hover:text-text!";
 
 /**
- * Arrows at the chart's edges for a bar that's gone past them: right once its start is past the right edge, left once
- * its end is past the task list. By CSS alone: each arrow rests just outside the bar (before its start, after its end),
- * beyond the end of a box that cuts off what's outside it; sticky, it slides into that box only once the bar has left
- * that edge, and never over the bar. (overflow: clip, not clip-path, which Chromium mis-paints sticky content inside.)
- * Above the bar's quick tools, which slide out behind it. For the mouse: the list's "Show on chart" is the keyboard's way.
+ * Tells each row whether its bar is past the chart's left or right edge (data-past-left / data-past-right), which shows
+ * its edge arrows. The browser reports it, as each bar's markers go out of view: no work while scrolling, and no React.
+ * The visible chart is the scroll area less the task list (left) and the drawer's strip (right); rows above and below
+ * count as in view.
  */
-function EdgeArrows({ box, top, title, id, onClick }: { box: { left: number; right: number }; top: number; title: string; id: string; onClick: () => void }) {
+function useEdgeMarkers(scroller: RefObject<HTMLElement | null> | undefined, listWidth: number) {
+  const markers = useRef(new Set<HTMLElement>());
+  const observer = useRef<IntersectionObserver | null>(null);
+  useEffect(() => {
+    const root = scroller?.current;
+    if (!root || typeof IntersectionObserver === "undefined") return;
+    const watch = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const side = (entry.target as HTMLElement).dataset["edgeMarker"];
+          entry.target.closest("[data-row]")?.toggleAttribute(`data-past-${side}`, !entry.isIntersecting);
+        }
+      },
+      { root, rootMargin: `10000px -${EDGE_RIGHT}px 10000px -${listWidth}px` },
+    );
+    observer.current = watch;
+    for (const marker of markers.current) watch.observe(marker);
+    return () => {
+      watch.disconnect();
+      observer.current = null;
+    };
+  }, [scroller, listWidth]);
+  return useCallback((marker: HTMLElement | null) => {
+    if (!marker) return;
+    markers.current.add(marker);
+    observer.current?.observe(marker);
+    return () => {
+      markers.current.delete(marker);
+      observer.current?.unobserve(marker);
+    };
+  }, []);
+}
+
+/**
+ * Arrows at the chart's edges for a bar that's past them: left once its start has gone under the task list (as its
+ * quick tools start to stick), right once its end has gone past the right edge. Sticky, they sit at the edges, above
+ * the bar, its title and its quick tools; the row's data-past-* attributes (useEdgeMarkers) show them. Each bar has
+ * two invisible markers: from the chart's start to where its quick tools start sticking, and from its end to the
+ * chart's end; one wholly out of view means the bar is past that edge. For the mouse: the list's "Show on chart" is
+ * the keyboard's way.
+ */
+function EdgeArrows({
+  box,
+  top,
+  title,
+  id,
+  marker,
+  onClick,
+}: {
+  box: { left: number; right: number };
+  top: number;
+  title: string;
+  id: string;
+  marker: (element: HTMLElement | null) => void;
+  onClick: () => void;
+}) {
   const label = `Scroll to “${title}”`;
   const arrow = (side: "left" | "right") => (
     <button
@@ -81,7 +139,7 @@ function EdgeArrows({ box, top, title, id, onClick }: { box: { left: number; rig
       title={label}
       data-edge-arrow={side}
       data-row-id={id}
-      className={ARROW_BUTTON}
+      className={`${ARROW_BUTTON} ${side === "left" ? "group-data-[past-left]/row:flex" : "ml-auto group-data-[past-right]/row:flex"}`}
       style={side === "right" ? { right: "var(--edge-right, 4px)" } : { left: "calc(var(--list-width) + 4px)" }}
       onClick={(event) => {
         event.stopPropagation();
@@ -93,15 +151,11 @@ function EdgeArrows({ box, top, title, id, onClick }: { box: { left: number; rig
   );
   return (
     <div aria-hidden>
-      <div className="pointer-events-none absolute left-0 z-[5] overflow-clip" style={{ top, height: EDGE_ARROW, width: Math.max(box.left - EDGE_ARROW, 0) }}>
-        <div className="flex h-full justify-end" style={{ width: box.left }}>
-          {arrow("right")}
-        </div>
-      </div>
-      <div className="pointer-events-none absolute right-0 z-[5] overflow-clip" style={{ top, height: EDGE_ARROW, left: box.right + EDGE_ARROW }}>
-        <div className="flex h-full justify-start" style={{ marginLeft: -EDGE_ARROW, width: `calc(100% + ${EDGE_ARROW}px)` }}>
-          {arrow("left")}
-        </div>
+      <div ref={marker} data-edge-marker="left" className="pointer-events-none absolute" style={{ left: 0, width: Math.max(toolsLeft(box) - TOOLS_STICK, 1), top, height: 1 }} />
+      <div ref={marker} data-edge-marker="right" className="pointer-events-none absolute right-0" style={{ left: box.right, top, height: 1 }} />
+      <div className="pointer-events-none absolute right-0 left-0 z-[5] flex" style={{ top, height: EDGE_ARROW }}>
+        {arrow("left")}
+        {arrow("right")}
       </div>
     </div>
   );
@@ -115,7 +169,12 @@ export function ChartRows({
   style,
   tagFilter,
   filtering,
+  scroller,
+  listWidth = 0,
 }: {
+  /** the board's scroll area and the task list's width: where the edge arrows' markers are watched from */
+  scroller?: RefObject<HTMLElement | null>;
+  listWidth?: number;
   /** the rendered window (already showing any drag preview) */
   rows: readonly BoardRow[];
   /** every shown row, for link targets and the blank row's position */
@@ -135,6 +194,7 @@ export function ChartRows({
   const critical = useCriticalPath(board.sync.projectId);
   const select = useSelection((selection) => selection.select);
   const centerBar = useSelection((selection) => selection.center);
+  const edgeMarker = useEdgeMarkers(scroller, listWidth);
   const drag = useChartDrag((store) => store.drag);
   const [hover, setHover] = useState<{ index: number; day: DayNum } | null>(null);
   const menuFor = useChartDrag((store) => store.menuFor);
@@ -333,6 +393,7 @@ export function ChartRows({
                 top={center - 10}
                 title={row.title || "Untitled"}
                 id={row.id}
+                marker={edgeMarker}
                 onClick={() => {
                   select(row.id, false);
                   centerBar(row.id);
@@ -412,7 +473,7 @@ export function ChartRows({
                   <div
                     data-bar-tools
                     className={`pointer-events-auto sticky flex gap-1 group-focus-within/row:opacity-100 group-hover/row:opacity-100 ${menuFor === row.id ? "opacity-100" : "opacity-0"}`}
-                    style={{ marginLeft: toolsLeft(box), left: `calc(var(--list-width) + ${4 + EDGE_ARROW + 4}px)` }}
+                    style={{ marginLeft: toolsLeft(box), left: `calc(var(--list-width) + ${TOOLS_STICK}px)` }}
                     onClick={(event) => event.stopPropagation()}
                   >
                     {resizable ? (
