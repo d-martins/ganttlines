@@ -96,6 +96,14 @@ describe("editing the task list", () => {
     expect(sentCommands().filter((command) => command.type === "moveRow")).toEqual([]);
   });
 
+  it("a value that can't be edited shows the default cursor (its tooltip still says why), not a question mark or a caret", async () => {
+    await editableBoard();
+    // A section's working days are worked out from the tasks inside it.
+    const worked = within(listRow("design")).getAllByTitle(/from the tasks inside/)[0]!;
+    expect(worked).toHaveClass("cursor-default");
+    expect(worked).not.toHaveClass("cursor-help");
+  });
+
   it("a row's number shows the default cursor, not a text caret", async () => {
     await editableBoard();
     expect(within(listRow("ui")).getByRole("gridcell", { name: /^Row / })).toHaveClass("cursor-default");

@@ -701,7 +701,7 @@ function CellButton({
   // Same box as the button, so editable and read-only values line up.
   if (!editable) {
     return (
-      <span title={hint} className={`block h-6 truncate px-1 leading-6 ${hint ? "cursor-help" : ""}`}>
+      <span title={hint} className="block h-6 cursor-default truncate px-1 leading-6">
         {children}
       </span>
     );
