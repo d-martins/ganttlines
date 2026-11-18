@@ -31,6 +31,8 @@ const COLUMNS = "grid grid-cols-[40px_minmax(200px,1fr)_120px_40px_40px_var(--ac
 /** The same, with "Can slip" after AWD; SLIP_COLUMN in view-store.ts is its 72 px. */
 const COLUMNS_WITH_SLIP = "grid grid-cols-[40px_minmax(200px,1fr)_120px_40px_40px_72px_var(--actions-width,58px)] items-center";
 const INDENT = 16;
+/** How far (px) a press on a row moves before it drags the row. */
+const ROW_DRAG_THRESHOLD = 5;
 
 /**
  * Narrower than its columns, the list scrolls sideways: rows and headings move by `--list-x`, set on the list, and
@@ -266,10 +268,39 @@ export function ListRows({
     }
   };
 
+  /** From the grip: the drag starts at once. */
   const startDrag = (event: ReactPointerEvent, id: RowId) => {
     if (!canEdit || filtering) return;
     event.preventDefault();
+    beginDrag((event.currentTarget as HTMLElement).closest('[role="treegrid"]') as HTMLElement, id, false);
+  };
+
+  /**
+   * From anywhere else on the row, with a mouse or pen: a drag once the pointer has moved a few pixels, so a press that
+   * stays put is still a click. Not from the expand arrow, the row's actions or an open editor; and not by touch,
+   * where moving a finger scrolls the list (the grip drags).
+   */
+  const armDrag = (event: ReactPointerEvent, id: RowId) => {
+    if (!canEdit || filtering || event.defaultPrevented || event.button !== 0 || event.pointerType === "touch") return;
+    if ((event.target as HTMLElement).closest('input, textarea, select, [contenteditable="true"], [data-row-action], [data-row-toggle]')) return;
     const grid = (event.currentTarget as HTMLElement).closest('[role="treegrid"]') as HTMLElement;
+    const from = { x: event.clientX, y: event.clientY };
+    const move = (moveEvent: PointerEvent) => {
+      if (Math.hypot(moveEvent.clientX - from.x, moveEvent.clientY - from.y) < ROW_DRAG_THRESHOLD) return;
+      disarm();
+      window.getSelection()?.removeAllRanges();
+      beginDrag(grid, id, true)(moveEvent);
+    };
+    const disarm = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", disarm);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", disarm);
+  };
+
+  /** Drags row `id` until the pointer is released; `swallowClick`: the click the release sends isn't one. Returns the move handler. */
+  const beginDrag = (grid: HTMLElement, id: RowId, swallowClick: boolean) => {
     const scroller = grid.closest('[data-testid="board-scroller"]') as HTMLElement | null;
     let target: DragState["target"] = null;
     let last: PointerEvent | null = null;
@@ -296,6 +327,15 @@ export function ListRows({
       clearInterval(autoScroll);
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
+      if (swallowClick) {
+        const swallow = (click: MouseEvent) => {
+          click.stopPropagation();
+          click.preventDefault();
+        };
+        window.addEventListener("click", swallow, { capture: true, once: true });
+        // Only the click this release sends (if any): gone before the next.
+        setTimeout(() => window.removeEventListener("click", swallow, { capture: true }), 0);
+      }
       setDrag(null);
       const entry = target ? allRows[target.index] : undefined;
       const moveTo = entry && target ? dropMove(state, id, entry.row, target.zone) : null;
@@ -303,6 +343,7 @@ export function ListRows({
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
+    return move;
   };
 
   const dropTarget = drag?.target ? allRows[drag.target.index] : undefined;
@@ -327,22 +368,27 @@ export function ListRows({
             aria-level={entry.depth + 1}
             aria-selected={selected}
             aria-expanded={entry.hasChildren ? !entry.collapsed : undefined}
-            // A click only selects (highlights) the row; a double-click also brings its bar into view (its
-            // start just inside the chart's left edge). Not on a cell that edits. The details open from the bar.
+            // A click only selects (highlights) the row; a double-click also brings its bar into view and opens its
+            // details. Not on a cell that edits.
             onClick={() => select(row.id, false)}
             onDoubleClick={(event) => {
               if ((event.target as HTMLElement).closest("[data-cell], [data-row-action], input")) return;
               center(row.id);
-              select(row.id, false);
+              select(row.id, true);
             }}
             className={`group ${critical ? COLUMNS_WITH_SLIP : COLUMNS} absolute left-0 px-1 text-sm ${selected ? "bg-accent-soft" : "hover:bg-surface-2 hover:[--row-bg:var(--surface-2)]"} ${drag?.id === row.id ? "opacity-50" : entry.context ? "opacity-45" : ""}`}
             style={{ top: (firstRow + index) * rowHeight, height: rowHeight, ...LIST_SHIFT }}
+            onPointerDown={(event) => armDrag(event, row.id)}
+            // The second press of a double-click would select the text in the columns (but not inside an open editor).
+            onMouseDown={(event) => {
+              if (event.detail > 1 && !(event.target as HTMLElement).closest('input, textarea, [contenteditable="true"]')) event.preventDefault();
+            }}
           >
             <span
               role="gridcell"
               aria-label={`Row ${entry.number}`}
               {...(pinned ? { "data-pinned": true } : {})}
-              className="relative z-[1] flex h-full items-center justify-end pr-2 text-xs text-muted tabular-nums"
+              className="relative z-[1] flex h-full cursor-default items-center justify-end pr-2 text-xs text-muted tabular-nums"
               style={pinned ? { ...PINNED_LEFT, background: pinnedBackground(selected) } : undefined}
             >
               {canEdit && !filtering ? (
@@ -363,6 +409,7 @@ export function ListRows({
                 <button
                   type="button"
                   aria-label={entry.collapsed ? "Expand" : "Collapse"}
+                  data-row-toggle
                   disabled={filtering}
                   onClick={(event) => {
                     event.stopPropagation();
@@ -654,7 +701,7 @@ function CellButton({
   // Same box as the button, so editable and read-only values line up.
   if (!editable) {
     return (
-      <span title={hint} className={`block h-6 truncate px-1 leading-6 ${hint ? "cursor-help" : ""}`}>
+      <span title={hint} className="block h-6 cursor-default truncate px-1 leading-6">
         {children}
       </span>
     );

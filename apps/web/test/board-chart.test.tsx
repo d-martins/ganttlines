@@ -71,13 +71,160 @@ describe("chart editing", () => {
     useBoardView.getState().setBarStyle("compact");
   });
 
-  it("keeps a bar's quick tools just past the task list by CSS (sticky) while the bar starts under it", async () => {
+  it("keeps a bar's quick tools past the task list and its left edge arrow by CSS (sticky) while the bar starts under it", async () => {
     await chartBoard();
     const tools = screen.getByRole("button", { name: "Options for “ui”" }).closest("[data-bar-tools]") as HTMLElement;
     expect(tools.className).toContain("sticky");
-    expect(tools.style.left).toBe("calc(var(--list-width) + 4px)");
+    // The edge arrow (20 px) and a gap either side: the tools slide out behind the arrow (which sits above them).
+    expect(tools.style.left).toBe("calc(var(--list-width) + 28px)");
     // Clear of the bar: its right edge (three 20 px buttons, 4 px apart) 4 px or more left of the bar.
     expect(parseFloat(tools.style.marginLeft) + 68).toBeLessThanOrEqual(parseFloat(bar(/^ui,/).style.left) - 4);
+  });
+
+  describe("edge arrows", () => {
+    /** jsdom has no IntersectionObserver: a fake that records what's watched, and reports what the test says. */
+    class FakeObserver {
+      static last: FakeObserver;
+      watched = new Set<Element>();
+      constructor(
+        public callback: IntersectionObserverCallback,
+        public options: IntersectionObserverInit,
+      ) {
+        FakeObserver.last = this;
+      }
+      observe(element: Element) {
+        this.watched.add(element);
+      }
+      unobserve(element: Element) {
+        this.watched.delete(element);
+      }
+      disconnect() {
+        this.watched.clear();
+      }
+      /** The marker is in view or not, as the browser would report it. */
+      report(element: Element, inView: boolean) {
+        act(() => this.callback([{ target: element, isIntersecting: inView } as IntersectionObserverEntry], this as unknown as IntersectionObserver));
+      }
+    }
+    beforeEach(() => vi.stubGlobal("IntersectionObserver", FakeObserver));
+
+    const rowOf = (id: string) => document.querySelector(`[data-edge-arrow="left"][data-row-id="${id}"]`)!.closest("[data-row]") as HTMLElement;
+    const arrow = (side: "left" | "right", id: string) => document.querySelector(`[data-edge-arrow="${side}"][data-row-id="${id}"]`) as HTMLElement;
+    const marker = (side: "left" | "right", id: string) => rowOf(id).querySelector(`[data-edge-marker="${side}"]`) as HTMLElement;
+
+    it("stick to the edges by CSS, above the bar, its title and its quick tools; nothing clips them", async () => {
+      await chartBoard();
+      const toLeft = arrow("left", "hooks");
+      const toRight = arrow("right", "hooks");
+      expect(toLeft).toHaveClass("sticky");
+      expect(toLeft.style.left).toBe("calc(var(--list-width) + 4px)");
+      expect(toRight).toHaveClass("sticky");
+      expect(toRight.style.right).toBe("var(--edge-right, 4px)");
+      const strip = toLeft.parentElement!;
+      expect(strip).toBe(toRight.parentElement);
+      expect(strip).toHaveClass("absolute", "right-0", "left-0", "z-[5]", "pointer-events-none");
+      expect(toLeft.closest(".overflow-clip, [style*=clip-path]")).toBe(document.querySelector("[data-chart-body]"));
+      // Solid buttons the size and look of the quick tools; only the icon fades off the hovered row.
+      expect(toLeft).toHaveClass("h-5", "w-5", "rounded", "bg-bg", "ring-1", "ring-border", "text-muted/55", "group-hover/row:text-muted");
+    });
+
+    it("show only while the bar is past that edge, as the browser reports its markers going out of view", async () => {
+      await chartBoard();
+      const observer = FakeObserver.last;
+      // Watching the visible chart: the task list covers its left, the drawer's strip its right; rows above and below count.
+      expect(observer.options.root).toBe(screen.getByTestId("board-scroller"));
+      expect(observer.options.rootMargin).toBe(`10000px -40px 10000px -${LIST_WIDTH.initial}px`);
+      const row = rowOf("hooks");
+      expect(observer.watched).toContain(marker("left", "hooks"));
+      expect(observer.watched).toContain(marker("right", "hooks"));
+      // Hidden unless the row says the bar is past that edge.
+      expect(arrow("left", "hooks")).toHaveClass("hidden", "group-data-[past-left]/row:flex");
+      expect(arrow("right", "hooks")).toHaveClass("hidden", "group-data-[past-right]/row:flex");
+      observer.report(marker("left", "hooks"), false);
+      expect(row).toHaveAttribute("data-past-left");
+      observer.report(marker("left", "hooks"), true);
+      expect(row).not.toHaveAttribute("data-past-left");
+      observer.report(marker("right", "hooks"), false);
+      expect(row).toHaveAttribute("data-past-right");
+    });
+
+    it("the left arrow comes as the quick tools start to stick: its marker runs from the chart's start to there", async () => {
+      await chartBoard();
+      const shape = bar(/^hooks,/); // one part (no weekend inside)
+      const box = { left: parseFloat(shape.style.left), right: parseFloat(shape.style.left) + parseFloat(shape.style.width) };
+      const left = marker("left", "hooks");
+      expect(left.style.left).toBe("0px");
+      expect(left.style.width).toBe(`${toolsLeft(box) - 28}px`);
+      // The right one runs from the bar's end to the chart's end: out of view once the end has passed the right edge.
+      const right = marker("right", "hooks");
+      expect(right.style.left).toBe(`${box.right}px`);
+      expect(right).toHaveClass("right-0");
+    });
+
+    const hooksBox = () => {
+      const shape = bar(/^hooks,/); // one part (no weekend inside)
+      return { left: parseFloat(shape.style.left), right: parseFloat(shape.style.left) + parseFloat(shape.style.width) };
+    };
+    const scrollerOf = (width: number) => {
+      const scroller = screen.getByTestId("board-scroller");
+      Object.defineProperty(scroller, "clientWidth", { configurable: true, value: width });
+      return scroller;
+    };
+
+    it("the left one scrolls back until the bar's start is 4½ days in from the task list, past where its arrow shows", async () => {
+      await chartBoard();
+      const scroller = scrollerOf(1200);
+      const box = hooksBox();
+      fireEvent.click(arrow("left", "hooks"));
+      // 4½ days (32 px each) before the bar, or further if the arrow would still show (as its quick tools still stick).
+      expect(scroller.scrollLeft).toBe(Math.max(Math.min(box.left - 4.5 * 32, toolsLeft(box) - 28 - 1), 0));
+      const { useSelection } = await import("../src/board/selection");
+      expect(useSelection.getState().selectedId).toBe("hooks");
+    });
+
+    it("the right one scrolls on until the bar's end has 4½ days of room before the chart's right edge", async () => {
+      await chartBoard();
+      const scroller = scrollerOf(1200);
+      const box = hooksBox();
+      fireEvent.click(arrow("right", "hooks"));
+      // The chart shows the scroll area less the task list; its right edge is clear of the drawer's strip (40 px).
+      const chartWidth = 1200 - LIST_WIDTH.initial;
+      expect(scroller.scrollLeft).toBe(Math.max(box.right + 4.5 * 32 + 40 - chartWidth, 0));
+      const { useSelection } = await import("../src/board/selection");
+      expect(useSelection.getState().selectedId).toBe("hooks");
+    });
+
+    it("the list's Show on chart lands the same as the left arrow: the bar's start 4½ days in from the task list", async () => {
+      await chartBoard();
+      const scroller = scrollerOf(1200);
+      const box = hooksBox();
+      fireEvent.click(screen.getByRole("button", { name: "Show “hooks” on the chart" }));
+      expect(scroller.scrollLeft).toBe(Math.max(Math.min(box.left - 4.5 * 32, toolsLeft(box) - 28 - 1), 0));
+    });
+
+    it("slide in as they appear (still, for reduced motion), and show a pointer", async () => {
+      await chartBoard();
+      expect(arrow("left", "hooks")).toHaveClass("group-data-[past-left]/row:animate-edge-in-left", "motion-reduce:animate-none!", "cursor-pointer");
+      expect(arrow("right", "hooks")).toHaveClass("group-data-[past-right]/row:animate-edge-in-right", "motion-reduce:animate-none!", "cursor-pointer");
+    });
+
+    it("are for the mouse (the list's Show on chart is the keyboard's way): out of the tab order and hidden from screen readers", async () => {
+      await chartBoard();
+      const toRight = arrow("right", "ui");
+      expect(toRight).toHaveAttribute("tabindex", "-1");
+      expect(toRight.closest("[aria-hidden]")).not.toBeNull();
+      expect(toRight).toHaveAttribute("title", "Scroll to “ui”");
+    });
+
+    it("leave room for the drawer's collapsed strip on the right", async () => {
+      await chartBoard();
+      expect((document.querySelector("[data-chart-body]") as HTMLElement).style.getPropertyValue("--edge-right")).toBe("40px");
+    });
+
+    it("sections have none", async () => {
+      await chartBoard();
+      expect(document.querySelector('[data-edge-arrow][data-row-id="x"]')).toBeNull();
+    });
   });
 
   it("shows sections as dividers across the chart, without dates", async () => {

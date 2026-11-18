@@ -20,6 +20,7 @@ import { aiActorOf, type Actor } from "../actor";
 import { toProjectDto } from "../dto";
 import { HttpError } from "../errors";
 import type { OutlineRow } from "../projects/project-service";
+import { writeBaselines } from "./baselines";
 import { pickOne, pickPerson, pickProject, ToolProblem } from "./lookup";
 import { describeRow } from "./plans-read";
 import { answer, guarded, type ToolContext, type ToolGroup } from "./tools";
@@ -194,6 +195,7 @@ const TaskFields = {
 
 /** Editing plans: projects, and the tasks on their boards. */
 export const writePlans: ToolGroup = (server, tools) => {
+  writeBaselines(server, tools);
   const { context, caller } = tools;
   const people = async () => context.instance.resources();
 

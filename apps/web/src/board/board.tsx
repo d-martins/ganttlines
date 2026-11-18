@@ -4,8 +4,8 @@ import type { BaselineTaskDto, CalendarDto, HighlightDto, ResourceDto } from "@g
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { BoardSearch } from "../router";
-import { ROW_HEIGHT } from "./chart/bars";
-import { ChartRows } from "./chart/chart-rows";
+import { extent, ROW_HEIGHT } from "./chart/bars";
+import { ChartRows, EDGE_RIGHT, edgeScrollTarget } from "./chart/chart-rows";
 import { DayMenu } from "./chart/day-menu";
 import { useChartDrag } from "./chart/drag";
 import { ChartHeader } from "./chart/chart-header";
@@ -47,8 +47,6 @@ function useDetailsPanel(): DetailsPanelType | null {
 }
 
 const HEADER_HEIGHT = 48;
-/** how far inside the chart's left edge a revealed bar starts */
-const BAR_REVEAL_MARGIN = 24;
 const OVERSCAN_ROWS = 10;
 const OVERSCAN_PX = 600;
 /** Room below the board's scroll area for its own sideways scrollbar, kept out of view (thicker than any browser's). */
@@ -298,14 +296,14 @@ export function Board({
   const bodyHeight = Math.max((model.rows.length + (canEdit ? 1 : 0)) * rowHeight + Math.round(visibleHeight / 2), visibleHeight);
   const selectedIndex = model.rows.findIndex((entry) => entry.row.id === selectedId);
 
-  // Bring a row's bar into view when asked (a click on the already selected row, or a double-click):
-  // its start lands just inside the chart's left edge, so it reads from the beginning.
+  // Bring a row's bar into view when asked (Show on chart, or a double-click): its start lands where the left edge
+  // arrow's click puts it, a few days in from the task list, so it reads from the beginning.
   useEffect(() => {
     const element = scroller.current;
-    const span = centerRequest ? model.rows.find((entry) => entry.row.id === centerRequest.id)?.span : null;
-    if (!element || !span) return;
+    const entry = centerRequest ? model.rows.find((candidate) => candidate.row.id === centerRequest.id) : undefined;
+    if (!element || !entry?.span) return;
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const left = Math.max(timeline.x(span.start) - BAR_REVEAL_MARGIN, 0);
+    const left = edgeScrollTarget("left", extent(entry.kind, entry.span, timeline, barStyle), timeline.dayWidth, chartWidth);
     if (typeof element.scrollTo === "function") element.scrollTo({ left, behavior: reduce ? "auto" : "smooth" });
     else element.scrollLeft = left;
     // Only a new request moves the chart; later edits to the row don't (model/timeline are read at request time).
@@ -417,7 +415,7 @@ export function Board({
                 data-chart-body
                 // clip, not hidden: section names stick to the scroll area, which a hidden overflow would cut them off from
                 className="relative shrink-0 overflow-clip"
-                style={{ width: timeline.width, height: bodyHeight, ["--list-width" as string]: `${listWidth}px`, ...chartGrid }}
+                style={{ width: timeline.width, height: bodyHeight, ["--list-width" as string]: `${listWidth}px`, ["--edge-right" as string]: `${EDGE_RIGHT}px`, ...chartGrid }}
               >
                 <Shading
                   timeline={timeline}
@@ -436,7 +434,7 @@ export function Board({
                 <div aria-hidden className="absolute top-0 w-0.5 bg-[var(--today)]" style={{ left: timeline.x(todayDay) + timeline.dayWidth / 2 - 1, height: bodyHeight }} />
                 <MilestoneLines milestones={milestones} timeline={timeline} height={bodyHeight} />
                 <Dependencies rows={model.rows} links={model.links} firstRow={firstRow} lastRow={lastRow} timeline={timeline} style={barStyle} />
-                <ChartRows rows={shown} allRows={model.rows} firstRow={firstRow} timeline={timeline} style={barStyle} tagFilter={tagFilter} filtering={model.filtering} />
+                <ChartRows rows={shown} allRows={model.rows} firstRow={firstRow} timeline={timeline} style={barStyle} tagFilter={tagFilter} filtering={model.filtering} scroller={scroller} listWidth={listWidth} />
               </div>
               </DayMenu>
             </div>

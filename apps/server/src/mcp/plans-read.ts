@@ -1,6 +1,7 @@
 import { changedRowIds, fromDay, LINK_KIND_WORDS, linkKey, type Change } from "@ganttlines/engine";
 import { z } from "zod";
 import type { OutlineRow } from "../projects/project-service";
+import { readBaselines } from "./baselines";
 import { pickPerson, pickProject, ToolProblem } from "./lookup";
 import { answer, guarded, type ToolContext, type ToolGroup } from "./tools";
 
@@ -51,6 +52,7 @@ async function projectsOf({ context }: ToolContext, includeArchived = false) {
 
 /** Reading projects: the list, one board, a search across boards, and a board's history. */
 export const readPlans: ToolGroup = (server, tools) => {
+  readBaselines(server, tools);
   const { context } = tools;
 
   server.registerTool(

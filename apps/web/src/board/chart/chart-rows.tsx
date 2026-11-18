@@ -1,7 +1,7 @@
 import type { SlackAnalysis } from "@ganttlines/engine";
 import { fromDay, spanEnd, spanStart, type Command, type DayNum, type RowId } from "@ganttlines/engine";
-import { SquareCenterlineDashedHorizontal, UserRound } from "lucide-react";
-import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { ArrowLeft, ArrowRight, SquareCenterlineDashedHorizontal, UserRound } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { AssigneePicker } from "../assignee-picker";
 import { runCommand, useBoard } from "../board-context";
 import { useCriticalPath } from "../critical-path-view";
@@ -60,6 +60,119 @@ function slackMark(entry: BoardRow, { slack, pastTarget }: SlackAnalysis, critic
   return critical && mine.halves === 0 ? "zero" : null;
 }
 
+/** Where the edge arrows stick: 4 px past the task list (the quick tools stick past the arrow), clear of the drawer's strip. */
+const EDGE_ARROW = 20;
+/** The quick tools stick this far past the task list: the left arrow and a gap either side. */
+const TOOLS_STICK = 4 + EDGE_ARROW + 4;
+/** Where the right arrows stick: clear of the details drawer's collapsed strip (36 px), and a gap. */
+export const EDGE_RIGHT = 40;
+const ARROW_BUTTON =
+  "pointer-events-auto sticky hidden h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded bg-bg text-muted/55 shadow-sm ring-1 ring-border group-hover/row:text-muted hover:text-text! motion-reduce:animate-none!";
+/** How much room an edge arrow's click leaves between the bar and that edge, in days. */
+const EDGE_ROOM_DAYS = 4.5;
+
+/**
+ * Where an edge arrow's click scrolls the chart: back until the bar's start is EDGE_ROOM_DAYS in from the task list
+ * (or further, past where its left arrow shows), or on until its end has EDGE_ROOM_DAYS of room before the right edge.
+ */
+export function edgeScrollTarget(side: "left" | "right", box: { left: number; right: number }, dayWidth: number, chartWidth: number): number {
+  const room = EDGE_ROOM_DAYS * dayWidth;
+  const left = side === "left" ? Math.min(box.left - room, toolsLeft(box) - TOOLS_STICK - 1) : box.right + room + EDGE_RIGHT - chartWidth;
+  return Math.max(left, 0);
+}
+
+/**
+ * Tells each row whether its bar is past the chart's left or right edge (data-past-left / data-past-right), which shows
+ * its edge arrows. The browser reports it, as each bar's markers go out of view: no work while scrolling, and no React.
+ * The visible chart is the scroll area less the task list (left) and the drawer's strip (right); rows above and below
+ * count as in view.
+ */
+function useEdgeMarkers(scroller: RefObject<HTMLElement | null> | undefined, listWidth: number) {
+  const markers = useRef(new Set<HTMLElement>());
+  const observer = useRef<IntersectionObserver | null>(null);
+  useEffect(() => {
+    const root = scroller?.current;
+    if (!root || typeof IntersectionObserver === "undefined") return;
+    const watch = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const side = (entry.target as HTMLElement).dataset["edgeMarker"];
+          entry.target.closest("[data-row]")?.toggleAttribute(`data-past-${side}`, !entry.isIntersecting);
+        }
+      },
+      { root, rootMargin: `10000px -${EDGE_RIGHT}px 10000px -${listWidth}px` },
+    );
+    observer.current = watch;
+    for (const marker of markers.current) watch.observe(marker);
+    return () => {
+      watch.disconnect();
+      observer.current = null;
+    };
+  }, [scroller, listWidth]);
+  return useCallback((marker: HTMLElement | null) => {
+    if (!marker) return;
+    markers.current.add(marker);
+    observer.current?.observe(marker);
+    return () => {
+      markers.current.delete(marker);
+      observer.current?.unobserve(marker);
+    };
+  }, []);
+}
+
+/**
+ * Arrows at the chart's edges for a bar that's past them: left once its start has gone under the task list (as its
+ * quick tools start to stick), right once its end has gone past the right edge. Sticky, they sit at the edges, above
+ * the bar, its title and its quick tools; the row's data-past-* attributes (useEdgeMarkers) show them. Each bar has
+ * two invisible markers: from the chart's start to where its quick tools start sticking, and from its end to the
+ * chart's end; one wholly out of view means the bar is past that edge. For the mouse: the list's "Show on chart" is
+ * the keyboard's way.
+ */
+function EdgeArrows({
+  box,
+  top,
+  title,
+  id,
+  marker,
+  onClick,
+}: {
+  box: { left: number; right: number };
+  top: number;
+  title: string;
+  id: string;
+  marker: (element: HTMLElement | null) => void;
+  onClick: (side: "left" | "right") => void;
+}) {
+  const label = `Scroll to “${title}”`;
+  const arrow = (side: "left" | "right") => (
+    <button
+      type="button"
+      tabIndex={-1}
+      title={label}
+      data-edge-arrow={side}
+      data-row-id={id}
+      className={`${ARROW_BUTTON} ${side === "left" ? "group-data-[past-left]/row:flex group-data-[past-left]/row:animate-edge-in-left" : "ml-auto group-data-[past-right]/row:flex group-data-[past-right]/row:animate-edge-in-right"}`}
+      style={side === "right" ? { right: "var(--edge-right, 4px)" } : { left: "calc(var(--list-width) + 4px)" }}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick(side);
+      }}
+    >
+      {side === "right" ? <ArrowRight size={12} /> : <ArrowLeft size={12} />}
+    </button>
+  );
+  return (
+    <div aria-hidden>
+      <div ref={marker} data-edge-marker="left" className="pointer-events-none absolute" style={{ left: 0, width: Math.max(toolsLeft(box) - TOOLS_STICK, 1), top, height: 1 }} />
+      <div ref={marker} data-edge-marker="right" className="pointer-events-none absolute right-0" style={{ left: box.right, top, height: 1 }} />
+      <div className="pointer-events-none absolute right-0 left-0 z-[5] flex" style={{ top, height: EDGE_ARROW }}>
+        {arrow("left")}
+        {arrow("right")}
+      </div>
+    </div>
+  );
+}
+
 export function ChartRows({
   rows,
   allRows,
@@ -68,7 +181,12 @@ export function ChartRows({
   style,
   tagFilter,
   filtering,
+  scroller,
+  listWidth = 0,
 }: {
+  /** the board's scroll area and the task list's width: where the edge arrows' markers are watched from */
+  scroller?: RefObject<HTMLElement | null>;
+  listWidth?: number;
   /** the rendered window (already showing any drag preview) */
   rows: readonly BoardRow[];
   /** every shown row, for link targets and the blank row's position */
@@ -87,6 +205,7 @@ export function ChartRows({
   const [linkChoice, setLinkChoice] = useState<LinkChoice | null>(null);
   const critical = useCriticalPath(board.sync.projectId);
   const select = useSelection((selection) => selection.select);
+  const edgeMarker = useEdgeMarkers(scroller, listWidth);
   const drag = useChartDrag((store) => store.drag);
   const [hover, setHover] = useState<{ index: number; day: DayNum } | null>(null);
   const menuFor = useChartDrag((store) => store.menuFor);
@@ -279,6 +398,24 @@ export function ChartRows({
             {kind === "section" ? (
               <SectionBand title={row.title || "Untitled"} />
             ) : null}
+            {box && kind !== "section" ? (
+              <EdgeArrows
+                box={box}
+                top={center - 10}
+                title={row.title || "Untitled"}
+                id={row.id}
+                marker={edgeMarker}
+                onClick={(side) => {
+                  select(row.id, false);
+                  const element = scroller?.current;
+                  if (!element) return;
+                  const left = edgeScrollTarget(side, box, timeline.dayWidth, Math.max(element.clientWidth - listWidth, 0));
+                  const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+                  if (typeof element.scrollTo === "function") element.scrollTo({ left, behavior: reduce ? "auto" : "smooth" });
+                  else element.scrollLeft = left;
+                }}
+              />
+            ) : null}
             {span && kind !== "section" ? (
               <RowBar
                 entry={entry}
@@ -346,12 +483,13 @@ export function ChartRows({
                     ])
                   : null}
                 <LinkDot left={box.right + DOT_GAP} top={center} title="Drag onto another task to link them" onPointerDown={(event) => startDrag(event, entry, absoluteIndex, "link")} />
-                {/* Left of the bar, clear of its start dot; sticky, so it stays past the task list while the bar starts under it (and leaves with the bar). */}
+                {/* Left of the bar, clear of its start dot; sticky, so it stays past the task list and the left edge arrow while the bar
+                    starts under it (and leaves with the bar, sliding out behind the arrow). */}
                 <div className="pointer-events-none absolute left-0 flex items-center" style={{ width: Math.max(box.right, toolsLeft(box) + TOOLS_WIDTH), top: center - 10, height: 20 }}>
                   <div
                     data-bar-tools
                     className={`pointer-events-auto sticky flex gap-1 group-focus-within/row:opacity-100 group-hover/row:opacity-100 ${menuFor === row.id ? "opacity-100" : "opacity-0"}`}
-                    style={{ marginLeft: toolsLeft(box), left: "calc(var(--list-width) + 4px)" }}
+                    style={{ marginLeft: toolsLeft(box), left: `calc(var(--list-width) + ${TOOLS_STICK}px)` }}
                     onClick={(event) => event.stopPropagation()}
                   >
                     {resizable ? (

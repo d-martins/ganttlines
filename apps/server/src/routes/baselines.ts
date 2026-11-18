@@ -16,22 +16,46 @@ export async function listBaselines(db: Db, projectId: string): Promise<Baseline
   return (await db.baseline.findMany({ where: { projectId }, orderBy: { createdAt: "desc" }, select: BASELINE_SUMMARY })).map(toBaselineDto);
 }
 
+/** Change + re-read + broadcast one at a time per project, so the last list sent is the latest. */
+function changeBaselines<T>({ boardQueue, live }: RouteContext, projectId: string, work: () => Promise<T>): Promise<T> {
+  return boardQueue.run(`baselines:${projectId}`, async () => {
+    const result = await work();
+    await live.baselines(projectId);
+    return result;
+  });
+}
+
+/** Saves the project's scheduled dates as a baseline, credited to `actor` (the web app and AI apps alike). */
+export async function saveBaseline(context: RouteContext, projectId: string, name: string, actor: { userId: string | null; label: string }): Promise<BaselineDto> {
+  const { db, projects } = context;
+  const baseline = await changeBaselines(context, projectId, async () => {
+    const tasks = await projects.scheduleSnapshot(projectId);
+    await assertNotArchived(db, projectId);
+    if ((await db.baseline.count({ where: { projectId } })) >= MAX_BASELINES_PER_PROJECT) {
+      throw conflict(`At most ${MAX_BASELINES_PER_PROJECT} baselines per project`);
+    }
+    return db.baseline.create({
+      data: { projectId, name, createdByUserId: actor.userId, createdByLabel: actor.label, snapshot: tasks as unknown as object[] },
+      select: BASELINE_SUMMARY,
+    });
+  });
+  return toBaselineDto(baseline);
+}
+
+export async function deleteBaseline(context: RouteContext, baseline: Pick<Baseline, "id" | "projectId">): Promise<void> {
+  await changeBaselines(context, baseline.projectId, () => context.db.baseline.deleteMany({ where: { id: baseline.id } }));
+}
+
+/** A baseline as the web app reads it: its summary and its saved tasks. */
+export const readBaseline = (baseline: Baseline) => ({ baseline: toBaselineDto(baseline), tasks: baseline.snapshot as unknown as BaselineTaskDto[] });
+
 /**
  * Baselines: saved copies of a project's scheduled dates. Everyone who can see the board can view
  * them (to switch to or overlay); only signed-in editors create or delete them (never via links).
  */
 export function baselineRoutes(app: FastifyInstance, context: RouteContext): void {
-  const { db, projects, live, boardQueue } = context;
-
+  const { db } = context;
   const list = (projectId: string) => listBaselines(db, projectId);
-  const announce = (projectId: string) => live.baselines(projectId);
-  /** Change + re-read + broadcast one at a time per project, so the last list sent is the latest. */
-  const change = <T>(projectId: string, work: () => Promise<T>) =>
-    boardQueue.run(`baselines:${projectId}`, async () => {
-      const result = await work();
-      await announce(projectId);
-      return result;
-    });
 
   app.get<{ Params: { id: string } }>("/api/projects/:id/baselines", async (request) => {
     const projectId = parseId(request.params.id, "Project");
@@ -42,32 +66,20 @@ export function baselineRoutes(app: FastifyInstance, context: RouteContext): voi
   app.get<{ Params: { id: string } }>("/api/baselines/:id", async (request) => {
     const baseline = await find(request.params.id);
     await requireProjectAccess(request, context, baseline.projectId, "view");
-    return { baseline: toBaselineDto(baseline), tasks: baseline.snapshot as unknown as BaselineTaskDto[] };
+    return readBaseline(baseline);
   });
 
   app.post<{ Params: { id: string } }>("/api/projects/:id/baselines", async (request, reply) => {
     const user = requireUser(request, "editor");
     const projectId = parseId(request.params.id, "Project");
     const { name } = parseBody(CreateBaselineBody, request.body);
-    const baseline = await change(projectId, async () => {
-      const tasks = await projects.scheduleSnapshot(projectId);
-      await assertNotArchived(db, projectId);
-      if ((await db.baseline.count({ where: { projectId } })) >= MAX_BASELINES_PER_PROJECT) {
-        throw conflict(`At most ${MAX_BASELINES_PER_PROJECT} baselines per project`);
-      }
-      const actor = actorOf(user);
-      return db.baseline.create({
-        data: { projectId, name, createdByUserId: actor.userId, createdByLabel: actor.label, snapshot: tasks as unknown as object[] },
-        select: BASELINE_SUMMARY,
-      });
-    });
-    return reply.status(201).send({ baseline: toBaselineDto(baseline) });
+    return reply.status(201).send({ baseline: await saveBaseline(context, projectId, name, actorOf(user)) });
   });
 
   app.delete<{ Params: { id: string } }>("/api/baselines/:id", async (request, reply) => {
     requireUser(request, "editor");
     const baseline = await find(request.params.id);
-    await change(baseline.projectId, () => db.baseline.deleteMany({ where: { id: baseline.id } }));
+    await deleteBaseline(context, baseline);
     return reply.status(204).send();
   });
 
