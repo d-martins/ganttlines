@@ -89,23 +89,28 @@ describe("chart editing", () => {
       const shape = bar(/^hooks,/); // one part (no weekend inside)
       const left = parseFloat(shape.style.left);
       const right = left + parseFloat(shape.style.width);
-      // Right: in a box ending 20 px into the bar, whose last 20 px are clipped. It sticks to the chart's right edge
-      // (clear of the drawer's strip), so it only shows once the bar's start is past that edge.
+      // Right: it rests just before the bar's start, past the end of a box that cuts off what's outside it (overflow:
+      // clip, no clip-path: Chromium mis-paints sticky content inside one). Sticky to the chart's right edge (clear of the
+      // drawer's strip), it comes into that box only once the bar's start has gone past the edge, and never over the bar.
       const toRight = arrow("right", "hooks");
       expect(toRight.className).toContain("sticky");
       expect(toRight.style.right).toBe("var(--edge-right, 4px)");
-      const rightBox = toRight.parentElement!;
-      expect(rightBox.style.width).toBe(`${left + 20}px`);
-      expect(rightBox.style.clipPath).toBe("inset(0px 20px 0px 0px)");
-      // Left: in a box starting 20 px before the bar's end, whose first 20 px are clipped; sticks past the task list.
+      const rightTrack = toRight.parentElement!;
+      expect(rightTrack.style.width).toBe(`${left}px`);
+      const rightBox = rightTrack.parentElement!;
+      expect(rightBox).toHaveClass("overflow-clip", "z-[5]");
+      expect(rightBox.style.width).toBe(`${left - 20}px`);
+      // Left: the same, mirrored: it rests just after the bar's end; sticks past the task list.
       const toLeft = arrow("left", "hooks");
       expect(toLeft.className).toContain("sticky");
       expect(toLeft.style.left).toBe("calc(var(--list-width) + 4px)");
-      const leftBox = toLeft.parentElement!;
-      expect(leftBox.style.left).toBe(`${right - 20}px`);
-      expect(leftBox.style.clipPath).toBe("inset(0px 0px 0px 20px)");
-      // Always shown; faded except on the hovered row.
-      expect(toRight).toHaveClass("opacity-55", "group-hover/row:opacity-100");
+      const leftBox = toLeft.parentElement!.parentElement!;
+      expect(leftBox).toHaveClass("overflow-clip", "z-[5]");
+      expect(leftBox.style.left).toBe(`${right + 20}px`);
+      expect(document.querySelector("[data-edge-arrow]")!.closest("[style*=clip-path]")).toBeNull();
+      // Always shown, above the bar and its quick tools: solid, with only the icon faded except on the hovered row.
+      expect(toRight).toHaveClass("bg-bg", "text-muted/55", "group-hover/row:text-muted");
+      expect(toRight.className).not.toMatch(/\bopacity-/);
     });
 
     it("leave room for the drawer's collapsed strip on the right", async () => {

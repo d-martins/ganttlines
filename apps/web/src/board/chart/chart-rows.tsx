@@ -62,12 +62,14 @@ function slackMark(entry: BoardRow, { slack, pastTarget }: SlackAnalysis, critic
 
 /** An edge arrow's size: the same as a bar's quick-tool buttons. */
 const EDGE_ARROW = 20;
-const ARROW_BUTTON = "pointer-events-auto sticky flex h-5 w-5 items-center justify-center rounded bg-bg text-muted opacity-55 shadow-sm ring-1 ring-border group-hover/row:opacity-100 hover:text-text";
+const ARROW_BUTTON =
+  "pointer-events-auto sticky flex h-5 w-5 shrink-0 items-center justify-center rounded bg-bg text-muted/55 shadow-sm ring-1 ring-border group-hover/row:text-muted hover:text-text!";
 
 /**
  * Arrows at the chart's edges for a bar that's gone past them: right once its start is past the right edge, left once
- * its end is past the task list. By CSS alone: each arrow sits in a box ending 20 px into the bar (right) or starting
- * 20 px before its end (left), where it's clipped away; sticky, it comes into view only once the bar has left that edge.
+ * its end is past the task list. By CSS alone: each arrow rests just outside the bar (before its start, after its end),
+ * beyond the end of a box that cuts off what's outside it; sticky, it slides into that box only once the bar has left
+ * that edge, and never over the bar. (overflow: clip, not clip-path, which Chromium mis-paints sticky content inside.)
  * Above the bar's quick tools, which slide out behind it. For the mouse: the list's "Show on chart" is the keyboard's way.
  */
 function EdgeArrows({ box, top, title, id, onClick }: { box: { left: number; right: number }; top: number; title: string; id: string; onClick: () => void }) {
@@ -91,17 +93,15 @@ function EdgeArrows({ box, top, title, id, onClick }: { box: { left: number; rig
   );
   return (
     <div aria-hidden>
-      <div
-        className="pointer-events-none absolute left-0 z-[5] flex justify-end"
-        style={{ top, height: EDGE_ARROW, width: box.left + EDGE_ARROW, clipPath: `inset(0px ${EDGE_ARROW}px 0px 0px)` }}
-      >
-        {arrow("right")}
+      <div className="pointer-events-none absolute left-0 z-[5] overflow-clip" style={{ top, height: EDGE_ARROW, width: Math.max(box.left - EDGE_ARROW, 0) }}>
+        <div className="flex h-full justify-end" style={{ width: box.left }}>
+          {arrow("right")}
+        </div>
       </div>
-      <div
-        className="pointer-events-none absolute right-0 z-[5] flex justify-start"
-        style={{ top, height: EDGE_ARROW, left: box.right - EDGE_ARROW, clipPath: `inset(0px 0px 0px ${EDGE_ARROW}px)` }}
-      >
-        {arrow("left")}
+      <div className="pointer-events-none absolute right-0 z-[5] overflow-clip" style={{ top, height: EDGE_ARROW, left: box.right + EDGE_ARROW }}>
+        <div className="flex h-full justify-start" style={{ marginLeft: -EDGE_ARROW, width: `calc(100% + ${EDGE_ARROW}px)` }}>
+          {arrow("left")}
+        </div>
       </div>
     </div>
   );
