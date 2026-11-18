@@ -53,6 +53,8 @@ const OVERSCAN_ROWS = 10;
 const OVERSCAN_PX = 600;
 /** Room below the board's scroll area for its own sideways scrollbar, kept out of view (thicker than any browser's). */
 const HIDDEN_SCROLLBAR = 20;
+/** Where the chart's right edge arrows stick: clear of the details drawer's collapsed strip (36 px), and a gap. */
+const EDGE_RIGHT = 40;
 /** Where "today" (and the day kept in place when zooming) sits: a third into the chart. */
 const ANCHOR = 1 / 3;
 /** how long a row that stopped matching stays after it is no longer selected */
@@ -417,7 +419,7 @@ export function Board({
                 data-chart-body
                 // clip, not hidden: section names stick to the scroll area, which a hidden overflow would cut them off from
                 className="relative shrink-0 overflow-clip"
-                style={{ width: timeline.width, height: bodyHeight, ["--list-width" as string]: `${listWidth}px`, ...chartGrid }}
+                style={{ width: timeline.width, height: bodyHeight, ["--list-width" as string]: `${listWidth}px`, ["--edge-right" as string]: `${EDGE_RIGHT}px`, ...chartGrid }}
               >
                 <Shading
                   timeline={timeline}

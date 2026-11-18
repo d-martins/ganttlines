@@ -71,13 +71,68 @@ describe("chart editing", () => {
     useBoardView.getState().setBarStyle("compact");
   });
 
-  it("keeps a bar's quick tools just past the task list by CSS (sticky) while the bar starts under it", async () => {
+  it("keeps a bar's quick tools past the task list and its left edge arrow by CSS (sticky) while the bar starts under it", async () => {
     await chartBoard();
     const tools = screen.getByRole("button", { name: "Options for “ui”" }).closest("[data-bar-tools]") as HTMLElement;
     expect(tools.className).toContain("sticky");
-    expect(tools.style.left).toBe("calc(var(--list-width) + 4px)");
+    // The edge arrow (20 px) and a gap either side: the tools slide out behind the arrow (which sits above them).
+    expect(tools.style.left).toBe("calc(var(--list-width) + 28px)");
     // Clear of the bar: its right edge (three 20 px buttons, 4 px apart) 4 px or more left of the bar.
     expect(parseFloat(tools.style.marginLeft) + 68).toBeLessThanOrEqual(parseFloat(bar(/^ui,/).style.left) - 4);
+  });
+
+  describe("edge arrows", () => {
+    const arrow = (side: "left" | "right", name: string) => document.querySelector(`[data-edge-arrow="${side}"][data-row-id="${name}"]`) as HTMLElement;
+
+    it("each bar has an arrow for either edge, shown by CSS alone once the bar has gone past that edge", async () => {
+      await chartBoard();
+      const shape = bar(/^hooks,/); // one part (no weekend inside)
+      const left = parseFloat(shape.style.left);
+      const right = left + parseFloat(shape.style.width);
+      // Right: in a box ending 20 px into the bar, whose last 20 px are clipped. It sticks to the chart's right edge
+      // (clear of the drawer's strip), so it only shows once the bar's start is past that edge.
+      const toRight = arrow("right", "hooks");
+      expect(toRight.className).toContain("sticky");
+      expect(toRight.style.right).toBe("var(--edge-right, 4px)");
+      const rightBox = toRight.parentElement!;
+      expect(rightBox.style.width).toBe(`${left + 20}px`);
+      expect(rightBox.style.clipPath).toBe("inset(0px 20px 0px 0px)");
+      // Left: in a box starting 20 px before the bar's end, whose first 20 px are clipped; sticks past the task list.
+      const toLeft = arrow("left", "hooks");
+      expect(toLeft.className).toContain("sticky");
+      expect(toLeft.style.left).toBe("calc(var(--list-width) + 4px)");
+      const leftBox = toLeft.parentElement!;
+      expect(leftBox.style.left).toBe(`${right - 20}px`);
+      expect(leftBox.style.clipPath).toBe("inset(0px 0px 0px 20px)");
+      // Always shown; faded except on the hovered row.
+      expect(toRight).toHaveClass("opacity-55", "group-hover/row:opacity-100");
+    });
+
+    it("leave room for the drawer's collapsed strip on the right", async () => {
+      await chartBoard();
+      expect((document.querySelector("[data-chart-body]") as HTMLElement).style.getPropertyValue("--edge-right")).toBe("40px");
+    });
+
+    it("clicking one selects the task and brings its bar into view", async () => {
+      await chartBoard();
+      fireEvent.click(arrow("right", "hooks"));
+      const { useSelection } = await import("../src/board/selection");
+      expect(useSelection.getState().selectedId).toBe("hooks");
+      expect(useSelection.getState().centerRequest?.id).toBe("hooks");
+    });
+
+    it("are for the mouse (the list's Show on chart is the keyboard's way): out of the tab order and hidden from screen readers", async () => {
+      await chartBoard();
+      const toRight = arrow("right", "ui");
+      expect(toRight).toHaveAttribute("tabindex", "-1");
+      expect(toRight.closest("[aria-hidden]")).not.toBeNull();
+      expect(toRight).toHaveAttribute("title", "Scroll to “ui”");
+    });
+
+    it("sections have none", async () => {
+      await chartBoard();
+      expect(document.querySelector('[data-edge-arrow][data-row-id="x"]')).toBeNull();
+    });
   });
 
   it("shows sections as dividers across the chart, without dates", async () => {

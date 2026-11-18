@@ -1,6 +1,6 @@
 import type { SlackAnalysis } from "@ganttlines/engine";
 import { fromDay, spanEnd, spanStart, type Command, type DayNum, type RowId } from "@ganttlines/engine";
-import { SquareCenterlineDashedHorizontal, UserRound } from "lucide-react";
+import { ArrowLeft, ArrowRight, SquareCenterlineDashedHorizontal, UserRound } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { AssigneePicker } from "../assignee-picker";
 import { runCommand, useBoard } from "../board-context";
@@ -60,6 +60,53 @@ function slackMark(entry: BoardRow, { slack, pastTarget }: SlackAnalysis, critic
   return critical && mine.halves === 0 ? "zero" : null;
 }
 
+/** An edge arrow's size: the same as a bar's quick-tool buttons. */
+const EDGE_ARROW = 20;
+const ARROW_BUTTON = "pointer-events-auto sticky flex h-5 w-5 items-center justify-center rounded bg-bg text-muted opacity-55 shadow-sm ring-1 ring-border group-hover/row:opacity-100 hover:text-text";
+
+/**
+ * Arrows at the chart's edges for a bar that's gone past them: right once its start is past the right edge, left once
+ * its end is past the task list. By CSS alone: each arrow sits in a box ending 20 px into the bar (right) or starting
+ * 20 px before its end (left), where it's clipped away; sticky, it comes into view only once the bar has left that edge.
+ * Above the bar's quick tools, which slide out behind it. For the mouse: the list's "Show on chart" is the keyboard's way.
+ */
+function EdgeArrows({ box, top, title, id, onClick }: { box: { left: number; right: number }; top: number; title: string; id: string; onClick: () => void }) {
+  const label = `Scroll to “${title}”`;
+  const arrow = (side: "left" | "right") => (
+    <button
+      type="button"
+      tabIndex={-1}
+      title={label}
+      data-edge-arrow={side}
+      data-row-id={id}
+      className={ARROW_BUTTON}
+      style={side === "right" ? { right: "var(--edge-right, 4px)" } : { left: "calc(var(--list-width) + 4px)" }}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+    >
+      {side === "right" ? <ArrowRight size={12} /> : <ArrowLeft size={12} />}
+    </button>
+  );
+  return (
+    <div aria-hidden>
+      <div
+        className="pointer-events-none absolute left-0 z-[5] flex justify-end"
+        style={{ top, height: EDGE_ARROW, width: box.left + EDGE_ARROW, clipPath: `inset(0px ${EDGE_ARROW}px 0px 0px)` }}
+      >
+        {arrow("right")}
+      </div>
+      <div
+        className="pointer-events-none absolute right-0 z-[5] flex justify-start"
+        style={{ top, height: EDGE_ARROW, left: box.right - EDGE_ARROW, clipPath: `inset(0px 0px 0px ${EDGE_ARROW}px)` }}
+      >
+        {arrow("left")}
+      </div>
+    </div>
+  );
+}
+
 export function ChartRows({
   rows,
   allRows,
@@ -87,6 +134,7 @@ export function ChartRows({
   const [linkChoice, setLinkChoice] = useState<LinkChoice | null>(null);
   const critical = useCriticalPath(board.sync.projectId);
   const select = useSelection((selection) => selection.select);
+  const centerBar = useSelection((selection) => selection.center);
   const drag = useChartDrag((store) => store.drag);
   const [hover, setHover] = useState<{ index: number; day: DayNum } | null>(null);
   const menuFor = useChartDrag((store) => store.menuFor);
@@ -279,6 +327,18 @@ export function ChartRows({
             {kind === "section" ? (
               <SectionBand title={row.title || "Untitled"} />
             ) : null}
+            {box && kind !== "section" ? (
+              <EdgeArrows
+                box={box}
+                top={center - 10}
+                title={row.title || "Untitled"}
+                id={row.id}
+                onClick={() => {
+                  select(row.id, false);
+                  centerBar(row.id);
+                }}
+              />
+            ) : null}
             {span && kind !== "section" ? (
               <RowBar
                 entry={entry}
@@ -346,12 +406,13 @@ export function ChartRows({
                     ])
                   : null}
                 <LinkDot left={box.right + DOT_GAP} top={center} title="Drag onto another task to link them" onPointerDown={(event) => startDrag(event, entry, absoluteIndex, "link")} />
-                {/* Left of the bar, clear of its start dot; sticky, so it stays past the task list while the bar starts under it (and leaves with the bar). */}
+                {/* Left of the bar, clear of its start dot; sticky, so it stays past the task list and the left edge arrow while the bar
+                    starts under it (and leaves with the bar, sliding out behind the arrow). */}
                 <div className="pointer-events-none absolute left-0 flex items-center" style={{ width: Math.max(box.right, toolsLeft(box) + TOOLS_WIDTH), top: center - 10, height: 20 }}>
                   <div
                     data-bar-tools
                     className={`pointer-events-auto sticky flex gap-1 group-focus-within/row:opacity-100 group-hover/row:opacity-100 ${menuFor === row.id ? "opacity-100" : "opacity-0"}`}
-                    style={{ marginLeft: toolsLeft(box), left: "calc(var(--list-width) + 4px)" }}
+                    style={{ marginLeft: toolsLeft(box), left: `calc(var(--list-width) + ${4 + EDGE_ARROW + 4}px)` }}
                     onClick={(event) => event.stopPropagation()}
                   >
                     {resizable ? (
