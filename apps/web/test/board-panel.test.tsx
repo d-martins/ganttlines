@@ -177,7 +177,7 @@ describe("details panel", () => {
     expect(panel()).toHaveAccessibleName("Details of “hooks”");
   });
 
-  it("selects on a click; a double-click reveals the bar (start just inside the left edge), leaving the details as they are", async () => {
+  it("selects on a click; a double-click reveals the bar (start 4½ days in from the task list), leaving the details as they are", async () => {
     const { user } = await panelBoard();
     const scrollTo = vi.fn();
     const scroller = screen.getByTestId("board-scroller");
@@ -195,8 +195,8 @@ describe("details panel", () => {
     expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
     expect(scrollTo).toHaveBeenCalledTimes(1);
     const { left, behavior } = scrollTo.mock.calls[0]![0] as ScrollToOptions;
-    // hooks starts Oct 12; the chart starts Mon Aug 31 at 32 px a day: its start lands 24 px inside the left edge
-    expect(left).toBe(42 * 32 - 24);
+    // hooks starts Oct 12; the chart starts Mon Aug 31 at 32 px a day: its start lands 4½ days in (as a left edge arrow puts it)
+    expect(left).toBe(42 * 32 - 4.5 * 32);
     expect(behavior).toBe("smooth");
   });
 

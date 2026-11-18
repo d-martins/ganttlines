@@ -194,6 +194,14 @@ describe("chart editing", () => {
       expect(useSelection.getState().selectedId).toBe("hooks");
     });
 
+    it("the list's Show on chart lands the same as the left arrow: the bar's start 4½ days in from the task list", async () => {
+      await chartBoard();
+      const scroller = scrollerOf(1200);
+      const box = hooksBox();
+      fireEvent.click(screen.getByRole("button", { name: "Show “hooks” on the chart" }));
+      expect(scroller.scrollLeft).toBe(Math.max(Math.min(box.left - 4.5 * 32, toolsLeft(box) - 28 - 1), 0));
+    });
+
     it("slide in as they appear (still, for reduced motion), and show a pointer", async () => {
       await chartBoard();
       expect(arrow("left", "hooks")).toHaveClass("group-data-[past-left]/row:animate-edge-in-left", "motion-reduce:animate-none!", "cursor-pointer");
