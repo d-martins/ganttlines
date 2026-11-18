@@ -155,6 +155,12 @@ describe("the details drawer", () => {
     expect((await screen.findByRole("complementary", { name: "Details" })).className).toContain("w-[min(26rem,92%)]");
   });
 
+  it("collapsed, its strip doesn't cover the filter bar's end: the bar leaves room for it (36 px + 8)", async () => {
+    await board([task("t", { userStart: "2026-10-12" })]);
+    expect(await screen.findByRole("button", { name: "Show details" })).toHaveClass("w-9");
+    expect(screen.getByRole("toolbar", { name: "Filters" })).toHaveClass("pr-11");
+  });
+
   it("slides open, even with nothing selected (still, for reduced motion)", async () => {
     await board([task("t", { userStart: "2026-10-12" })]);
     act(() => useSelection.getState().openPanel());

@@ -62,7 +62,8 @@ export function FilterBar({
   });
 
   return (
-    <div role="toolbar" aria-label="Filters" className="flex min-h-9 shrink-0 flex-wrap items-center gap-1.5 border-b border-border bg-surface px-2 py-1 text-xs">
+    // (room on the right for the details drawer's collapsed strip, which lies over the board's right edge)
+    <div role="toolbar" aria-label="Filters" className="flex min-h-9 shrink-0 flex-wrap items-center gap-1.5 border-b border-border bg-surface py-1 pr-11 pl-2 text-xs">
       <SearchBox value={filters.q} onChange={(q) => onUpdate((current) => ({ ...current, q }))} />
       {chips.map(({ part, label }) => (
         <span key={part} className={`flex items-center rounded-full border ${ACTIVE_CHIP}`}>
