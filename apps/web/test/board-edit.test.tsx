@@ -57,6 +57,50 @@ describe("editing the task list", () => {
     fireEvent.pointerUp(window, { clientY: 395 });
   });
 
+  it("drags a row from anywhere on it, as from its grip; a press that doesn't move is still a click", async () => {
+    await editableBoard();
+    const height = parseFloat(listRow("ui").style.height);
+    const cell = within(listRow("ui")).getByRole("button", { name: "Working days of “ui”" });
+    fireEvent.pointerDown(cell, { button: 0, pointerType: "mouse", clientX: 300, clientY: height * 1.5 });
+    fireEvent.pointerMove(window, { pointerType: "mouse", clientX: 302, clientY: height * 1.5 + 2 }); // a wobble: not a drag yet
+    expect(listRow("ui")).not.toHaveClass("opacity-50");
+    fireEvent.pointerMove(window, { pointerType: "mouse", clientX: 300, clientY: height * 2.8 });
+    expect(listRow("ui")).toHaveClass("opacity-50");
+    fireEvent.pointerUp(window, { pointerType: "mouse", clientX: 300, clientY: height * 2.8 });
+    // The click the browser sends on release doesn't open the cell.
+    fireEvent.click(cell);
+    expect(sentCommands()).toEqual([expect.objectContaining({ type: "moveRow", id: "ui" })]);
+    expect(screen.getByRole("button", { name: "Working days of “ui”" })).toBeInTheDocument();
+    // And the next click is an ordinary one again.
+    expect(fireEvent.click(screen.getByRole("button", { name: "Working days of “ui”" }))).toBe(true);
+  });
+
+  it("a finger on a row scrolls the list rather than dragging it (the grip still drags)", async () => {
+    await editableBoard();
+    const height = parseFloat(listRow("ui").style.height);
+    fireEvent.pointerDown(within(listRow("ui")).getByRole("button", { name: "Working days of “ui”" }), { button: 0, pointerType: "touch", clientY: height * 1.5 });
+    fireEvent.pointerMove(window, { pointerType: "touch", clientY: height * 2.8 });
+    expect(listRow("ui")).not.toHaveClass("opacity-50");
+    fireEvent.pointerUp(window, { pointerType: "touch", clientY: height * 2.8 });
+  });
+
+  it("the expand arrow and the row actions don't start a drag", async () => {
+    await editableBoard();
+    const height = parseFloat(listRow("design").style.height);
+    for (const target of [within(listRow("design")).getByRole("button", { name: "Collapse" }), within(listRow("ui")).getByRole("button", { name: "Delete “ui”" })]) {
+      fireEvent.pointerDown(target, { button: 0, pointerType: "mouse", clientY: height * 0.5 });
+      fireEvent.pointerMove(window, { pointerType: "mouse", clientY: height * 2.8 });
+      expect(document.querySelector('[role="row"].opacity-50')).toBeNull();
+      fireEvent.pointerUp(window, { pointerType: "mouse", clientY: height * 2.8 });
+    }
+    expect(sentCommands().filter((command) => command.type === "moveRow")).toEqual([]);
+  });
+
+  it("a row's number shows the default cursor, not a text caret", async () => {
+    await editableBoard();
+    expect(within(listRow("ui")).getByRole("gridcell", { name: /^Row / })).toHaveClass("cursor-default");
+  });
+
   it("renames on Enter and starts the next row", async () => {
     const { user } = await editableBoard();
     await user.dblClick(within(listRow("ui")).getByText("ui"));
